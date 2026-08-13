@@ -35,4 +35,8 @@ COPY . .
 RUN useradd -m -u 1000 -s /bin/bash app && chown -R app:app /app
 USER app
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Pas de --reload ici (13/08/2026, cf. CHECKLIST_DOCKER.md) : l'image doit rester "prod-safe" par
+# défaut (utilisée telle quelle par backend-prod/worker-prod/beat-prod, docker-compose.yml) — le
+# rechargement à chaud reste disponible, posé explicitement via `command:` sur le seul service dev
+# `backend`.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

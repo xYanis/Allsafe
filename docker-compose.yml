@@ -2,6 +2,7 @@ services:
 
   db:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME:-cybervuln}
       POSTGRES_USER: ${DB_USER:-cybervuln}
@@ -31,9 +32,12 @@ services:
     # sur un volume déjà initialisé. cap_drop: [ALL] casserait le démarrage.
     mem_limit: 1g
     cpus: 1.0
+    networks:
+      - backend_net
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -47,9 +51,16 @@ services:
       - no-new-privileges:true
     mem_limit: 256m
     cpus: 0.5
+    networks:
+      - backend_net
 
   backend:
     build: ./backend
+    restart: unless-stopped
+    # --reload (13/08/2026) : déplacé du Dockerfile (qui doit rester "prod-safe" par défaut, cf.
+    # backend-prod plus bas) vers ce service dev uniquement — comportement de rechargement à chaud
+    # inchangé, juste plus jamais activé par défaut sur l'image elle-même.
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     # 127.0.0.1 uniquement (03/08/2026, audit sécurité) : publié sur toutes les
     # interfaces, le port était joignable directement par tout hôte du réseau
     # local, hors du proxy nginx (frontend) qui pose X-Forwarded-For — un client
@@ -112,9 +123,64 @@ services:
     # 6g laisse une vraie marge de croissance du référentiel CVE.
     mem_limit: 6g
     cpus: 2.0
+    # backend_net (parle à db/redis) ET frontend_net (le frontend proxie /api côté serveur vers ce
+    # service, cf. nginx.conf/vite.config.js) — seul service avec les deux (13/08/2026, segmentation
+    # réseau, cf. CHECKLIST_DOCKER.md). frontend n'est lui jamais sur backend_net.
+    networks:
+      - backend_net
+      - frontend_net
+
+  # Profil "prod" (13/08/2026, cf. CHECKLIST_DOCKER.md) — même image que `backend`, mais sans le
+  # bind mount du code source (l'image buildée fait foi, COPY au build) ni --reload (cf. Dockerfile,
+  # plus de CMD avec --reload par défaut). Même esprit que frontend/frontend-prod ci-dessous : un
+  # service à part entière plutôt qu'un docker-compose.prod.yml séparé, pour éviter toute ambiguïté
+  # de fusion YAML sur les listes (volumes/healthcheck). `docker compose up` seul ne le démarre
+  # jamais (profil inactif) ; à utiliser seul, jamais en même temps que `backend` (même port hôte).
+  backend-prod:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["prod"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./keys:/app/keys:ro
+      - ssh_known_hosts:/app/ssh-state
+      - backups:/app/backups
+      - incident_attachments:/app/incident_attachments
+      - documents:/app/documents
+      - audit_attachments:/app/audit_attachments
+      - note_images:/app/note_images
+      - ./agent/dist:/app/agent-dist:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 6g
+    cpus: 2.0
+    networks:
+      - backend_net
+      - frontend_net
 
   worker:
     build: ./backend
+    restart: unless-stopped
     # --concurrency=1 (27/07/2026) : sans ça, le pool de fork Celery démarre autant
     # de process que de CPU visibles par le conteneur (multiprocessing.cpu_count(),
     # qui lit le host — 14 ici — pas le quota `cpus:` ci-dessous). Deux tâches de
@@ -160,9 +226,48 @@ services:
     # --concurrency=1 ci-dessus. 6g laisse une vraie marge même à une tâche à la fois.
     mem_limit: 6g
     cpus: 1.5
+    networks:
+      - backend_net
+
+  # Profil "prod" — même principe que backend-prod ci-dessus, appliqué au worker Celery.
+  worker-prod:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["prod"]
+    command: celery -A tasks.scheduled_tasks.celery_app worker --loglevel=info -Q default --concurrency=1
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./keys:/app/keys:ro
+      - ssh_known_hosts:/app/ssh-state
+      - backups:/app/backups
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A tasks.scheduled_tasks.celery_app inspect ping --timeout 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 6g
+    cpus: 1.5
+    networks:
+      - backend_net
 
   beat:
     build: ./backend
+    restart: unless-stopped
     command: celery -A tasks.scheduled_tasks.celery_app beat --loglevel=info
     env_file: .env
     depends_on:
@@ -188,6 +293,39 @@ services:
       - ALL
     mem_limit: 256m
     cpus: 0.5
+    networks:
+      - backend_net
+
+  # Profil "prod" — même principe que backend-prod/worker-prod. Aucun volume : le seul volume de
+  # `beat` (ci-dessus) est le bind mount du code source, qui disparaît ici — la planification ne
+  # touche aucun fichier runtime (backups/documents/...), contrairement à backend/worker.
+  beat-prod:
+    build: ./backend
+    restart: unless-stopped
+    profiles: ["prod"]
+    command: celery -A tasks.scheduled_tasks.celery_app beat --loglevel=info
+    env_file: .env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - backend_net
 
   frontend:
     # target: dev explicite — sans lui, Docker construirait le DERNIER stage du
@@ -196,6 +334,7 @@ services:
     build:
       context: ./frontend
       target: dev
+    restart: unless-stopped
     ports:
       - "3000:3000"
     depends_on:
@@ -223,6 +362,10 @@ services:
       - ALL
     mem_limit: 512m
     cpus: 1.0
+    # frontend_net uniquement (13/08/2026, segmentation réseau) — le frontend n'a jamais besoin de
+    # joindre db/redis directement, seulement backend (présent sur frontend_net lui aussi).
+    networks:
+      - frontend_net
 
   # Build de production (27/07/2026) — Vite build minifié servi par nginx,
   # cf. frontend/Dockerfile § stage "prod" et frontend/nginx.conf. Derrière un
@@ -238,11 +381,15 @@ services:
     build:
       context: ./frontend
       target: prod
+    restart: unless-stopped
     profiles: ["prod"]
     ports:
       - "3000:3000"
+    # backend-prod (13/08/2026), pas backend — sinon `docker compose --profile prod up
+    # frontend-prod` entraînait aussi le service dev `backend` (résolution de depends_on), qui
+    # tentait de se lier sur le même port hôte 127.0.0.1:8000 que backend-prod déjà démarré.
     depends_on:
-      - backend
+      - backend-prod
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
       interval: 30s
@@ -260,6 +407,17 @@ services:
       - ALL
     mem_limit: 128m
     cpus: 0.5
+    networks:
+      - frontend_net
+
+networks:
+  # Segmentation (13/08/2026, cf. CHECKLIST_DOCKER.md) : avant, un seul bridge par défaut laissait
+  # le frontend joindre db/redis réseau-niveau alors qu'il n'en a jamais eu besoin (c'est un SPA, il
+  # ne parle qu'au backend). backend_net regroupe tout ce qui parle à Postgres/Redis ; frontend_net
+  # ne contient que ce qui doit être joignable depuis/vers le frontend (lui-même + backend, seul
+  # service sur les deux réseaux).
+  backend_net:
+  frontend_net:
 
 volumes:
   postgres_data:

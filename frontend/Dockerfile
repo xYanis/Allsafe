@@ -32,6 +32,10 @@ RUN npm run build
 # `routers/connections.py` continue de journaliser la vraie IP cliente et pas
 # celle du conteneur frontend.
 FROM nginx:1.27-alpine AS prod
+# apk upgrade (13/08/2026, scan Trivy — CVE-2026-31789 CRITICAL sur libssl3/libcrypto3, correctif
+# déjà publié par Alpine mais pas encore dans le tag figé nginx:1.27-alpine) : récupère les derniers
+# paquets patchés du dépôt Alpine au moment du build, sans attendre une nouvelle image de base.
+RUN apk update && apk upgrade --no-cache
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 # Non-root (10/08/2026, cf. AUDIT_SECURITE.md) : utilisateur `nginx` déjà présent dans

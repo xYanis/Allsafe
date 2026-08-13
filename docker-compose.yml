@@ -1,0 +1,271 @@
+services:
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-cybervuln}
+      POSTGRES_USER: ${DB_USER:-cybervuln}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-cybervuln}"]
+      interval: 10s
+      retries: 5
+    # Rotation des logs (27/07/2026, sur les 6 services) : `json-file` sans
+    # limite grossit indéfiniment par défaut — vérifié sur cet hôte (`docker
+    # inspect` : LogConfig vide, pas de daemon.json global). Sur un outil qui
+    # tourne en continu (sync NVD/veille/patch check toutes les heures), les
+    # logs de backend/worker/beat n'auraient jamais été purgés. 10m × 5 fichiers
+    # = 50 Mo max par service.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    # Pas de cap_drop ici : l'entrypoint officiel postgres démarre root (chown du
+    # volume de données) avant de basculer sur l'utilisateur postgres via gosu —
+    # DAC_OVERRIDE/CHOWN/SETUID/SETGID nécessaires à chaque démarrage, y compris
+    # sur un volume déjà initialisé. cap_drop: [ALL] casserait le démarrage.
+    mem_limit: 1g
+    cpus: 1.0
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    cpus: 0.5
+
+  backend:
+    build: ./backend
+    # 127.0.0.1 uniquement (03/08/2026, audit sécurité) : publié sur toutes les
+    # interfaces, le port était joignable directement par tout hôte du réseau
+    # local, hors du proxy nginx (frontend) qui pose X-Forwarded-For — un client
+    # network pouvait forger cet en-tête (routers/auth.py::_client_ip y fait
+    # confiance sans vérifier la provenance), contournant le verrou anti-
+    # bruteforce IP et corrompant l'IP tracée dans AuthAuditLog/ConnectionLog/
+    # UserSession. Restreint à l'hôte local : les commandes curl documentées
+    # dans CLAUDE.md (localhost:8000) et /api/docs restent utilisables depuis
+    # la machine qui héberge Docker, plus depuis le reste du réseau.
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      # :ro (10/08/2026, cf. AUDIT_SECURITE.md § Docker) : la clé privée id_ed25519 n'a
+      # besoin que d'être lue — known_hosts (seul fichier qui a besoin d'écriture, TOFU
+      # SSH, cf. ssh_trust.py) vit désormais sur son propre volume nommé ci-dessous,
+      # séparé de la clé privée.
+      - ./keys:/app/keys:ro
+      - ssh_known_hosts:/app/ssh-state   # rw : known_hosts SSH pinné en TOFU au premier contact
+      - backups:/app/backups   # lecture (GET /api/backup/list) — l'écriture a lieu côté worker
+      - incident_attachments:/app/incident_attachments   # rw : PDF du rapport final (module Incidents)
+      - documents:/app/documents   # rw : documents de gouvernance NIS 2 (module Documentation)
+      - audit_attachments:/app/audit_attachments   # rw : mandats + preuves (module Audits)
+      - note_images:/app/note_images   # rw : images insérées dans les sujets (module Documentation > Notes)
+      - ./agent/dist:/app/agent-dist:ro   # ro : .msi/.deb allsafe-agent déjà construits (13/08/2026,
+      #   déploiement centralisé des mises à jour), servis tels quels par GET /api/agents/latest/*
+      #   — jamais reconstruits par le backend, juste republiés depuis ce qui a été buildé à la main
+    # start_period généreux : STARTUP_MATCHING/STARTUP_PATCH_CHECK peuvent prendre
+    # plus d'une minute (corrélation CVE synchrone au démarrage) — sans cette marge,
+    # Docker compterait des échecs "unhealthy" pendant un démarrage pourtant normal.
+    healthcheck:
+      # 127.0.0.1 explicite, pas "localhost" : `/etc/hosts` résout "localhost" en
+      # ::1 (IPv6) en premier, sur lequel uvicorn n'écoute pas (0.0.0.0 = IPv4
+      # seulement) — "Connection refused" garanti, constaté en direct le 27/07/2026
+      # sur le même piège côté frontend (Vite).
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Mesuré en direct (27/07/2026) : le matching CVE synchrone au démarrage
+    # (STARTUP_MATCHING) pique à ~4.6GiB avant de retomber à ~300MiB une fois
+    # terminé — 1g/3g testés en pratique, tous les deux insuffisants (le
+    # conteneur restait bloqué à la limite sans jamais finir le démarrage).
+    # 6g laisse une vraie marge de croissance du référentiel CVE.
+    mem_limit: 6g
+    cpus: 2.0
+
+  worker:
+    build: ./backend
+    # --concurrency=1 (27/07/2026) : sans ça, le pool de fork Celery démarre autant
+    # de process que de CPU visibles par le conteneur (multiprocessing.cpu_count(),
+    # qui lit le host — 14 ici — pas le quota `cpus:` ci-dessous). Deux tâches de
+    # matching CPE concurrentes (~4.6GiB chacune, mêmes traitements que
+    # STARTUP_MATCHING) ont fait dépasser mem_limit et tuer le worker (OOMKilled,
+    # constaté en direct). `worker_prefetch_multiplier=1` (scheduled_tasks.py)
+    # limite déjà la réservation à une tâche par process — encore fallait-il
+    # n'avoir qu'un seul process pour que "une tâche à la fois" soit vrai.
+    command: celery -A tasks.scheduled_tasks.celery_app worker --loglevel=info -Q default --concurrency=1
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - ./keys:/app/keys:ro   # cf. commentaire équivalent sur le service backend ci-dessus
+      - ssh_known_hosts:/app/ssh-state   # rw : known_hosts SSH pinné en TOFU au premier contact
+      - backups:/app/backups   # sauvegarde quotidienne pg_dump (services/backup.py), écriture
+    # "inspect ping" est la vérification officielle Celery : joignable via le
+    # broker Redis, pas juste "le process existe" (ne détecterait pas un worker
+    # bloqué/déconnecté du broker).
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A tasks.scheduled_tasks.celery_app inspect ping --timeout 10 || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Le worker exécute aussi les syncs NVD/patch-check périodiques et, depuis le
+    # 27/07/2026, le matching CPE par actif (routers/assets.py, déporté du
+    # backend). 4g s'est révélé insuffisant : OOMKilled constaté en direct avec
+    # deux tâches de matching concurrentes (~4.6GiB chacune) avant l'ajout de
+    # --concurrency=1 ci-dessus. 6g laisse une vraie marge même à une tâche à la fois.
+    mem_limit: 6g
+    cpus: 1.5
+
+  beat:
+    build: ./backend
+    command: celery -A tasks.scheduled_tasks.celery_app beat --loglevel=info
+    env_file: .env
+    depends_on:
+      - redis
+    volumes:
+      - ./backend:/app
+    # Pas d'endpoint HTTP à interroger (beat ne fait que planifier, pas exécuter) —
+    # vérifie que le process celery beat tourne toujours (pgrep, cf. Dockerfile).
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'celery.*beat' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 256m
+    cpus: 0.5
+
+  frontend:
+    # target: dev explicite — sans lui, Docker construirait le DERNIER stage du
+    # Dockerfile par défaut ("prod", cf. frontend/Dockerfile), ce qui basculerait
+    # silencieusement l'environnement de dev vers un build figé sans HMR.
+    build:
+      context: ./frontend
+      target: dev
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    healthcheck:
+      # 127.0.0.1 explicite : "localhost" résout en ::1 (IPv6) en premier dans
+      # /etc/hosts, sur lequel Vite (--host 0.0.0.0, IPv4 seulement) n'écoute pas
+      # — "Connection refused" constaté en direct le 27/07/2026 avec "localhost".
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 512m
+    cpus: 1.0
+
+  # Build de production (27/07/2026) — Vite build minifié servi par nginx,
+  # cf. frontend/Dockerfile § stage "prod" et frontend/nginx.conf. Derrière un
+  # profil Compose ("prod") plutôt qu'un docker-compose.prod.yml séparé : évite
+  # toute ambiguïté de fusion YAML entre fichiers sur `volumes`/`healthcheck`
+  # (les listes se concatènent par défaut entre fichiers Compose, elles ne se
+  # remplacent pas) — un service à part entière dans le même fichier est sans
+  # équivoque. `docker compose up` seul ne le démarre jamais (profil inactif) ;
+  # `docker compose up -d frontend-prod` le démarre explicitement (le nommer
+  # suffit, pas besoin de `--profile prod`) — à utiliser seul, pas en même
+  # temps que `frontend` (les deux occupent le port 3000 hôte).
+  frontend-prod:
+    build:
+      context: ./frontend
+      target: prod
+    profiles: ["prod"]
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 128m
+    cpus: 0.5
+
+volumes:
+  postgres_data:
+  backups:
+  incident_attachments:
+  documents:
+  audit_attachments:
+  note_images:
+  ssh_known_hosts:

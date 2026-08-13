@@ -1,0 +1,14 @@
+[Unit]
+Description=Allsafe Agent — collecte lecture seule + boucle de check-in persistante
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/allsafe-agent run
+Restart=on-failure
+RestartSec=30
+User=root
+
+[Install]
+WantedBy=multi-user.target

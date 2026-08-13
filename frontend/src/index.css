@@ -1,0 +1,723 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app:        #0d1117;
+  --bg-card:       #161b22;
+  --bg-secondary:  #21262d;
+  --border:        #30363d;
+  --border-subtle: #21262d;
+  --text-primary:  #e6edf3;
+  --text-secondary:#c9d1d9;
+  --text-muted:    #8b949e;
+  --text-faint:    #6e7681;
+}
+:root[data-theme="light"] {
+  --bg-app:        #f6f8fa;
+  --bg-card:       #ffffff;
+  --bg-secondary:  #f0f2f5;
+  --border:        #d0d7de;
+  --border-subtle: #eaeef2;
+  --text-primary:  #1f2328;
+  --text-secondary:#24292f;
+  --text-muted:    #57606a;
+  --text-faint:    #8c959f;
+}
+
+/* Identité de marque CBR — un seul jeu de tokens au lieu du même à plat recopié en dur dans
+   Layout/Home/Login/WelcomeOverlay/ProtectedRoute (5 fichiers avant cette centralisation).
+   Noir + jaune (11/08/2026, 2e palette — remplace le violet initial, demande explicite).
+   --brand est la teinte de référence pour du TEXTE lisible sur le fond de PAGE (qui change de
+   blanc à noir selon le thème) — un jaune assez vif pour "faire jaune" n'a PAS un contraste
+   suffisant en clair sur un fond quasi blanc (well known problem : le jaune est le pire choix
+   de couleur de texte sur blanc), d'où l'override `[data-theme="light"]` ci-dessous, un or plus
+   sombre. --brand-icon/--brand-grad/--brand-glow habillent la tuile de logo (`CbrLogoTile`) —
+   tuile noire + glyphe jaune en sombre, **tuile claire + glyphe doré foncé en clair** (12/08/2026,
+   demande utilisateur — revient sur le choix initial du 11/08 qui la gardait toujours noire ;
+   la tuile se fond mieux dans une interface claire qu'un carré noir imposé). --brand-text-grad
+   (dégradé pour le wordmark "CBR" en `background-clip:text`) a lui aussi besoin d'une variante
+   claire, même raison que --brand. */
+:root {
+  --brand-icon:  #f5c518;
+  --brand:       #f5c518;
+  --brand-dark:  #a37f00;
+  --brand-grad: linear-gradient(155deg, #2e2e2e 0%, #121212 55%, #000000 100%);
+  --brand-text-grad: linear-gradient(100deg, #fff6c9 0%, #f5c518 35%, #c99a00 65%, #f5c518 100%);
+  --brand-glow:  rgba(245, 197, 24, 0.4);
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Bleu "action primaire" (11/08/2026, tour visuel) — recopié en dur (`#1f6feb`) dans
+     8 endroits (Assets/Vulnerabilities/Watch/Settings) avant cette centralisation. Distinct
+     de --brand : ce bleu reste la couleur des boutons d'action "neutres" (scanner, filtrer...),
+     pas de la marque elle-même. */
+  --accent-blue: #1f6feb;
+}
+:root[data-theme="light"] {
+  --brand: #8a6a00;
+  --brand-dark: #5c4700;
+  --brand-text-grad: linear-gradient(100deg, #a3820a 0%, #8a6a00 35%, #6b5200 65%, #8a6a00 100%);
+  --brand-icon: var(--brand-dark);
+  --brand-grad: linear-gradient(155deg, #ffffff 0%, #f6f1e0 55%, #ede4c8 100%);
+  --brand-glow: rgba(138, 106, 0, 0.22);
+}
+html, body, #root {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  height: 100%;
+}
+
+/* Scrollbar de la sidebar : le navigateur affiche par défaut une barre
+   blanche/grise avec son propre fond, qui détonne avec le thème (surtout en
+   dark mode) — on la réduit et on la fait suivre les couleurs de l'app,
+   piste (track) transparente + curseur (thumb) sur --border, dans les deux
+   états (réduite ou non, même conteneur `.sidebar-scroll`). */
+.sidebar-scroll {
+  scrollbar-width: thin;                          /* Firefox */
+  scrollbar-color: var(--border) transparent;      /* Firefox */
+}
+.sidebar-scroll::-webkit-scrollbar {               /* Chrome/Edge/Safari */
+  width: 6px;
+}
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 999px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-faint);
+}
+
+/* Scrollbar de la zone de contenu principale (<main>, Layout.jsx) — même
+   principe que .sidebar-scroll : sans ça, le navigateur affiche sa barre
+   grise/blanche par défaut à droite, qui ne suit pas le thème et détonne
+   avec celle de la sidebar à gauche (déjà stylée) selon dark/light. */
+.main-scroll {
+  scrollbar-width: thin;                          /* Firefox */
+  scrollbar-color: var(--border) var(--bg-app);    /* Firefox */
+}
+.main-scroll::-webkit-scrollbar {                  /* Chrome/Edge/Safari */
+  width: 10px;
+}
+.main-scroll::-webkit-scrollbar-track {
+  background: var(--bg-app);
+}
+.main-scroll::-webkit-scrollbar-thumb {
+  background-color: var(--border);
+  border-radius: 999px;
+  border: 2px solid var(--bg-app);
+}
+.main-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: var(--text-faint);
+}
+
+/* Calendrier natif des <input type="date"/"datetime-local"/"time"> (12/08/2026, filtres
+   Administration > Connexion) — même problème que les scrollbars ci-dessus : le popup de
+   sélection de date est dessiné par le navigateur, pas par l'app, et reste blanc par défaut
+   même en thème sombre. `color-scheme` est la seule propriété qui influence ce rendu natif
+   (impossible à cibler avec des sélecteurs CSS classiques) — le navigateur l'utilise pour
+   choisir son propre popup clair ou sombre, et réajuste l'icône calendrier en conséquence. */
+:root[data-theme="dark"] input[type="date"],
+:root[data-theme="dark"] input[type="datetime-local"],
+:root[data-theme="dark"] input[type="time"] {
+  color-scheme: dark;
+}
+:root[data-theme="light"] input[type="date"],
+:root[data-theme="light"] input[type="datetime-local"],
+:root[data-theme="light"] input[type="time"] {
+  color-scheme: light;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  border-radius: 4px;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+  background-color: var(--border);
+}
+
+/* Fond translucide + flou derrière les modales — plus doux qu'un aplat noir
+   plein, quel que soit le thème (dark/light) : le contenu derrière reste
+   deviné plutôt que masqué net. */
+.modal-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Rendu Markdown des annotations d'analyste (MarkdownNote.jsx) — pas de
+   plugin @tailwindcss/typography dans ce projet (cf. docs/FRONTEND.md), donc
+   stylé à la main sur les variables de thème existantes plutôt que d'ajouter
+   une dépendance de plus pour quelques balises. */
+.markdown-note > :first-child { margin-top: 0; }
+.markdown-note > :last-child { margin-bottom: 0; }
+.markdown-note p { margin: 0.5em 0; }
+.markdown-note strong { color: var(--text-primary); font-weight: 600; }
+.markdown-note ul, .markdown-note ol { margin: 0.5em 0; padding-left: 1.25em; }
+.markdown-note li { margin: 0.15em 0; }
+.markdown-note li > ul, .markdown-note li > ol { margin: 0.15em 0; }
+.markdown-note a { color: #58a6ff; text-decoration: underline; }
+.markdown-note code {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}
+.markdown-note pre {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6em 0.8em;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.markdown-note pre code { background: none; border: none; padding: 0; }
+.markdown-note blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.5em 0;
+  padding-left: 0.75em;
+  color: var(--text-muted);
+}
+.markdown-note h1, .markdown-note h2, .markdown-note h3 {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin: 0.6em 0 0.3em;
+}
+.markdown-note h1 { font-size: 1.15em; }
+.markdown-note h2 { font-size: 1.08em; }
+.markdown-note h3 { font-size: 1em; }
+.markdown-note hr { border: none; border-top: 1px solid var(--border); margin: 0.75em 0; }
+.markdown-note img { max-width: 100%; border-radius: 8px; margin: 0.5em 0; display: block; }
+
+/* ─── Polish global réutilisable (cf. emil-design-eng) ───────────────────────
+
+   1. Feedback au press : tout bouton "répond" au clic (scale léger). Global mais
+   conservateur — :active seulement, jamais désactivé, derrière @media hover pour
+   ne pas se déclencher au tap ; les règles composant plus spécifiques gardent la
+   priorité. */
+@media (hover: hover) and (pointer: fine) {
+  button:not(:disabled):active { transform: scale(0.97); }
+}
+
+/* 2. Carte "liftable" au survol (grilles de cartes cliquables). Opt-in via la
+   classe .lift-card. transform+box-shadow uniquement (GPU, pas de reflow). */
+.lift-card {
+  transition: transform 220ms var(--ease-out), box-shadow 220ms var(--ease-out), border-color 220ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .lift-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 30px -16px rgba(0,0,0,0.45);
+    border-color: var(--text-faint);
+  }
+}
+
+/* 3. Cascade d'apparition (grilles/listes) via .stagger sur le conteneur. Cap à
+   12 enfants pour ne pas ralentir les longues listes ; ne rejoue qu'au (re)montage
+   d'un enfant — avec des clés stables, pas de replay au simple filtrage. */
+.stagger > * { opacity: 0; animation: home-rise 420ms var(--ease-out) both; }
+.stagger > *:nth-child(1)  { animation-delay: 20ms; }
+.stagger > *:nth-child(2)  { animation-delay: 45ms; }
+.stagger > *:nth-child(3)  { animation-delay: 70ms; }
+.stagger > *:nth-child(4)  { animation-delay: 95ms; }
+.stagger > *:nth-child(5)  { animation-delay: 120ms; }
+.stagger > *:nth-child(6)  { animation-delay: 145ms; }
+.stagger > *:nth-child(7)  { animation-delay: 170ms; }
+.stagger > *:nth-child(8)  { animation-delay: 195ms; }
+.stagger > *:nth-child(9)  { animation-delay: 220ms; }
+.stagger > *:nth-child(10) { animation-delay: 245ms; }
+.stagger > *:nth-child(11) { animation-delay: 270ms; }
+.stagger > *:nth-child(12) { animation-delay: 295ms; }
+.stagger > *:nth-child(n+13) { animation-delay: 300ms; }
+
+/* Variante douce pour les lignes de tableau : montée plus discrète (6px) et plus
+   courte, cap à 8. Ne rejoue qu'au (re)montage d'une ligne (clés stables). À
+   n'appliquer que sur des tableaux peu rafraîchis — pas ceux en polling. */
+@keyframes row-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.stagger-rows > * { opacity: 0; animation: row-rise 300ms var(--ease-out) both; }
+.stagger-rows > *:nth-child(1) { animation-delay: 15ms; }
+.stagger-rows > *:nth-child(2) { animation-delay: 35ms; }
+.stagger-rows > *:nth-child(3) { animation-delay: 55ms; }
+.stagger-rows > *:nth-child(4) { animation-delay: 75ms; }
+.stagger-rows > *:nth-child(5) { animation-delay: 95ms; }
+.stagger-rows > *:nth-child(6) { animation-delay: 115ms; }
+.stagger-rows > *:nth-child(7) { animation-delay: 135ms; }
+.stagger-rows > *:nth-child(n+8) { animation-delay: 150ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  button:not(:disabled):active { transform: none; }
+  .lift-card, .lift-card:hover { transform: none; box-shadow: none; }
+  .stagger > *, .stagger-rows > * { animation: none; opacity: 1; }
+}
+
+/* 3b. Module Notes — volontairement PAS des cartes ni des panneaux bordés (2e itération,
+   12/08/2026 : la première passait par des cartes, la deuxième par un explorateur à deux
+   volets bordés, aucune des deux n'a plu). Arborescence façon Notion à plat sur le fond de
+   page : une seule règle, rangées sans fond propre — le survol teinte directement vers
+   --bg-app (le fond réel derrière, pas de panneau intermédiaire cette fois). --accent
+   (couleur du thème) injectée par rangée. */
+.tree-row {
+  --accent: var(--text-muted);
+  border-radius: 8px;
+  transition: background 150ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .tree-row:hover { background: color-mix(in srgb, var(--accent) 8%, var(--bg-app)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-row { transition-duration: 0ms; }
+}
+
+/* 4. Items de nav (sidebar) — même « feel » que les tuiles d'accueil : au survol,
+   un fond teinté se diffuse derrière l'item, qui répond aussi au press. --nav
+   (couleur du module) est injectée en style inline par item. Le texte est déjà
+   coloré à la couleur du module en permanence (style inline, actif ou non) —
+   le survol ne fait que renforcer le fond, sans re-teinter le texte. */
+.nav-item {
+  --nav: var(--text-muted);
+  position: relative;
+  transition: background 200ms var(--ease-out), color 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+/* Liseré actif — un aplat de fond teinté seul (déjà en place) se voit peu à
+   faible contraste ; le repère net à gauche (façon Linear/Vercel) donne à la
+   sélection un rendu "produit dessiné" plutôt que "juste une classe active".
+   Escamoté en mode réduit (icône seule) : la barre collerait à l'icône sans
+   la marge du libellé. */
+.nav-item.active-nav::before {
+  content: ""; position: absolute; left: 3px; top: 50%;
+  width: 3px; height: 16px; border-radius: 999px;
+  background: var(--nav); transform: translateY(-50%);
+}
+.nav-item.active-nav.nav-item-collapsed::before { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .nav-item:not(.active-nav):hover {
+    background: color-mix(in srgb, var(--nav) 13%, transparent);
+  }
+}
+.nav-item:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) { .nav-item:active { transform: none; } }
+
+/* ─── Transition d'entrée de page (Layout.jsx, à chaque changement de route) ──
+   Fade seul (pas de translateY) : `animation: ... both` fige la dernière valeur
+   de `transform` indéfiniment (pas seulement le temps de l'animation) — tout
+   `transform` non-`none` sur un ancêtre crée un nouveau containing block pour
+   ses descendants `position: fixed`. Toute modale rendue à l'intérieur d'une
+   page (donc de ce wrapper, sur toutes les routes) se positionnait alors par
+   rapport à cette div au lieu du viewport : mal centrée, tronquée, et un clic
+   sur le fond ne correspondait plus à l'écran entier (fermeture impossible sans
+   recharger la page — bug réel, signalé par l'utilisateur le 27/07/2026).
+   Neutralisée sous prefers-reduced-motion. */
+@keyframes route-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.route-fade { animation: route-fade-in 180ms var(--ease-out, cubic-bezier(0.23,1,0.32,1)) both; }
+@media (prefers-reduced-motion: reduce) {
+  .route-fade { animation: none; }
+}
+
+/* ─── Barre "Analyse en cours" du dashboard (patch check) — rayures diagonales
+   animées sur le remplissage, pour distinguer une barre qui avance réellement
+   d'une barre simplement large et statique. */
+@keyframes progress-shimmer { to { background-position: 28px 0; } }
+.progress-bar-shimmer {
+  background-image: linear-gradient(135deg, rgba(255,255,255,0.28) 25%, transparent 25%, transparent 50%,
+    rgba(255,255,255,0.28) 50%, rgba(255,255,255,0.28) 75%, transparent 75%, transparent);
+  background-size: 28px 28px;
+  animation: progress-shimmer 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar-shimmer { animation: none; }
+}
+
+/* ─── Loader de page (PageLoader.jsx) — remplace le spinner Heroicons générique
+   jusqu'ici dupliqué page par page. --loader (couleur du module actif, déduite
+   de la route) est injectée en style inline par le composant, même schéma que
+   --nav ci-dessus. Neutralisé sous prefers-reduced-motion (ring statique). */
+@keyframes page-loader-spin { to { transform: rotate(360deg); } }
+@keyframes page-loader-glow {
+  0%, 100% { opacity: 0.35; transform: scale(1); }
+  50%      { opacity: 0.65; transform: scale(1.18); }
+}
+.page-loader-glow {
+  position: absolute; inset: -30%; border-radius: 9999px;
+  background: radial-gradient(circle, var(--loader), transparent 70%);
+  filter: blur(6px); pointer-events: none;
+  animation: page-loader-glow 2.2s ease-in-out infinite;
+}
+.page-loader-ring, .page-loader-arc {
+  position: absolute; inset: 0; border-radius: 9999px; border-style: solid;
+}
+.page-loader-ring { border-color: color-mix(in srgb, var(--loader) 16%, transparent); }
+.page-loader-arc {
+  border-color: transparent;
+  border-top-color: var(--loader); border-right-color: var(--loader);
+  animation: page-loader-spin 0.7s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-loader-arc { animation: none; }
+  .page-loader-glow { animation: none; }
+}
+
+/* ─── Page d'accueil (Home.jsx) — sélecteur de module ────────────────────────
+   Motion en CSS (hors main thread, interruptible via transitions) : entrée en
+   cascade au chargement, hover premium teinté de la couleur du module, feedback
+   au press. Courbe d'ease-out forte (cf. emil-design-eng) — les easings CSS
+   natifs manquent de punch. Tout est neutralisé sous prefers-reduced-motion. */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* Overshoot ("back out") — réservée aux écrans rares (Login, Bienvenue Boss,
+     cf. skill emil-design-eng § fréquence : occasionnel/rare peut se permettre
+     du delight). Ne jamais l'utiliser sur une page vue plusieurs fois par jour
+     (Home, nav...) — l'overshoot y deviendrait vite fatigant. */
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes home-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes home-pop {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+/* Halo qui respire derrière le logo — lent et discret, purement décoratif. */
+@keyframes home-glow {
+  0%, 100% { opacity: 0.55; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 0.9;  transform: translate(-50%, -50%) scale(1.12); }
+}
+
+/* `both` : l'état initial (opacity 0) s'applique aussi pendant le delay, donc les
+   tuiles restent invisibles avant leur tour dans la cascade. */
+.home-enter { opacity: 0; animation: home-rise 560ms var(--ease-out) both; }
+.home-logo  { animation: home-pop 620ms var(--ease-out) both; }
+
+
+.home-glow {
+  position: absolute; top: 42%; left: 50%;
+  width: 460px; height: 460px; border-radius: 50%;
+  background: radial-gradient(circle, var(--brand-glow), transparent 60%);
+  filter: blur(30px); pointer-events: none; z-index: 0;
+  animation: home-glow 7s ease-in-out infinite;
+}
+/* Contenu remonté en haut de page sur Home.jsx (cf. justify-start) — le halo
+   suit, sans affecter Login.jsx/WelcomeOverlay qui restent centrés verticalement. */
+.home-glow--high { top: 20%; }
+:root[data-theme="light"] .home-glow {
+  background: radial-gradient(circle, rgba(138,106,0,0.16), transparent 60%);
+}
+
+/* Trame de points sous le halo — signature "poste de contrôle / schéma
+   technique" plutôt que le halo seul, qui suffisait à lui seul à donner
+   l'impression d'un gabarit générique "hero + blob" (le repère explicite de
+   l'utilisateur, cf. session courante). Statique, très discrète (masquée en
+   dégradé radial pour ne jamais toucher net les bords), désactivée sous
+   prefers-reduced-motion inutile ici (pas d'animation) mais alignée sur les
+   autres décorations du hero par cohérence de lecture. */
+.hero-grid {
+  position: absolute; inset: 0; z-index: 0; pointer-events: none;
+  background-image: radial-gradient(color-mix(in srgb, var(--text-faint) 55%, transparent) 1px, transparent 1px);
+  background-size: 26px 26px;
+  -webkit-mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 0%, transparent 75%);
+  mask-image: radial-gradient(ellipse 60% 50% at 50% 30%, black 0%, transparent 75%);
+  opacity: 0.5;
+}
+:root[data-theme="light"] .hero-grid { opacity: 0.35; }
+
+/* Fond + bordure déjà teintés de la couleur du module au repos (léger dégradé
+   + liseré coloré à faible opacité) — avant, un simple --bg-card gris identique
+   pour les 7 tuiles ne laissait deviner l'identité du module qu'au survol.
+   --tile est injectée en style inline par tuile (cf. Home.jsx). */
+.home-tile {
+  position: relative; z-index: 1; overflow: hidden;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 18%, var(--bg-card)), var(--bg-card) 70%);
+  border: 1px solid color-mix(in srgb, var(--tile) 32%, var(--border));
+  transition: transform 240ms var(--ease-out), border-color 240ms var(--ease-out),
+              box-shadow 240ms var(--ease-out), background 240ms var(--ease-out);
+  will-change: transform;
+}
+.home-tile:active { transform: scale(0.98); }
+
+.home-icon  { transition: transform 240ms var(--ease-out), background 240ms var(--ease-out); }
+.home-arrow { opacity: 0; transform: translateX(-6px); transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out); }
+
+/* Contenu au-dessus du spotlight (::after) mais sous le liseré (::before). */
+.home-tile > * { position: relative; z-index: 1; }
+
+/* Spotlight qui suit la souris : radial-gradient positionné en var(--mx/--my),
+   mises à jour en JS directement sur la tuile (pas de re-render). Décoratif —
+   révélé au survol seulement, masqué sous prefers-reduced-motion. */
+.home-tile::after {
+  content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit;
+  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%),
+              color-mix(in srgb, var(--tile) 22%, transparent), transparent 62%);
+  opacity: 0; transition: opacity 260ms var(--ease-out); pointer-events: none;
+}
+
+/* Liseré supérieur à la couleur du module, révélé au survol (clip-path : pas de
+   reflow, GPU). --tile est injectée en style inline par tuile. */
+.home-tile::before {
+  content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; z-index: 2;
+  background: var(--tile); clip-path: inset(0 100% 0 0);
+  transition: clip-path 320ms var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .home-tile:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--tile) 55%, transparent);
+    background: color-mix(in srgb, var(--tile) 7%, var(--bg-card));
+    box-shadow: 0 14px 34px -14px color-mix(in srgb, var(--tile) 50%, transparent);
+  }
+  .home-tile:hover::before { clip-path: inset(0 0 0 0); }
+  .home-tile:hover::after  { opacity: 1; }
+  .home-tile:hover .home-icon  { transform: scale(1.08); background: color-mix(in srgb, var(--tile) 28%, transparent); }
+  .home-tile:hover .home-arrow { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-enter, .home-logo, .home-glow { animation: none; opacity: 1; }
+  .home-tile, .home-tile:hover { transform: none; }
+  .home-tile::before { transition: none; }
+  .home-tile::after, .home-tile:hover::after { display: none; }
+  .home-arrow { transform: none; transition: opacity 200ms ease; }
+}
+
+/* ─── Delight de marque — Login.jsx + WelcomeOverlay.jsx uniquement ──────────
+   Les deux seuls écrans "rares" de l'app (une fois par session/connexion, cf.
+   skill emil-design-eng § fréquence : occasionnel/rare peut se permettre du
+   delight — à l'inverse de Home.jsx, revisité plusieurs fois par jour via le
+   logo de la sidebar, qui garde volontairement des animations sobres). Classes
+   dédiées (préfixe brand-/login-/welcome-), jamais réutilisées sur une page
+   fréquente. */
+
+/* Logo qui "atterrit" — overshoot + léger tour, plus un ping façon radar qui
+   se dissipe autour. Beaucoup plus visible que l'ancien home-pop (simple
+   scale 0.9→1) sans devenir cartoonesque : l'overshoot reste contenu (8%). */
+@keyframes brand-pop-bounce {
+  0%   { opacity: 0; transform: scale(0.4) rotate(-8deg); }
+  55%  { opacity: 1; transform: scale(1.08) rotate(3deg); }
+  80%  { transform: scale(0.97) rotate(-1deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.brand-pop { animation: brand-pop-bounce 700ms var(--ease-bounce) both; }
+
+@keyframes brand-ring-ping {
+  0%   { opacity: 0.55; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+.brand-ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--brand);
+  animation: brand-ring-ping 900ms var(--ease-out) 380ms both;
+  pointer-events: none;
+}
+
+/* Titre en dégradé de marque, révélé avec un balayage lumineux qui traverse le
+   texte une fois puis se fige — plus qu'un simple fondu, sans boucler (une
+   boucle infinie sur un titre serait vite fatigante, même sur un écran rare). */
+@keyframes brand-text-reveal {
+  0%   { opacity: 0; transform: translateY(10px); background-position: 200% 0; }
+  55%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 1; transform: translateY(0); background-position: 0% 0; }
+}
+.brand-text-shimmer {
+  background-image: var(--brand-text-grad);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  opacity: 0;
+  animation: brand-text-reveal 1.4s var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand-pop, .brand-text-shimmer { animation: none; opacity: 1; transform: none; background-position: 0 0; }
+  .brand-ring { display: none; }
+}
+
+/* ─── Login.jsx ───────────────────────────────────────────────────────────── */
+
+/* Champs de formulaire : montée + flou qui se dissipe ("matérialisation", cf.
+   emil-design-eng § blur) plutôt qu'un simple fondu — plus visible sans
+   ajouter de mouvement parasite. */
+@keyframes login-rise {
+  from { opacity: 0; transform: translateY(18px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+.login-enter { opacity: 0; animation: login-rise 550ms var(--ease-out) both; }
+
+/* Bouton de connexion : même overshoot que le logo, la CTA de l'écran mérite
+   un peu plus de présence qu'un simple fondu. */
+@keyframes login-button-pop {
+  0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
+  70%  { opacity: 1; transform: translateY(0) scale(1.03); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.login-button-enter { opacity: 0; animation: login-button-pop 650ms var(--ease-bounce) both; }
+
+/* Erreur de connexion : apparaît puis tremble légèrement — indication d'état
+   (cf. emil-design-eng § purpose), pas de la décoration pure. Une seule
+   keyframe (plutôt que deux animations superposées) : deux `animation`
+   distinctes animant chacune `transform` sur le même élément ne se combinent
+   pas nativement en CSS, la seconde écraserait silencieusement la première.
+   `key={error}` côté JSX force le remontage à chaque nouvelle tentative ratée
+   pour rejouer l'animation même si le message reste identique. */
+@keyframes login-error-in {
+  0%   { opacity: 0; transform: translateY(6px); filter: blur(3px); }
+  40%  { opacity: 1; transform: translateY(0) translateX(0); filter: blur(0); }
+  50%  { transform: translateX(-4px); }
+  60%  { transform: translateX(4px); }
+  70%  { transform: translateX(-3px); }
+  80%  { transform: translateX(3px); }
+  90%  { transform: translateX(-1px); }
+  100% { transform: translateX(0); }
+}
+.login-error { opacity: 0; animation: login-error-in 480ms var(--ease-out) both; }
+
+/* Trame de points du hero (cf. .hero-grid, index.css § tokens) : révélée en
+   cercle depuis le centre façon "mise sous tension", au lieu d'apparaître
+   figée. Réservé à Login — sur Home.jsx (visité en boucle) la trame reste
+   statique, cf. règle de fréquence en tête de section. */
+@keyframes hero-grid-boot {
+  from { clip-path: circle(0% at 50% 30%); }
+  to   { clip-path: circle(75% at 50% 30%); }
+}
+.hero-grid-boot { animation: hero-grid-boot 900ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-enter, .login-button-enter { animation: none; opacity: 1; transform: none; filter: none; }
+  .login-error { animation: none; opacity: 1; }
+  .hero-grid-boot { animation: none; clip-path: none; }
+}
+
+/* ─── Écran de bienvenue post-connexion (WelcomeOverlay.jsx) ─────────────────
+   Rare par nature (une fois par connexion, admin seulement pour l'instant) —
+   se permet plus de "delight" qu'une animation d'UI courante (cf.
+   emil-design-eng § fréquence). Sortie plus rapide que l'entrée (asymétrie
+   intentionnelle) et assistée d'un léger flou pour fondre l'écran vers la
+   Home déjà montée dessous, plutôt qu'un simple fondu qui laisserait deviner
+   les deux calques. */
+.welcome-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+  animation: welcome-fade-in 200ms var(--ease-out) both;
+  transition: opacity 380ms ease, filter 380ms ease;
+}
+.welcome-overlay.welcome-overlay-exit {
+  opacity: 0;
+  filter: blur(10px);
+  pointer-events: none;
+}
+@keyframes welcome-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* La couronne "atterrit" avec un vrai tour (façon couronne qu'on pose sur une
+   tête) plutôt qu'un simple scale-in, accompagnée d'un halo doré qui pulse et
+   se dissipe une fois — clin d'œil visuel au "Boss" du titre. */
+.welcome-crown-wrap { position: relative; display: inline-flex; }
+@keyframes welcome-crown-pop {
+  0%   { opacity: 0; transform: scale(0.3) rotate(-25deg); }
+  55%  { opacity: 1; transform: scale(1.18) rotate(10deg); }
+  75%  { transform: scale(0.95) rotate(-4deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.welcome-crown {
+  position: relative; z-index: 1;
+  display: inline-block;
+  font-size: 2.75rem;
+  line-height: 1;
+  margin-bottom: 0.75rem;
+  animation: welcome-crown-pop 800ms var(--ease-bounce) both;
+}
+@keyframes welcome-crown-glow {
+  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
+  45%  { opacity: 0.6; }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
+}
+.welcome-crown-glow {
+  position: absolute; top: 45%; left: 50%; width: 84px; height: 84px; z-index: 0;
+  background: radial-gradient(circle, rgba(227, 179, 65, 0.55), transparent 70%);
+  filter: blur(6px); pointer-events: none;
+  animation: welcome-crown-glow 1.1s var(--ease-out) 150ms both;
+}
+
+/* Même traitement que .brand-text-shimmer (dégradé + balayage) mais en classe
+   autonome plutôt qu'en la combinant : évite de dépendre de l'ordre du
+   cascade entre deux classes qui définiraient chacune un bout de `animation`
+   sur le même élément. Keyframe partagée (brand-text-reveal), déclaration
+   dupliquée volontairement. */
+.welcome-title {
+  background-image: var(--brand-text-grad);
+  background-size: 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  opacity: 0;
+  animation: brand-text-reveal 1.4s var(--ease-out) 120ms both;
+}
+.welcome-sub {
+  opacity: 0;
+  animation: home-rise 560ms var(--ease-out) both;
+  animation-delay: 220ms;
+}
+
+/* LogoutOverlay.jsx — même esprit que .welcome-sub, délai raccourci : l'écran
+   est bref (550ms de tenue avant la sortie, cf. HOLD_MS), pas la peine de
+   faire attendre le texte aussi longtemps qu'un écran de bienvenue lu en
+   entier. */
+.logout-text {
+  opacity: 0;
+  animation: home-rise 420ms var(--ease-out) 120ms both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logout-text { animation: none; opacity: 1; }
+}
+
+/* Récap (bascules auto, alertes sécurité, échéances NIS 2) — glisse depuis la
+   gauche plutôt qu'une simple montée, pour se distinguer du reste de l'app
+   (variété volontaire sur un écran qui se permet plus de personnalité).
+   Delay complet (base + i*70ms) posé en inline par ligne (WelcomeOverlay.jsx) —
+   la valeur ci-dessous n'est qu'un repli si jamais le style inline n'était pas
+   appliqué. */
+@keyframes welcome-row-in {
+  from { opacity: 0; transform: translateX(-18px) scale(0.97); }
+  to   { opacity: 1; transform: translateX(0) scale(1); }
+}
+.welcome-recap-row {
+  opacity: 0;
+  animation: welcome-row-in 420ms var(--ease-out) both;
+  animation-delay: 300ms;
+}
+
+/* Bouton "Continuer" : overshoot à l'entrée puis halo qui respire en continu
+   pour attirer l'œil vers l'action — l'écran se ferme seul à 9s (filet de
+   sécurité), ce halo aide à remarquer qu'on peut le faire plus tôt soi-même. */
+@keyframes welcome-continue-pop {
+  0%   { opacity: 0; transform: translateY(10px) scale(0.9); }
+  70%  { opacity: 1; transform: translateY(0) scale(1.04); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes welcome-continue-glow {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 45%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--brand) 0%, transparent); }
+}
+.welcome-continue {
+  opacity: 0;
+  animation: welcome-continue-pop 550ms var(--ease-bounce) 550ms both,
+             welcome-continue-glow 2.2s ease-in-out 1150ms infinite;
+  transition: transform 160ms var(--ease-out), background 160ms ease;
+}
+.welcome-continue:active { transform: scale(0.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .welcome-overlay { animation: none; transition: opacity 200ms ease; }
+  .welcome-overlay.welcome-overlay-exit { filter: none; }
+  .welcome-crown, .welcome-title, .welcome-sub, .welcome-recap-row, .welcome-continue { animation: none; opacity: 1; transform: none; }
+  .welcome-crown-glow { display: none; }
+  .welcome-continue:active { transform: none; }
+}

@@ -1,0 +1,5 @@
+#!/bin/sh
+# Arrête et désactive le service avant de retirer le paquet (13/08/2026).
+set -e
+systemctl disable --now allsafe-agent.service || true
+exit 0

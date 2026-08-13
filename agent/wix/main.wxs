@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empaquetage MSI de l'agent Allsafe. Construit avec `wixl` (paquet Debian/Ubuntu
+  `msitools`) plutôt que le WiX Toolset officiel (Windows uniquement, .NET Framework,
+  candle.exe/light.exe) — `wixl` comprend un sous-ensemble de cette même syntaxe WXS
+  suffisant pour un installeur mono-binaire sans UI custom, cf. agent/README.md § MSI.
+
+  UpgradeCode figé une fois pour toutes (ne JAMAIS le régénérer) : c'est lui qui permet à
+  Windows Installer de reconnaître une mise à jour de la même application plutôt que
+  d'installer une deuxième copie en parallèle.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Allsafe Agent"
+           Language="1033"
+           Version="0.1.3.0"
+           Manufacturer="Allsafe"
+           UpgradeCode="F7307503-099E-4424-9611-81DE4739933C">
+
+    <!-- 64-bit obligatoire (13/08/2026) : sans ça, wixl construit un paquet marqué 32-bit
+         (Template "Intel;1033") et Windows Installer peut rediriger ProgramFiles64Folder
+         vers "Program Files (x86)" selon le contexte d'exécution du moment — constaté en
+         conditions réelles sur DEPLOYAPP, binaire installé au mauvais endroit sans erreur
+         ni avertissement. Un attribut `Platform="x64"` ici serait le réflexe WiX officiel,
+         mais cette version de wixl (msitools 0.101) ne le supporte pas (silently ignoré,
+         warning GLib) — l'architecture se fixe uniquement en ligne de commande, cf.
+         `wixl -a x64` dans agent/README.md § Build. -->
+    <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine"
+             Description="Agent Allsafe (lecture seule) pour postes Windows"
+             Manufacturer="Allsafe" />
+
+    <Media Id="1" Cabinet="allsafe.cab" EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="Allsafe Agent">
+          <Component Id="MainExecutable" Guid="44E7BDA5-2EED-496E-BF11-CB2F0D3BF578">
+            <File Id="AllsafeAgentEXE" Name="allsafe-agent.exe" KeyPath="yes"
+                  Source="target/x86_64-pc-windows-gnu/release/allsafe-agent.exe" />
+            <!-- Service Windows (13/08/2026, mode recommandé — cf. deploy/README.md).
+                 Name="AllsafeAgent" doit correspondre exactement à SERVICE_NAME dans
+                 service.rs. Arguments="service-run" : sous-commande cachée dédiée au SCM
+                 (clap dérive le nom en kebab-case depuis Commands::ServiceRun), jamais
+                 `run` — celle-là reste le mode interactif/systemd Linux, incompatible
+                 avec service_dispatcher::start (cf. commentaire d'en-tête service.rs).
+                 CHECKPOINT DE VÉRIFICATION (cf. plan) : confirmer après build que wixl a
+                 bien honoré ces éléments — `msiinfo export allsafe-agent.msi
+                 ServiceInstall` ne doit pas être vide. -->
+            <ServiceInstall Id="AllsafeAgentService" Type="ownProcess" Name="AllsafeAgent"
+                             DisplayName="Allsafe Agent" Description="Agent Allsafe (lecture seule) — collecte + check-in périodique"
+                             Start="auto" Account="LocalSystem" ErrorControl="normal"
+                             Arguments="service-run" />
+            <ServiceControl Id="AllsafeAgentServiceControl" Name="AllsafeAgent"
+                             Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="MainFeature" Title="Allsafe Agent" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+  </Product>
+</Wix>

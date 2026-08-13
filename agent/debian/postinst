@@ -1,0 +1,9 @@
+#!/bin/sh
+# Enregistre et démarre le service systemd (13/08/2026, mode recommandé — cf.
+# agent/deploy/README.md). `|| true` : ne fait jamais échouer l'installation du paquet
+# si systemd est absent (défensif, pas attendu sur ce parc mais pas de raison de bloquer
+# dpkg pour ça).
+set -e
+systemctl daemon-reload || true
+systemctl enable --now allsafe-agent.service || true
+exit 0

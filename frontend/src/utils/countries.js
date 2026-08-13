@@ -1,0 +1,48 @@
+// Liste de pays utilisée par les filtres/formulaires "pays" de la veille
+// (Fuite de données + ajout de source personnalisée) — partagée pour éviter
+// deux listes qui divergent. Pas une liste ISO complète : les pays les plus
+// représentés dans les sources de fuites/ransomware actuellement connectées.
+export const COUNTRIES = [
+  { code: 'FR', label: 'France' },
+  { code: 'DE', label: 'Allemagne' },
+  { code: 'GB', label: 'Royaume-Uni' },
+  { code: 'US', label: 'États-Unis' },
+  { code: 'IT', label: 'Italie' },
+  { code: 'ES', label: 'Espagne' },
+  { code: 'BE', label: 'Belgique' },
+  { code: 'CH', label: 'Suisse' },
+  { code: 'NL', label: 'Pays-Bas' },
+  { code: 'CA', label: 'Canada' },
+  { code: 'AU', label: 'Australie' },
+  { code: 'BR', label: 'Brésil' },
+  { code: 'MX', label: 'Mexique' },
+  { code: 'JP', label: 'Japon' },
+  { code: 'PL', label: 'Pologne' },
+  { code: 'SE', label: 'Suède' },
+  { code: 'AT', label: 'Autriche' },
+  { code: 'CZ', label: 'Tchéquie' },
+  { code: 'SK', label: 'Slovaquie' },
+  { code: 'PT', label: 'Portugal' },
+  { code: 'IE', label: 'Irlande' },
+  { code: 'NO', label: 'Norvège' },
+  { code: 'DK', label: 'Danemark' },
+  { code: 'FI', label: 'Finlande' },
+  { code: 'GR', label: 'Grèce' },
+  { code: 'TR', label: 'Turquie' },
+  { code: 'IN', label: 'Inde' },
+  { code: 'CN', label: 'Chine' },
+  { code: 'SG', label: 'Singapour' },
+  { code: 'HK', label: 'Hong Kong' },
+  { code: 'MY', label: 'Malaisie' },
+  { code: 'TH', label: 'Thaïlande' },
+  { code: 'TW', label: 'Taïwan' },
+  { code: 'AE', label: 'Émirats arabes unis' },
+  { code: 'ZA', label: 'Afrique du Sud' },
+  { code: 'AR', label: 'Argentine' },
+  { code: 'CL', label: 'Chili' },
+  { code: 'CO', label: 'Colombie' },
+  { code: 'NZ', label: 'Nouvelle-Zélande' },
+  { code: 'KR', label: 'Corée du Sud' },
+]
+
+export const COUNTRY_LABELS = Object.fromEntries(COUNTRIES.map(c => [c.code, c.label]))

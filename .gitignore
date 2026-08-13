@@ -1,0 +1,37 @@
+# Secrets réels — jamais committés. .env.example est le template versionné.
+.env
+.env.local
+keys/id_ed25519
+keys/id_ed25519.pub
+keys/known_hosts
+cookies.txt
+
+# Python
+__pycache__/
+*.pyc
+backend/venv/
+backend/.venv/
+*.egg-info/
+
+# Runtime/cache locaux — jamais du code source, régénérés au démarrage/à l'usage
+backend/celerybeat-schedule*
+backend/cache/
+backend/note_images/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+
+# Agent Rust
+agent/target/
+agent/dist/
+
+# Caches de build locaux
+.cargo-cache/
+
+# Claude Code — settings.local.json est personnel/local, pas partagé avec l'équipe
+.claude/settings.local.json
+
+# Éditeurs / OS
+.DS_Store
+*.swp

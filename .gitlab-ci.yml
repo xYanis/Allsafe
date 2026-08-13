@@ -1,0 +1,57 @@
+# Pipeline CI (13/08/2026) — test + build + scan de vulnérabilités, pas de déploiement (bloqué
+# sur le serveur cible, pas encore accessible à ce stade). Runner unique (wsl2-docker-runner, tag
+# "docker"), exécuteur Docker enregistré avec le socket de l'hôte monté (--docker-volumes
+# /var/run/docker.sock:...) : les jobs parlent directement au daemon Docker de la machine de dev,
+# pas de docker:dind séparé — même daemon que celui utilisé manuellement toute la session.
+
+stages:
+  - build
+  - verify
+
+variables:
+  BACKEND_IMAGE: "cybervuln-backend:ci-$CI_COMMIT_SHORT_SHA"
+  FRONTEND_IMAGE: "cybervuln-frontend-prod:ci-$CI_COMMIT_SHORT_SHA"
+
+default:
+  image: docker:24-cli
+  tags:
+    - docker
+
+build-backend:
+  stage: build
+  script:
+    - docker build -t $BACKEND_IMAGE ./backend
+
+build-frontend:
+  stage: build
+  script:
+    # --target prod : valide le build Vite (npm ci && npm run build, cf. frontend/Dockerfile
+    # stage "build") en plus du stage nginx — même image que frontend-prod en local.
+    - docker build -t $FRONTEND_IMAGE --target prod ./frontend
+
+test-backend:
+  stage: verify
+  needs: ["build-backend"]
+  script:
+    # SECRET_KEY/DB_PASSWORD : config.py refuse de démarrer avec la valeur par défaut "changeme"
+    # (garde-fou anti-.env-oublié, cf. AUDIT_SECURITE.md) — valeurs factices, jamais utilisées
+    # pour une vraie connexion (les 13 tests sont des fonctions pures ou une AsyncSession mockée,
+    # aucune vraie base n'est nécessaire, cf. backend/tests/).
+    - docker run --rm -e SECRET_KEY=ci-not-a-real-secret -e DB_PASSWORD=ci-not-a-real-password $BACKEND_IMAGE pytest
+
+scan-backend:
+  stage: verify
+  needs: ["build-backend"]
+  script:
+    # --exit-code 0 (informationnel, ne fait jamais échouer le job) : l'image de base
+    # python:3.12-slim porte des CVE non corrigeables de notre côté (ex. perl/libperl5.40, sans
+    # correctif Debian publié à ce jour, cf. CHECKLIST_DOCKER.md) — un job qui échoue en
+    # permanence sans action possible ne sert à rien, juste de l'alerte ignorée. Le but ici est
+    # la visibilité à chaque build, pas un gate automatique.
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL $BACKEND_IMAGE
+
+scan-frontend:
+  stage: verify
+  needs: ["build-frontend"]
+  script:
+    - docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy image --exit-code 0 --severity HIGH,CRITICAL $FRONTEND_IMAGE

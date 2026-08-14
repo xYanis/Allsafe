@@ -27,6 +27,36 @@ logger = logging.getLogger(__name__)
 # faible ici (un seul test CPE/mots-clés) donc intervalle plus large.
 MATCHING_YIELD_EVERY = 200
 
+# État de progression du matching global (14/08/2026, retour utilisateur — le bouton
+# "Matching CVE" du Dashboard bloquait la requête HTTP jusqu'à la fin du calcul complet
+# (jusqu'à 13,4M itérations, cf. commentaire dans run_cpe_matching), sans le moindre
+# retour pendant l'attente. Même patron que services/patch_checker.py (_cycle_running/
+# _cycle_started_at/_asset_progress) : état en mémoire, remis à zéro à la fin du run
+# (perdu à un redémarrage backend, ce qui est correct — un run interrompu n'existe plus).
+_matching_running = False
+_matching_started_at: Optional[datetime] = None
+_matching_progress: dict = {"checked": 0, "total": 0}
+# Dernier résultat complet (matched/created/skipped/created_by_asset) — permet à un poll
+# de récupérer le détail par actif après coup, puisque POST /api/sync/match ne l'attend
+# plus (cf. routers/sync.py).
+_matching_last_result: Optional[dict] = None
+
+
+def is_matching_running() -> bool:
+    return _matching_running
+
+
+def get_matching_started_at() -> Optional[str]:
+    return _matching_started_at.isoformat() if _matching_started_at else None
+
+
+def get_matching_progress() -> dict:
+    return _matching_progress
+
+
+def get_matching_last_result() -> Optional[dict]:
+    return _matching_last_result
+
 
 def _keywords_from_asset(asset) -> list[str]:
     """
@@ -433,6 +463,14 @@ async def run_cpe_matching(db: AsyncSession | None = None) -> dict:
     if own_session:
         db = SessionLocal()
 
+    # État de progression (14/08/2026, retour utilisateur — cf. déclaration en tête de
+    # fichier) : posé avant le `try` pour que `is_matching_running()` réponde vrai dès
+    # l'appel, y compris si l'ouverture de session échoue avant la 1re requête.
+    global _matching_running, _matching_started_at, _matching_progress, _matching_last_result
+    _matching_running = True
+    _matching_started_at = datetime.now(timezone.utc)
+    _matching_progress = {"checked": 0, "total": 0}
+
     matched = created = skipped = 0
     # Détail par actif (demande explicite, 11/08/2026) : le bouton "Matching CVE"
     # du Dashboard confirme désormais combien de CVE ont été rajoutées et sur quel
@@ -462,6 +500,17 @@ async def run_cpe_matching(db: AsyncSession | None = None) -> dict:
         product_index = _cve_product_index(cves)
         windows_mappings = await _load_windows_mappings(db)
 
+        # Total exact de progression (pas une estimation assets×cves) : un actif sans
+        # CPE ni paquet installé est `continue`-é immédiatement par la boucle plus bas,
+        # jamais réellement comparé aux CVE — l'exclure ici évite qu'un parc avec
+        # beaucoup d'actifs "vides" (réseau importé sans scan) ne fasse plafonner la
+        # barre de progression avant 100%.
+        processable_assets = [
+            a for a in assets
+            if (a.cpe_list or []) or _installed_package_products(a, windows_mappings)
+        ]
+        _matching_progress["total"] = len(processable_assets) * len(cves)
+
         logger.info("CPE matching démarré : %d actifs × %d CVE", len(assets), len(cves))
 
         # `MATCHING_YIELD_EVERY` : jusqu'à 72 actifs × 187 000 CVE ≈ 13,4 millions
@@ -485,6 +534,7 @@ async def run_cpe_matching(db: AsyncSession | None = None) -> dict:
             for cve in cves:
                 i += 1
                 if i % MATCHING_YIELD_EVERY == 0:
+                    _matching_progress["checked"] = i
                     await asyncio.sleep(0)
 
                 cve_cpe_list: list = cve.cpe or []
@@ -534,6 +584,12 @@ async def run_cpe_matching(db: AsyncSession | None = None) -> dict:
     finally:
         if own_session:
             await db.close()
+        # Remise à zéro systématique (succès ou échec) — même raisonnement que
+        # run_full_patch_check_cycle : un run qui a levé une exception n'est plus "en
+        # cours", `is_matching_running()` ne doit pas rester bloqué à True indéfiniment.
+        _matching_running = False
+        _matching_started_at = None
+        _matching_progress = {"checked": 0, "total": 0}
 
     asset_by_id = {a.id: a for a in assets}
     created_by_asset_list = sorted(
@@ -550,13 +606,18 @@ async def run_cpe_matching(db: AsyncSession | None = None) -> dict:
         reverse=True,
     )
 
-    return {
+    result = {
         "matched": matched,
         "created": created,
         "skipped": skipped,
         "synced_at": now.isoformat(),
         "created_by_asset": created_by_asset_list,
     }
+    # Consultable après coup par GET /api/sync/match-status une fois le run terminé
+    # (POST /api/sync/match ne l'attend plus, cf. routers/sync.py) — c'est ce que le
+    # bouton du Dashboard affiche en toasts par actif.
+    _matching_last_result = result
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────

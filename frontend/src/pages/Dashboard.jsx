@@ -81,55 +81,92 @@ function SeverityDropdown({ selected, onChange }) {
   )
 }
 
+// Retravaillé le 14/08/2026 (retour utilisateur — "c'est très long", sans aucun signe
+// que ça avance) : POST /api/sync/match ne bloque plus la requête jusqu'à la fin du
+// calcul (jusqu'à 13,4M itérations, cf. services/cpe_matcher.py) — il se contente de
+// lancer le run en fond et retourne aussitôt. Le pourcentage vient du polling de
+// GET /api/sync/match-status, même patron que le bandeau "Analyse en cours" du patch
+// check plus bas. `wasRunningRef` détecte la transition running→terminé pour afficher
+// les toasts une seule fois (`last_result`, plus renvoyé directement par POST /match).
 function MatchingCveButton({ onDone, onToast }) {
-  const [status, setStatus] = useState('idle')
+  const [status, setStatus] = useState('idle') // idle | running | done | error
   const [lastSyncedAt, setLastSyncedAt] = useState(null)
+  const [progress, setProgress] = useState(null) // { checked, total } | null
+  const pollRef = useRef(null)
+  const wasRunningRef = useRef(false)
+
+  const checkStatus = useCallback(() => {
+    return syncMatchStatus().then(r => {
+      const d = r.data
+      setLastSyncedAt(d.last_synced_at)
+      if (d.running) {
+        wasRunningRef.current = true
+        setStatus('running')
+        setProgress(d.progress?.total ? d.progress : null)
+        if (!pollRef.current) pollRef.current = setInterval(checkStatus, 1500)
+        return
+      }
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+      setProgress(null)
+      // Ce poll voit `running: false` alors que le précédent le voyait `true` — le run
+      // vient tout juste de se terminer pendant cette page, c'est le moment d'afficher
+      // le résultat. Un simple montage de page sur un matching déjà inactif ne déclenche
+      // jamais ces toasts (wasRunningRef reste à false).
+      if (wasRunningRef.current) {
+        wasRunningRef.current = false
+        setStatus('done')
+        const byAsset = d.last_result?.created_by_asset || []
+        if (byAsset.length === 0) {
+          onToast?.('Matching CVE terminé — aucune nouvelle CVE.', 'info')
+        } else {
+          for (const a of byAsset) {
+            onToast?.(`${a.name || a.hostname} — ${a.count} nouvelle${a.count !== 1 ? 's' : ''} CVE`, 'success')
+          }
+        }
+        onDone()
+        setTimeout(() => setStatus('idle'), 5000)
+      }
+    }).catch(() => {})
+  }, [onDone, onToast])
 
   useEffect(() => {
-    syncMatchStatus().then(r => setLastSyncedAt(r.data.last_synced_at)).catch(() => {})
+    checkStatus() // détecte aussi un run déjà en cours au montage (démarré par un autre onglet, ou au boot du backend)
+    return () => { if (pollRef.current) clearInterval(pollRef.current) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function run() {
-    setStatus('loading')
     try {
       const r = await syncMatch()
-      setStatus('done')
-      if (r.data.synced_at) setLastSyncedAt(r.data.synced_at)
-      // Confirmation demandée explicitement (11/08/2026) : combien de CVE ajoutées
-      // et sur quel actif, un toast par actif concerné — même pattern que la
-      // notification "actif terminé" du patch check ci-dessous. Toast dédié
-      // même à zéro (r.data.created === 0), pour confirmer que le matching a
-      // bien tourné et n'a simplement rien trouvé de nouveau.
-      const byAsset = r.data.created_by_asset || []
-      if (byAsset.length === 0) {
-        onToast?.('Matching CVE terminé — aucune nouvelle CVE.', 'info')
-      } else {
-        for (const a of byAsset) {
-          onToast?.(`${a.name || a.hostname} — ${a.count} nouvelle${a.count !== 1 ? 's' : ''} CVE`, 'success')
-        }
-      }
-      onDone()
+      if (r.data.status === 'already_running') onToast?.('Un matching est déjà en cours.', 'info')
+      checkStatus()
     } catch {
       setStatus('error')
+      setTimeout(() => setStatus('idle'), 5000)
     }
-    setTimeout(() => setStatus('idle'), 5000)
   }
+
+  const pct = progress?.total ? Math.min(100, Math.round((progress.checked / progress.total) * 100)) : null
 
   const styles = {
     idle:    { background: 'rgba(251,143,68,0.1)', color: '#fb8f44', border: '1px solid rgba(251,143,68,0.25)' },
-    loading: { background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' },
+    running: { background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' },
     done:    { background: 'rgba(63,185,80,0.1)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.25)' },
     error:   { background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' },
   }
-  const labels = { idle: 'Matching CVE', loading: 'En cours…', done: 'Terminé ✓', error: 'Erreur ✕' }
+  const labels = {
+    idle: 'Matching CVE',
+    running: pct != null ? `En cours… ${pct}%` : 'En cours…',
+    done: 'Terminé ✓', error: 'Erreur ✕',
+  }
 
   return (
     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-      <button onClick={run} disabled={status === 'loading'}
+      <button onClick={run} disabled={status === 'running'}
         className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors flex-shrink-0 disabled:opacity-60"
         style={styles[status]}
       >
-        {status === 'loading' ? (
+        {status === 'running' ? (
           <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>

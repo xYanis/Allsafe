@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -6,7 +8,10 @@ from models import SyncState, Asset, CVE
 from config import settings
 from tasks.scheduled_tasks import trigger_manual_sync, get_task_status
 from services.asset_importer import run_asset_import
-from services.cpe_matcher import run_cpe_matching, run_cpe_matching_for_cve, backfill_component_types
+from services.cpe_matcher import (
+    run_cpe_matching, run_cpe_matching_for_cve, backfill_component_types,
+    is_matching_running, get_matching_started_at, get_matching_progress, get_matching_last_result,
+)
 from services.nvd_fetcher import run_nvd_sync_by_id, run_nvd_backfill_by_cpe
 from services.scoring import recalculate_all_scores, recalculate_scores_for_cve
 from services.epss_fetcher import run_epss_sync
@@ -84,8 +89,15 @@ async def trigger_asset_import():
 
 @router.post("/match")
 async def trigger_cpe_match():
-    stats = await run_cpe_matching()
-    return stats
+    """Lance le matching global en tâche de fond (14/08/2026 — avant cette date, la
+    requête HTTP restait ouverte jusqu'à la fin du calcul complet, jusqu'à 13,4M
+    itérations, sans le moindre retour côté bouton pendant l'attente — retour
+    utilisateur : "c'est très long"). `GET /match-status` expose la progression et le
+    résultat final une fois terminé (cf. son docstring)."""
+    if is_matching_running():
+        return {"status": "already_running"}
+    asyncio.create_task(run_cpe_matching())
+    return {"status": "started"}
 
 
 @router.post("/backfill-component-types")
@@ -102,9 +114,22 @@ async def cpe_match_status(session: AsyncSession = Depends(get_session)):
     """Date du dernier matching CPE (manuel via ce bouton, ou automatique au
     démarrage de l'app — cf. main.py `_startup_matching`) — lu au chargement
     de page pour afficher la date de dernière synchronisation sans attendre
-    un clic manuel (cf. MatchingCveButton dans Dashboard.jsx)."""
+    un clic manuel (cf. MatchingCveButton dans Dashboard.jsx).
+
+    `running`/`started_at`/`progress` (14/08/2026) : destinés au polling pendant un
+    run déclenché par POST /match (fire-and-forget désormais, cf. son docstring) —
+    même patron que GET /api/patch-check/status. `last_result` porte le détail par
+    actif (matched/created/skipped/created_by_asset) du dernier run terminé, pour que
+    le frontend affiche ses toasts une fois le poll détecte la fin plutôt que dans la
+    réponse de POST /match, qui ne l'attend plus."""
     state = await session.get(SyncState, "cpe_match")
-    return {"last_synced_at": state.last_synced_at.isoformat() if state and state.last_synced_at else None}
+    return {
+        "last_synced_at": state.last_synced_at.isoformat() if state and state.last_synced_at else None,
+        "running": is_matching_running(),
+        "started_at": get_matching_started_at(),
+        "progress": get_matching_progress(),
+        "last_result": get_matching_last_result(),
+    }
 
 
 @router.post("/rescore")

@@ -161,10 +161,21 @@ function PackagesModal({ asset, data, onClose, onRescan, rescanning }) {
   )
 }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond. Réponse BRUTE de fetchAssets()
+// (avant tri/filtrage local), pas les listes déjà filtrées par l'utilisateur.
+let inventairePageCache = null
+
 export default function Inventaire() {
   const { isAnonymous } = usePresentation()
-  const [assetList, setAssetList] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [assetList, setAssetList] = useState(() => {
+    if (inventairePageCache == null) return []
+    return isAnonymous ? [...inventairePageCache.map(anonymizeAsset), ...FAKE_ASSETS] : inventairePageCache
+  })
+  const [loading, setLoading] = useState(() => inventairePageCache == null)
   const [scanLoading, setScanLoading] = useState({})
   const [viewModal, setViewModal] = useState(null)
   const [pdfLoading, setPdfLoading] = useState(false)
@@ -183,6 +194,7 @@ export default function Inventaire() {
   useEffect(() => {
     fetchAssets().then(a => {
       const list = a.data || []
+      inventairePageCache = list   // alimente le cache module pour le prochain remontage
       setAssetList(isAnonymous ? [...list.map(anonymizeAsset), ...FAKE_ASSETS] : list)
     }).finally(() => setLoading(false))
   }, [isAnonymous])

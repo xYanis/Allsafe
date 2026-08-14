@@ -601,16 +601,28 @@ function KpiCard({ label, value, sub, color }) {
 }
 
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// Dashboard.jsx est entièrement redémonté à chaque navigation (pas de keep-alive de route,
+// cf. Layout.jsx/App.jsx), donc revenir dessus relançait ~13 requêtes et l'écran de
+// chargement plein écran à CHAQUE fois, pas seulement au premier chargement de la session
+// (retour utilisateur, 14/08/2026 : "le Dashboard se recharge dès que je change de page").
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux (mécanisme déjà existant, cf. `silent` sur loadLists)
+// les met à jour en fond — jamais reset explicitement, une session onglet = un cache.
+let dashboardCache = null
+
 export default function Dashboard() {
   const { isAnonymous } = usePresentation()
-  const [kpis, setKpis] = useState(null)
-  const [openVulns, setOpenVulns] = useState([])
-  const [patchedVulns, setPatchedVulns] = useState([])
-  const [awaitingVulns, setAwaitingVulns] = useState([])
+  const [kpis, setKpis] = useState(() => dashboardCache?.kpis ?? null)
+  const [openVulns, setOpenVulns] = useState(() => dashboardCache?.openVulns ?? [])
+  const [patchedVulns, setPatchedVulns] = useState(() => dashboardCache?.patchedVulns ?? [])
+  const [awaitingVulns, setAwaitingVulns] = useState(() => dashboardCache?.awaitingVulns ?? [])
   // Totaux serveur par statut — les badges des tableaux s'appuient dessus plutôt
   // que sur la longueur des listes chargées (plafonnées par `per_page`).
-  const [totals, setTotals] = useState({ open: 0, patched: 0, awaiting: 0 })
-  const [loading, setLoading] = useState(true)
+  const [totals, setTotals] = useState(() => dashboardCache?.totals ?? { open: 0, patched: 0, awaiting: 0 })
+  // `false` si un cache existe déjà (remontage) — évite l'écran de chargement plein
+  // écran systématique, cf. commentaire de `dashboardCache` plus haut.
+  const [loading, setLoading] = useState(() => !dashboardCache)
   const [actionMsg, setActionMsg] = useState('')
   // Rattrapage des bascules automatiques survenues depuis la dernière visite
   // (le cycle autonome tourne aussi la nuit, cf. tasks/scheduled_tasks.py, sans
@@ -658,7 +670,7 @@ export default function Dashboard() {
   const [editNoteModal, setEditNoteModal] = useState(null)
   const [detailModal, setDetailModal] = useState(null)
   const [patchLoading, setPatchLoading] = useState({})
-  const [patchDetected, setPatchDetected] = useState({})
+  const [patchDetected, setPatchDetected] = useState(() => dashboardCache?.patchDetected ?? {})
   const [openLimit, setOpenLimit] = useState(10)
   const [patchedLimit, setPatchedLimit] = useState(10)
   const [awaitingLimit, setAwaitingLimit] = useState(10)
@@ -690,7 +702,7 @@ export default function Dashboard() {
   const [remotePatched, setRemotePatched] = useState(null)
   const [remotePatchedTotal, setRemotePatchedTotal] = useState(null)   // total exact en base pour le filtre serveur actif
   const [patchedStatusFilter, setPatchedStatusFilter] = useState('')
-  const [assetList, setAssetList] = useState([])
+  const [assetList, setAssetList] = useState(() => dashboardCache?.assetList ?? [])
   const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [dashSort, setDashSort] = useState({ by: 'severity', dir: 'desc' })
   // Tri indépendant des sections "en attente" et "traitées" (même mécanique que
@@ -806,11 +818,12 @@ export default function Dashboard() {
       // *chargées*, donc plafonnée par `per_page` : "50 corrigées" alors que la
       // base en comptait 4600, et un écart permanent avec la carte KPI juste
       // au-dessus (qui, elle, lit /api/stats). Cf. STATUS.md 21/07/2026.
-      setTotals({
+      const newTotals = {
         open: open.data.total ?? openItems.length,
         patched: (patched.data.total ?? 0) + (falsePos.data.total ?? 0),
         awaiting: (awaiting.data.total ?? 0) + (awaitingPartial.data.total ?? 0),
-      })
+      }
+      setTotals(newTotals)
 
       if (isAnonymous) {
         // Mode Présentation : noms/IP/analystes réels remplacés par des
@@ -824,10 +837,11 @@ export default function Dashboard() {
         assetsList = [...assetsList.map(anonymizeAsset), ...FAKE_ASSETS]
       }
 
+      const sortedAssets = [...assetsList].sort((a, b) => a.name.localeCompare(b.name))
       setOpenVulns(openItems)
       setPatchedVulns(closed)
       setAwaitingVulns(awaitingItems)
-      setAssetList([...assetsList].sort((a, b) => a.name.localeCompare(b.name)))
+      setAssetList(sortedAssets)
       // Reprend les badges "Patch détecté" déjà persistés (ex: CRITICAL vérifiée par le
       // check auto avant l'ouverture du dashboard) — pas seulement ceux vus en live via le polling.
       // Remplacement (pas fusion) : c'est la vérité serveur, et une vuln réouverte
@@ -835,6 +849,13 @@ export default function Dashboard() {
       const persisted = {}
       openItems.forEach(v => { if (v.patch_detected) persisted[v.id] = true })
       setPatchDetected(persisted)
+      // Alimente le cache module (cf. déclaration en tête de fichier) pour que le
+      // prochain remontage du composant réaffiche ces données instantanément.
+      dashboardCache = {
+        ...dashboardCache,
+        openVulns: openItems, patchedVulns: closed, awaitingVulns: awaitingItems,
+        totals: newTotals, assetList: sortedAssets, patchDetected: persisted,
+      }
       // Purge les sélections pointant vers des lignes qui ne sont plus ouvertes
       // (basculées entre-temps par le cycle autonome) — sinon une action groupée
       // porterait sur des ids fantômes.
@@ -853,10 +874,12 @@ export default function Dashboard() {
   // doit afficher le loader plein écran ; les suivants (réaction au filtre Actifs) sont
   // des rafraîchissements de données déjà visibles, pas un premier chargement — même
   // logique `silent` que le rafraîchissement périodique de 30s un peu plus bas.
-  const didMountListsRef = useRef(false)
+  // `dashboardCache` (pas un ref par instance, cf. sa déclaration en tête de fichier) :
+  // un aller-retour sur une autre page puis retour ici est un REMONTAGE, pas le même
+  // "premier appel" — sans ce changement, revenir sur le Dashboard rejouait le loader
+  // plein écran à chaque fois (retour utilisateur, 14/08/2026).
   useEffect(() => {
-    loadLists({ silent: didMountListsRef.current })
-    didMountListsRef.current = true
+    loadLists({ silent: dashboardCache != null })
   }, [loadLists])
 
   // Recherche/filtre serveur des vulns traitées : la liste locale est plafonnée à
@@ -959,7 +982,8 @@ export default function Dashboard() {
   useEffect(() => {
     if (isAnonymous) return
     fetchStats(selectedAssetIds.length ? { asset_id: selectedAssetIds.join(',') } : {})
-      .then(s => setKpis(s.data)).catch(() => {})
+      .then(s => { setKpis(s.data); dashboardCache = { ...dashboardCache, kpis: s.data } })
+      .catch(() => {})
   }, [selectedAssetIds, isAnonymous])
 
   // Bandeau de rattrapage — une seule fois au montage du Dashboard. Pas de

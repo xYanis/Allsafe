@@ -11,6 +11,13 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 
 const MODULE_COLOR = MODULES.documentation.color
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Map par id (route /notes/:id) — un sujet différent ne doit jamais afficher un instant le
+// contenu resté en cache d'un autre id.
+let noteSubjectCache = {}
+
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('fr-FR') + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -26,8 +33,8 @@ export default function NoteSubject() {
   const textareaRef = useRef(null)
   const fileInputRef = useRef(null)
 
-  const [subject, setSubject] = useState(null)
-  const [theme, setTheme] = useState(null)
+  const [subject, setSubject] = useState(() => noteSubjectCache[id]?.subject ?? null)
+  const [theme, setTheme] = useState(() => noteSubjectCache[id]?.theme ?? null)
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [mode, setMode] = useState('write') // write | preview
@@ -40,10 +47,12 @@ export default function NoteSubject() {
 
   useEffect(() => {
     Promise.all([fetchNoteSubject(id), fetchNoteThemes()]).then(([s, t]) => {
+      const foundTheme = (t.data.items || []).find(th => th.id === s.data.theme_id) || null
       setSubject(s.data)
       setTitle(s.data.title)
       setContent(s.data.content_markdown || '')
-      setTheme((t.data.items || []).find(th => th.id === s.data.theme_id) || null)
+      setTheme(foundTheme)
+      noteSubjectCache[id] = { subject: s.data, theme: foundTheme }
       setError('')
     }).catch(() => setError('Impossible de charger ce sujet — le serveur a peut-être renvoyé une erreur, ou il a été supprimé.'))
   }, [id])

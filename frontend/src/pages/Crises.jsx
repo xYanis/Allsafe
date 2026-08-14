@@ -9,6 +9,13 @@ import PageHero from '../components/PageHero.jsx'
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond.
+let crisesCache = null
+
 function StatusPill({ active }) {
   return active
     ? <span className="text-xs px-2 py-0.5 rounded-lg font-medium" style={{ background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.4)' }}>Active</span>
@@ -20,8 +27,8 @@ function StatusPill({ active }) {
 // modale de création/détail), sans pagination serveur : le volume attendu est faible
 // (une crise est un évènement rare, contrairement aux incidents).
 export default function Crises() {
-  const [data, setData] = useState({ items: [], total: 0 })
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState(() => crisesCache ?? { items: [], total: 0 })
+  const [loading, setLoading] = useState(() => crisesCache == null)
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
   const [createModal, setCreateModal] = useState(false)
@@ -31,7 +38,11 @@ export default function Crises() {
   const load = useCallback(() => {
     setLoading(true)
     fetchCrises({ status: statusFilter || undefined, q: search || undefined })
-      .then(r => { setData(r.data); setError('') })
+      .then(r => {
+        setData(r.data)
+        setError('')
+        if (!statusFilter && !search) crisesCache = r.data
+      })
       .catch(() => {
         setData({ items: [], total: 0 })
         setError('Impossible de charger les crises — le serveur a peut-être renvoyé une erreur.')

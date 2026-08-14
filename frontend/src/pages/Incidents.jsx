@@ -28,12 +28,21 @@ function StatusBadge({ value }) {
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 const PER_PAGE = 25
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond. Seule la liste non filtrée
+// (celle qui déclenche le PageLoader plein écran) est mise en cache.
+let incidentsListCache = null
+let incidentsAssetsCache = null
+
 export default function Incidents() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [data, setData] = useState({ items: [], total: 0 })
-  const [loading, setLoading] = useState(true)
-  const [assetList, setAssetList] = useState([])
+  const [data, setData] = useState(() => incidentsListCache ?? { items: [], total: 0 })
+  const [loading, setLoading] = useState(() => incidentsListCache == null)
+  const [assetList, setAssetList] = useState(() => incidentsAssetsCache ?? [])
 
   const [statusFilter, setStatusFilter] = useState('')
   const [severityFilter, setSeverityFilter] = useState('')
@@ -49,8 +58,14 @@ export default function Incidents() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    fetchAssets().then(r => setAssetList([...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => {})
+    fetchAssets().then(r => {
+      const sorted = [...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name))
+      setAssetList(sorted)
+      incidentsAssetsCache = sorted
+    }).catch(() => {})
   }, [])
+
+  const noFilterActive = !statusFilter && !severityFilter && !categoryFilter && !notifOnly && !overdueOnly && !search
 
   const load = useCallback(() => {
     setLoading(true)
@@ -64,13 +79,17 @@ export default function Incidents() {
       page,
       per_page: PER_PAGE,
     })
-      .then(r => { setData(r.data); setError('') })
+      .then(r => {
+        setData(r.data)
+        setError('')
+        if (noFilterActive) incidentsListCache = r.data
+      })
       .catch(() => {
         setData({ items: [], total: 0 })
         setError('Impossible de charger les incidents — le serveur a peut-être renvoyé une erreur.')
       })
       .finally(() => setLoading(false))
-  }, [statusFilter, severityFilter, categoryFilter, notifOnly, overdueOnly, search, page])
+  }, [statusFilter, severityFilter, categoryFilter, notifOnly, overdueOnly, search, page, noFilterActive])
 
   useEffect(() => { load() }, [load])
 
@@ -121,7 +140,7 @@ export default function Incidents() {
 
   const totalPages = Math.ceil(data.total / PER_PAGE)
 
-  if (loading && data.items.length === 0 && !statusFilter && !severityFilter && !categoryFilter && !notifOnly && !overdueOnly && !search) {
+  if (loading && data.items.length === 0 && noFilterActive) {
     return <PageLoader />
   }
 

@@ -92,9 +92,23 @@ function sortValue(col, asset, summary) {
   }
 }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond. Réponse BRUTE de fetchAssets()
+// (avant tri/filtrage local), pas les listes déjà filtrées par l'utilisateur — cette page
+// est celle qui porte le payload par actif le plus lourd de l'app (last_scan_result.compliance/
+// network_compliance en entier), le cache stocke donc la réponse complète telle que reçue.
+let durcissementPageCache = null
+
 export default function Durcissement() {
-  const [assetList, setAssetList] = useState([])
-  const [loading, setLoading] = useState(true)
+  const { isAnonymous } = usePresentation()
+  const [assetList, setAssetList] = useState(() => {
+    if (durcissementPageCache == null) return []
+    return isAnonymous ? [...durcissementPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : durcissementPageCache
+  })
+  const [loading, setLoading] = useState(() => durcissementPageCache == null)
   const [search, setSearch] = useState('')
   const [warnOnly, setWarnOnly] = useState(false)
   // "Actifs configurés uniquement" (13/08/2026, demande utilisateur) : masque les actifs sans
@@ -113,13 +127,14 @@ export default function Durcissement() {
   // { by: null, dir } = ordre par défaut de GET /assets (alphabétique par nom), jusqu'au
   // premier clic sur un en-tête triable.
   const [sort, setSort] = useState({ by: null, dir: 'desc' })
-  const { isAnonymous } = usePresentation()
   const [searchParams, setSearchParams] = useSearchParams()
 
   useEffect(() => {
     fetchAssets()
       .then(r => {
-        let list = r.data || []
+        const raw = r.data || []
+        durcissementPageCache = raw   // alimente le cache module pour le prochain remontage
+        let list = raw
         if (isAnonymous) list = [...list.map(anonymizeAsset), ...FAKE_ASSETS]
         setAssetList(list)
       })

@@ -156,6 +156,15 @@ function MandateCard({ auditId, attachments, onUploaded }) {
   )
 }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Clé = id (route dynamique) pour ne jamais afficher un instant les données d'un autre
+// audit en rouvrant une page déjà visitée pour un id différent. `fetchAssets()` a son
+// propre cache simple (pas de clé, le parc d'actifs est le même pour tout le monde).
+let auditDetailCache = {}
+let auditDetailAssetsCache = null
+
 export default function AuditDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -165,11 +174,12 @@ export default function AuditDetail() {
   // après confirmation.
   const { user } = useAuth()
   const canDelete = user?.role === 'admin'
-  const [audit, setAudit] = useState(null)
-  const [findings, setFindings] = useState([])
-  const [assetList, setAssetList] = useState([])
-  const [attachments, setAttachments] = useState([])
-  const [loading, setLoading] = useState(true)
+  const cached = auditDetailCache[id]
+  const [audit, setAudit] = useState(() => cached?.audit ?? null)
+  const [findings, setFindings] = useState(() => cached?.findings ?? [])
+  const [assetList, setAssetList] = useState(() => auditDetailAssetsCache ?? [])
+  const [attachments, setAttachments] = useState(() => cached?.attachments ?? [])
+  const [loading, setLoading] = useState(() => cached == null)
   const [error, setError] = useState('')
 
   const [editing, setEditing] = useState(false)
@@ -178,7 +188,7 @@ export default function AuditDetail() {
   const [deleteFinding, setDeleteFinding] = useState(null)
   const [deleteAuditModal, setDeleteAuditModal] = useState(false)
   const [addAssetId, setAddAssetId] = useState('')
-  const [summary, setSummary] = useState('')
+  const [summary, setSummary] = useState(() => cached?.audit?.executive_summary || '')
   const [summaryEdit, setSummaryEdit] = useState(false)
   const [summarySaving, setSummarySaving] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
@@ -189,10 +199,13 @@ export default function AuditDetail() {
     setLoading(true)
     Promise.all([getAudit(id), auditFindings(id), auditAttachments(id)])
       .then(([a, f, att]) => {
+        const findingsData = f.data.items || []
+        const attachmentsData = att.data.items || []
         setAudit(a.data)
-        setFindings(f.data.items || [])
-        setAttachments(att.data.items || [])
+        setFindings(findingsData)
+        setAttachments(attachmentsData)
         setSummary(a.data.executive_summary || '')
+        auditDetailCache[id] = { audit: a.data, findings: findingsData, attachments: attachmentsData }
       })
       .catch(() => setError('Audit introuvable.'))
       .finally(() => setLoading(false))
@@ -200,7 +213,11 @@ export default function AuditDetail() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    fetchAssets().then(r => setAssetList([...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => {})
+    fetchAssets().then(r => {
+      const sorted = [...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name))
+      setAssetList(sorted)
+      auditDetailAssetsCache = sorted
+    }).catch(() => {})
   }, [])
 
   function startEdit() {
@@ -278,7 +295,7 @@ export default function AuditDetail() {
     getAuditReport(id).then(r => { setReportText(r.data.summary || ''); setReportOpen(true) }).finally(() => setReportLoading(false))
   }
 
-  if (loading) return <PageLoader />
+  if (loading && !audit) return <PageLoader />
   if (error || !audit) {
     return (
       <div className="p-6">

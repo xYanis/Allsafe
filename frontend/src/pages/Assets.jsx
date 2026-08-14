@@ -111,6 +111,14 @@ const inputStyle = {
 }
 const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4, display: 'block' }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond. Réponse BRUTE de fetchAssets()
+// (avant tri/filtrage local), pas les listes déjà filtrées par l'utilisateur.
+let assetsPageCache = null
+
 function AssetFormModal({ asset, onClose, onSaved }) {
   const isEdit = !!asset
   const [form, setForm] = useState(asset ? {
@@ -718,8 +726,11 @@ function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
 
 export default function Assets() {
   const { isAnonymous } = usePresentation()
-  const [assetList, setAssetList] = useState([])
-  const [loading, setLoading] = useState(true)
+  const [assetList, setAssetList] = useState(() => {
+    if (assetsPageCache == null) return []
+    return isAnonymous ? [...assetsPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : assetsPageCache
+  })
+  const [loading, setLoading] = useState(() => assetsPageCache == null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -749,7 +760,9 @@ export default function Assets() {
   // déjà porté par chaque actif de `fetchAssets()` — plus besoin d'un second appel ici.
   useEffect(() => {
     fetchAssets().then(a => {
-      let list = a.data || []
+      const raw = a.data || []
+      assetsPageCache = raw   // alimente le cache module pour le prochain remontage
+      let list = raw
       if (isAnonymous) list = [...list.map(anonymizeAsset), ...FAKE_ASSETS]
       setAssetList(list)
     }).finally(() => setLoading(false))

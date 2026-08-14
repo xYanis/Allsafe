@@ -16,6 +16,14 @@ function fmtDate(iso) {
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond.
+let notesThemesCache = null
+let notesSubjectsCache = {}
+
 // Prise de notes personnelle structurée (12/08/2026, cf. docs/Notes.md) — Thème > Sujet en
 // Markdown, remplace le glossaire plat initial le même jour. Phase 1 seulement : pas de QCM
 // généré par IA ici (reporté, demande explicite de l'utilisateur).
@@ -30,8 +38,8 @@ const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', 
 // multi-ouvert) — mêmes lignes .tree-row qu'avant pour les sujets, à l'intérieur du panneau.
 export default function Notes() {
   const navigate = useNavigate()
-  const [themes, setThemes] = useState(null)
-  const [subjectsByTheme, setSubjectsByTheme] = useState({}) // theme_id -> items[] | undefined tant que pas chargé
+  const [themes, setThemes] = useState(() => notesThemesCache)
+  const [subjectsByTheme, setSubjectsByTheme] = useState(() => notesSubjectsCache) // theme_id -> items[] | undefined tant que pas chargé
   const [selectedThemeId, setSelectedThemeId] = useState(null)
   const [error, setError] = useState('')
   const [themeModal, setThemeModal] = useState(null) // null | 'new' | theme object
@@ -40,14 +48,24 @@ export default function Notes() {
   const [creatingSubjectFor, setCreatingSubjectFor] = useState(null) // theme_id en cours de création
 
   function loadThemes() {
-    fetchNoteThemes().then(r => { setThemes(r.data.items || []); setError('') })
+    fetchNoteThemes().then(r => {
+      const data = r.data.items || []
+      setThemes(data)
+      notesThemesCache = data
+      setError('')
+    })
       .catch(() => { setThemes([]); setError('Impossible de charger les thèmes — le serveur a peut-être renvoyé une erreur.') })
   }
   useEffect(() => { loadThemes() }, [])
 
   function loadSubjectsFor(themeId) {
     fetchNoteSubjects(themeId).then(r => {
-      setSubjectsByTheme(m => ({ ...m, [themeId]: r.data.items || [] }))
+      const items = r.data.items || []
+      setSubjectsByTheme(m => {
+        const next = { ...m, [themeId]: items }
+        notesSubjectsCache = next
+        return next
+      })
       setError('')
     }).catch(() => setError('Impossible de charger les sujets — le serveur a peut-être renvoyé une erreur.'))
   }

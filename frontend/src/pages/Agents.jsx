@@ -354,14 +354,22 @@ function TokenModal({ assetList, onClose, onCreated }) {
   )
 }
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois,
+// par-dessus le guard hasLoadedOnce existant (state local, protège seulement les reloads
+// internes — revoke/scan — pas le remontage). Permet de réafficher instantanément la
+// dernière liste connue au remontage pendant qu'un rafraîchissement silencieux la met à jour.
+let agentsCache = null
+
 export default function Agents() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const [agentList, setAgentList] = useState([])
-  const [tokens, setTokens] = useState([])
+  const [agentList, setAgentList] = useState(() => agentsCache?.agentList ?? [])
+  const [tokens, setTokens] = useState(() => agentsCache?.tokens ?? [])
   const [assetList, setAssetList] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
+  const [loading, setLoading] = useState(() => agentsCache == null)
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(() => agentsCache != null)
   const [tokenModal, setTokenModal] = useState(false)
   const [revokeTarget, setRevokeTarget] = useState(null)
   const [deleteAgentTarget, setDeleteAgentTarget] = useState(null)
@@ -374,7 +382,12 @@ export default function Agents() {
       listAgents(),
       isAdmin ? listEnrollmentTokens() : Promise.resolve({ data: [] }),
     ])
-      .then(([a, t]) => { setAgentList(a.data?.items || []); setTokens(t.data?.items || []); setError('') })
+      .then(([a, t]) => {
+        const agents = a.data?.items || []
+        const toks = t.data?.items || []
+        setAgentList(agents); setTokens(toks); setError('')
+        agentsCache = { agentList: agents, tokens: toks }
+      })
       .catch(() => setError('Impossible de charger les agents — le serveur a peut-être renvoyé une erreur.'))
       .finally(() => { setLoading(false); setHasLoadedOnce(true) })
   }, [isAdmin])

@@ -27,10 +27,17 @@ const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 const PER_PAGE = 25
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Ne couvre que la première page sans filtre (le seul cas qui affiche le PageLoader plein
+// écran) — un résultat déjà filtré/paginé par l'utilisateur n'est jamais mis en cache.
+let auditsListCache = null
+
 export default function Audits() {
   const navigate = useNavigate()
-  const [data, setData] = useState({ items: [], total: 0 })
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState(() => auditsListCache ?? { items: [], total: 0 })
+  const [loading, setLoading] = useState(() => auditsListCache == null)
   const [assetList, setAssetList] = useState([])
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
@@ -46,7 +53,11 @@ export default function Audits() {
   const load = useCallback(() => {
     setLoading(true)
     fetchAudits({ status: statusFilter || undefined, type: typeFilter || undefined, q: search || undefined, page, per_page: PER_PAGE })
-      .then(r => { setData(r.data); setError('') })
+      .then(r => {
+        setData(r.data)
+        setError('')
+        if (!statusFilter && !typeFilter && !search && page === 1) auditsListCache = r.data
+      })
       .catch(() => {
         setData({ items: [], total: 0 })
         setError('Impossible de charger les audits — le serveur a peut-être renvoyé une erreur.')

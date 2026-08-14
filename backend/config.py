@@ -21,10 +21,11 @@ class Settings(BaseSettings):
     # reste nécessaire pour Celery (cf. commentaire sur `engine` dans database.py) —
     # un sémaphore ne retient ni ne réutilise aucune connexion entre deux requêtes,
     # il limite juste combien peuvent en détenir une EN MÊME TEMPS, donc compatible.
-    # 5 = décision explicite de l'utilisateur (10/08/2026) — à ajuster ici si ça
-    # se révèle trop restreint en usage réel (plusieurs analystes + polling
-    # Dashboard simultanés).
-    DB_MAX_CONCURRENT_SESSIONS: int = 5
+    # 5 = décision explicite de l'utilisateur (10/08/2026), relevé à 15 le 14/08/2026 :
+    # confirmé trop restreint en usage réel — Dashboard.jsx génère à lui seul 8 requêtes
+    # simultanées toutes les 30s (+ 1/3s de suivi patch-check), de quoi saturer le sémaphore
+    # dès qu'un 2e onglet/utilisateur était actif en même temps (cf. STATUS.md 14/08/2026).
+    DB_MAX_CONCURRENT_SESSIONS: int = 15
 
     # Rôle applicatif à privilèges réduits (least privilege) : DML seulement,
     # non-superuser, aucun DDL — l'app tourne avec lui, pas avec le superuser

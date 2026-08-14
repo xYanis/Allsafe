@@ -14,6 +14,13 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 
 const MODULE_COLOR = MODULES.documentation.color
 
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+// Permet de réafficher instantanément les dernières données connues au remontage pendant
+// qu'un rafraîchissement silencieux les met à jour en fond.
+let documentationCache = null
+
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('fr-FR') + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
@@ -136,8 +143,8 @@ function DocumentTypeCard({ type, docs, isAdmin, onUpload, onDeleteDoc, onDelete
 export default function Documentation() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
-  const [types, setTypes] = useState(null)
-  const [docsByType, setDocsByType] = useState({})
+  const [types, setTypes] = useState(() => documentationCache?.types ?? null)
+  const [docsByType, setDocsByType] = useState(() => documentationCache?.docsByType ?? {})
   const [showAddType, setShowAddType] = useState(false)
   const [uploadTarget, setUploadTarget] = useState(null) // null | { type, file? }
   const [previewTarget, setPreviewTarget] = useState(null) // null | document object
@@ -147,12 +154,14 @@ export default function Documentation() {
 
   function load() {
     Promise.all([fetchDocumentTypes(), fetchDocuments()]).then(([t, d]) => {
-      setTypes(t.data.items || [])
+      const typesData = t.data.items || []
       const grouped = {}
       for (const doc of (d.data.items || [])) {
         (grouped[doc.document_type_id] ||= []).push(doc)
       }
+      setTypes(typesData)
       setDocsByType(grouped)
+      documentationCache = { types: typesData, docsByType: grouped }
       setError('')
     }).catch(() => {
       setTypes([]); setDocsByType({})

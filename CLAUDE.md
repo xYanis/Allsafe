@@ -505,9 +505,12 @@ DB_USER=cybervuln      # superuser (init db, admin, migrations, déception) — 
 DB_PASSWORD=           # ← À remplir
 APP_DB_USER=cbr_app    # rôle applicatif à privilèges réduits (DML only) — l'app tourne avec lui
 APP_DB_PASSWORD=       # ← À remplir (rôle créé par backend/db/app_role.sql). Si vide → repli sur DB_USER
-DB_MAX_CONCURRENT_SESSIONS=5  # sémaphore sur database.py::get_session (10/08/2026, cf.
+DB_MAX_CONCURRENT_SESSIONS=15  # sémaphore sur database.py::get_session (10/08/2026, cf.
                        # AUDIT_SECURITE.md) — pas un pool de connexions (NullPool conservé,
-                       # nécessaire pour Celery), juste un plafond de requêtes HTTP simultanées
+                       # nécessaire pour Celery), juste un plafond de requêtes HTTP simultanées.
+                       # Relevé de 5 à 15 le 14/08/2026 : Dashboard.jsx génère à lui seul 8
+                       # requêtes simultanées toutes les 30s (+1/3s) — 5 saturait dès qu'un 2e
+                       # onglet/utilisateur était actif (lenteurs signalées par l'utilisateur)
 REDIS_URL=redis://redis:6379
 ANTHROPIC_API_KEY=     # ← À remplir
 NVD_API_KEY=           # Optionnel, recommandé (gratuit nvd.nist.gov)

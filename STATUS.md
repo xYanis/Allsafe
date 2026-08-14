@@ -72,6 +72,41 @@ fonctionnalités de compte self-service. Chronologie :
   `PageHero.jsx` + refonte Paramètres/Veille/Fuite de données + self-service compte (14/08/2026)` et
   `docs/ARCHITECTURE.md` § Authentification.
 
+**Suite de la même session, plus tard le même jour — lenteurs signalées par l'utilisateur** ("je reste
+sur le site plus d'une heure et j'ai l'impression que les pages sont sans cesse rechargées dès que je
+change de page, surtout le Dashboard") : diagnostic mené par un agent avec inspection **en direct**
+des logs et conteneurs Docker déjà en cours d'exécution (pas seulement de la lecture de code), deux
+causes confirmées avec preuve empirique, deux écartées :
+- **Confirmé** — React Router démonte/remonte entièrement chaque page à chaque navigation (pas de
+  cache de route, `<div key={location.pathname}>` autour de `<Outlet/>` dans `Layout.jsx`) : revenir
+  sur `/dashboard` rejouait ~13 requêtes en rafale et l'écran de chargement plein écran à CHAQUE
+  retour, pas seulement au premier chargement de la session — littéralement "le Dashboard se
+  recharge dès que je change de page".
+- **Confirmé par les logs backend en direct** — `DB_MAX_CONCURRENT_SESSIONS=5` (sémaphore partagé par
+  les 162 routes de l'API) saturé par les rafales périodiques du Dashboard (8 requêtes/30s + 1/3s) :
+  les 8 endpoints du bundle de 30s affichaient exactement le même compteur de requêtes sur 30 min de
+  logs, confirmant qu'ils partent bien en rafale simultanée. Une navigation dont le premier fetch
+  tombe pendant une de ces rafales fait la queue derrière — explique les lenteurs sur *d'autres*
+  pages.
+- **Écarté** — pas de fuite du sémaphore (`async with` relâche toujours le slot, y compris sur
+  exception), pas de fuite d'intervalle/dépendance instable côté frontend (tous les `setInterval`
+  trouvés sont proprement nettoyés avec des dépendances stables), pas de confusion avec le rechargement
+  à chaud (HMR) du serveur de dev.
+- **Corrigé** : `DB_MAX_CONCURRENT_SESSIONS` 5 → 15 (`.env`/`.env.example`/`backend/config.py`,
+  conteneur backend recréé pour appliquer). Puis, sur demande explicite de creuser le rechargement du
+  Dashboard ("oui, résoudre le rechargement complet") : convention de **cache module JS** (survit au
+  démontage/remontage du composant, contrairement au state React) posée sur Dashboard.jsx, puis étendue
+  par un audit dédié + 4 agents en parallèle à 11 pages de plus dont le fetch au montage était coûteux
+  et gaté par un loader plein écran (`Notes.jsx`, `NoteSubject.jsx`, `Documentation.jsx`,
+  `AuditDetail.jsx`, `Agents.jsx`, `Audits.jsx`, `Incidents.jsx`, `Crises.jsx`, `Assets.jsx`,
+  `Inventaire.jsx`, `Durcissement.jsx`) — cf. `docs/FRONTEND.md` § Cache module par page pour le détail
+  du patron et les règles suivies (map par id sur les pages à route dynamique, jamais de résultat
+  filtré mis en cache, etc.).
+  ⚠️ **Incident réel pendant l'implémentation, auto-corrigé** : un des agents a laissé passer une
+  déclaration `isAnonymous` dupliquée dans `Durcissement.jsx` (erreur de compilation Vite), repérée et
+  corrigée par l'agent lui-même avant la fin de sa tâche — confirmé sain en relisant le fichier final
+  et les logs de compilation après coup, aucune intervention manuelle nécessaire.
+
 **Session précédente : 12/08/2026** — module Sécurité > Agents construit de bout en bout (demande
 explicite, cf. `docs/AGENTS.md` pour le détail complet) : agent Rust `allsafe-agent` pour postes
 Windows/Linux, alternative de collecte au compte de service SSH/WinRM pour les postes qu'il atteint

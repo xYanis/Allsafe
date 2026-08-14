@@ -43,6 +43,60 @@ même violet à plat (`#5b21b6`) était recopié en dur dans 5 fichiers. `compon
 (`CbrMark`/`CbrLogoTile`) est désormais le seul point de vérité pour le glyphe et la tuile de logo,
 repris par `Layout.jsx`, `Home.jsx`, `Login.jsx` et `WelcomeOverlay.jsx`.
 
+**Cache module par page, contre le "rechargement" perçu à chaque navigation** (14/08/2026, retour
+utilisateur — "j'ai l'impression que les pages sont sans cesse rechargées") : React Router démonte/
+remonte entièrement chaque page à chaque changement de route (pas de cache de route ni de
+keep-alive), donc toute page qui gate son rendu sur `if (loading) return <PageLoader/>` (ou
+équivalent, ex. `if (data === null)`) rejoue cet écran plein écran à CHAQUE retour dessus, pas
+seulement au premier chargement de la session. Convention adoptée pour toute page dont le fetch au
+montage est coûteux ou visible :
+```jsx
+// Cache module (pas du state React) qui survit au démontage/remontage du composant —
+// cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
+// donc y revenir relançait le fetch et l'écran de chargement plein écran à CHAQUE fois.
+let xxxCache = null   // ou {} si la page est paramétrée par id (route dynamique) — alors une MAP par id
+
+export default function MaPage() {
+  const [data, setData] = useState(() => xxxCache ?? initialValue)
+  const [loading, setLoading] = useState(() => xxxCache == null)
+  useEffect(() => {
+    fetchData().then(r => { setData(r.data); xxxCache = r.data }).finally(() => setLoading(false))
+  }, [...])
+  if (loading && !data) return <PageLoader />   // déjà faux si xxxCache existait au montage
+  ...
+}
+```
+Le fetch continue de tourner à chaque montage (rafraîchissement silencieux en fond) — seul
+l'AFFICHAGE du loader plein écran saute s'il y a déjà quelque chose à montrer. Règles suivies sur
+les 12 pages où c'est appliqué (`Dashboard.jsx`, `Notes.jsx`, `NoteSubject.jsx`, `Documentation.jsx`,
+`AuditDetail.jsx`, `Agents.jsx`, `Audits.jsx`, `Incidents.jsx`, `Crises.jsx`, `Assets.jsx`,
+`Inventaire.jsx`, `Durcissement.jsx`) :
+- **Une variable de cache par page**, jamais partagée entre deux fichiers même quand ils appellent le
+  même endpoint (`Assets.jsx`/`Inventaire.jsx`/`Durcissement.jsx` appellent tous `fetchAssets()` mais
+  ont chacun leur propre `xxxPageCache` — pas de déduplication inter-pages dans cette passe, jugé plus
+  risqué pour le gain obtenu).
+- **Map par `id`** (pas une valeur unique) pour les pages paramétrées par route dynamique
+  (`NoteSubject.jsx`, `AuditDetail.jsx`) — sinon ouvrir l'item B affiche un instant le contenu de
+  l'item A resté en cache.
+- **Seul le premier écran non filtré/non paginé est mis en cache** sur les pages à filtres serveur
+  (`Audits.jsx`, `Incidents.jsx` : cache écrit seulement quand aucun filtre n'est actif et
+  `page === 1`, jamais un résultat déjà filtré par l'utilisateur).
+- Le cache stocke la réponse **brute** de l'API (avant tri/filtrage/anonymisation côté client) —
+  `Assets.jsx`/`Inventaire.jsx`/`Durcissement.jsx` appliquent `anonymizeAsset`/`FAKE_ASSETS` (mode
+  Présentation) *après* lecture du cache, jamais sur la valeur mise en cache elle-même.
+
+Pages volontairement non touchées (fetch trop léger pour valoir le coût, ou déjà sans gate plein
+écran) : `Watch.jsx`/`FuiteDeDonnees.jsx`/`Vulnerabilities.jsx`/`CVEs.jsx` (loader seulement inline
+dans le tableau/la grille, jamais plein écran), `Settings.jsx` (déjà en chargement à la demande par
+section), `Reports.jsx`/`RapportVeille.jsx`/`RapportSurveillance.jsx`/`RapportIncidents.jsx`/
+`SurveillanceIdentites.jsx`/`AdministrationSecurity.jsx` (fetch léger ou local à un onglet),
+`Home.jsx`/`Login.jsx`/`Bastion.jsx` (aucun fetch).
+
+Complément côté serveur, même session : `DB_MAX_CONCURRENT_SESSIONS` relevé de 5 à 15
+(`backend/database.py`, cf. CLAUDE.md) — le Dashboard à lui seul génère 8 requêtes simultanées
+toutes les 30s (+1/3s), suffisant pour saturer le sémaphore dès qu'un 2e onglet/utilisateur était
+actif en même temps, aggravant la lenteur perçue sur les autres pages pendant ces rafales.
+
 ---
 
 ## Animations & polish (session 24/07/2026)

@@ -32,6 +32,7 @@ import { logConnection } from './api/client.js'
 import { ThemeProvider } from './contexts/ThemeContext.jsx'
 import { PresentationProvider } from './contexts/PresentationContext.jsx'
 import { AnalystProvider } from './contexts/AnalystContext.jsx'
+import { AnalystPreferenceProvider } from './contexts/AnalystPreferenceContext.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 
 function ConnectionTracker() {
@@ -55,6 +56,7 @@ export default function App() {
     <AuthProvider>
     <PresentationProvider>
     <AnalystProvider>
+    <AnalystPreferenceProvider>
     <ThemeProvider>
       <BrowserRouter>
         <ConnectionTracker />
@@ -104,6 +106,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
+    </AnalystPreferenceProvider>
     </AnalystProvider>
     </PresentationProvider>
     </AuthProvider>

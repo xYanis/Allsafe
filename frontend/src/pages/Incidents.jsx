@@ -7,6 +7,7 @@ import IncidentNIS2Badges from '../components/IncidentNIS2Badges.jsx'
 import IncidentFormModal, { INCIDENT_CATEGORIES, INCIDENT_SEVERITIES, INCIDENT_STATUSES } from '../components/IncidentFormModal.jsx'
 import IncidentDetailModal from '../components/IncidentDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
+import PageHero from '../components/PageHero.jsx'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -126,14 +127,11 @@ export default function Incidents() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Incidents{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Registre auditable — suivi des délais légaux de notification NIS 2</p>
-        </div>
+      <PageHero
+        icon="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z M12 18a3.75 3.75 0 00.495-7.468 5.99 5.99 0 00-1.925 3.547 5.975 5.975 0 01-2.133-1.001A3.75 3.75 0 0012 18z"
+        title="Incidents" color={MODULE_COLOR}
+        subtitle="Registre auditable — suivi des délais légaux de notification NIS 2"
+      >
         <div className="flex items-center gap-2">
           <button onClick={handleExport}
             className="px-3 py-2 text-sm font-medium rounded-lg"
@@ -146,7 +144,7 @@ export default function Incidents() {
             + Déclarer un incident
           </button>
         </div>
-      </div>
+      </PageHero>
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}

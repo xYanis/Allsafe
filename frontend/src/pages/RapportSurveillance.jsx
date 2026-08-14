@@ -1,4 +1,5 @@
 import WeeklyArchives from '../components/WeeklyArchives.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 // Rapport hebdomadaire de Surveillance Identités — même composant d'archives que
 // les rapports CVE et Veille (cf. WeeklyArchives.jsx), seules changent la portée
@@ -8,12 +9,11 @@ import WeeklyArchives from '../components/WeeklyArchives.jsx'
 export default function RapportSurveillance() {
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Rapport Surveillance</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          Rapports hebdomadaires de surveillance des identités — preuve de veille continue NIS 2
-        </p>
-      </div>
+      <PageHero
+        icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        title="Rapport Surveillance" color="#a371f7"
+        subtitle="Rapports hebdomadaires de surveillance des identités — preuve de veille continue NIS 2"
+      />
 
       <WeeklyArchives
         kind="surveillance"

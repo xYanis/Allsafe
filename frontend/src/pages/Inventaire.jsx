@@ -6,6 +6,7 @@ import { merakiModelLabel, assetCategory } from '../utils/assetCategory.js'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import NetworkStatusBadge, { NETWORK_STATUS_LABELS } from '../components/NetworkStatusBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 import OsLogo from '../components/OsLogo.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { MODULES } from '../constants/modules.js'
@@ -334,15 +335,12 @@ export default function Inventaire() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Inventaire Complet <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>
-              ({filteredAssets.length}{filteredAssets.length !== assetList.length ? ` / ${assetList.length}` : ''})
-            </span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Specs matérielles et applications installées — lecture seule, jamais d'écriture sur les serveurs</p>
-        </div>
+      <PageHero
+        icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
+        title="Inventaire Complet"
+        color="#39c5cf"
+        subtitle="Specs matérielles et applications installées — lecture seule, jamais d'écriture sur les serveurs"
+      >
         <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
           <input
             value={searchName}
@@ -436,7 +434,7 @@ export default function Inventaire() {
             {pdfLoading ? 'Génération…' : 'Exporter en PDF'}
           </button>
         </div>
-      </div>
+      </PageHero>
       {bulkScan && bulkScan.errors > 0 && (
         <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(251,143,68,0.1)', color: '#fb8f44', border: '1px solid rgba(251,143,68,0.2)' }}>
           {bulkScan.errors} actif{bulkScan.errors > 1 ? 's' : ''} injoignable{bulkScan.errors > 1 ? 's' : ''} pour l'instant — les autres continuent.

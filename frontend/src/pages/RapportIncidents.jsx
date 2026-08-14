@@ -4,9 +4,11 @@ import IncidentSeverityBadge from '../components/IncidentSeverityBadge.jsx'
 import IncidentNIS2Badges from '../components/IncidentNIS2Badges.jsx'
 import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
+import PageHero from '../components/PageHero.jsx'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const MODULE_COLOR = MODULES.incidents.color
+const HERO_COLOR = MODULES.rapports.color
 
 const STATUS_STYLES = {
   declared:    { background: 'rgba(139,148,158,0.12)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' },
@@ -77,13 +79,11 @@ export default function RapportIncidents() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Rapport Incidents</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Un rapport par incident, généré à la demande — suivi des délais légaux de notification NIS 2
-          </p>
-        </div>
+      <PageHero
+        icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        title="Rapport Incidents" color={HERO_COLOR}
+        subtitle="Un rapport par incident, généré à la demande — suivi des délais légaux de notification NIS 2"
+      >
         <button onClick={handleExportCsv} disabled={exportLoading}
           className="px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
           style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
@@ -98,7 +98,7 @@ export default function RapportIncidents() {
           )}
           {exportLoading ? 'Export…' : 'Exporter CSV (registre complet)'}
         </button>
-      </div>
+      </PageHero>
 
       {error && (
         <div className="text-sm px-4 py-3 rounded-xl" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.2)' }}>

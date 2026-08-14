@@ -6,13 +6,38 @@ docs/ARCHITECTURE.md § Authentification.
 """
 
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
+from fastapi import HTTPException
 from sqlalchemy import func, select
 
 from models import AuthAuditLog, User, UserSession
+
+# Politique de mot de passe (14/08/2026, demande utilisateur) : jusqu'ici seule la
+# longueur (16 caractères) était vérifiée, dupliquée dans routers/auth.py ET
+# routers/users.py — centralisée ici pour que les deux endpoints (changement par soi-même
+# et création par un admin) restent alignés. Le frontend calque son indice de force
+# (PasswordStrengthHint.jsx) sur exactement ces mêmes règles.
+PASSWORD_MIN_LENGTH = 16
+
+
+def validate_password_strength(password: str) -> None:
+    missing = []
+    if len(password) < PASSWORD_MIN_LENGTH:
+        missing.append(f"au moins {PASSWORD_MIN_LENGTH} caractères")
+    if not re.search(r"[A-Z]", password):
+        missing.append("une majuscule")
+    if not re.search(r"[a-z]", password):
+        missing.append("une minuscule")
+    if not re.search(r"\d", password):
+        missing.append("un chiffre")
+    if not re.search(r"[^A-Za-z0-9]", password):
+        missing.append("un caractère spécial")
+    if missing:
+        raise HTTPException(400, "Le mot de passe doit contenir " + ", ".join(missing) + ".")
 
 # Session glissante : chaque requête valide repousse expires_at de SESSION_TTL, mais
 # jamais au-delà de created_at + SESSION_ABSOLUTE_TTL (défense en profondeur si un

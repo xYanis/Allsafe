@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, recommend, script, patchCheck, criticalReviewCandidates, falsePositiveCandidates, bulkFalsePositive, awaitingFixCandidates, bulkAwaitingFix, bulkAcceptedRisk, getVulnStatusHistory, getVulnOtherInstances } from '../api/client.js'
+import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import StatusBadge, { STATUS_LABELS } from '../components/StatusBadge.jsx'
 import AnalysisModal from '../components/AnalysisModal.jsx'
@@ -512,13 +513,11 @@ export default function Vulnerabilities() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Vulnérabilités <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Suivi et gestion des vulnérabilités par actif</p>
-        </div>
+      <PageHero
+        icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+        title="Vulnérabilités" color="#f85149"
+        subtitle="Suivi et gestion des vulnérabilités par actif"
+      >
         {!isAnonymous && assetList.length > 0 && (
           <select
             value={candidateAssetId}
@@ -532,7 +531,7 @@ export default function Vulnerabilities() {
             ))}
           </select>
         )}
-      </div>
+      </PageHero>
 
       {!isAnonymous && (afCandidates.length > 0 || fpCandidates.length > 0 || bulkCandidates.length > 0 || arCandidates.length > 0) && (
         <div className="flex items-center flex-wrap gap-2">

@@ -36,7 +36,7 @@ correspondante (état actif **et** icône au repos) :
 | **Rapports** | `#a371f7` violet | Rapport exécutif CVE, Rapport Veille, Rapport Surveillance — les trois avec des **rapports hebdomadaires figés** (`S30/2026`, générés le lundi 7h, export CSV) ; le rapport CVE se décline en plus par actif. Rapport Incidents à part (29/07/2026) : **par incident**, généré à la demande, jamais figé — un incident est rare, jamais plusieurs la même semaine (cf. docs/INCIDENTS.md § 7). ⚠️ "export PDF" n'existe pas côté serveur pour ces rapports — seul CSV est généré en backend (le seul export PDF serveur du projet est celui d'Inventaire, `reportlab`) ; le bouton "Exporter PDF" des 4 rapports (dont Incidents) est une impression navigateur côté client (`ReportMarkdown.jsx::exportPdf`), pas un fichier généré côté serveur |
 | **Incidents** | `#b5793a` marron | Registre incidents (29/07/2026, complet) — déclaration, qualification NIS 2 (`requires_notification`, **toujours manuelle**, jamais automatique) et suivi des 3 échéances légales (Art. 23 : alerte précoce 24h, notification 72h, rapport final 1 mois calendaire). L'app ne notifie **jamais** elle-même l'ANSSI — elle trace qui a déclaré/qualifié/envoyé quoi et quand (`services/nis2_deadlines.py`). Préremplissage (jamais création auto) depuis Sécurité/Vulnérabilités/Veille via `DeclareIncidentButton.jsx`. Roadmap par catégorie (plan d'action chronologique interne/externe, `RESPONSE_STEPS` — remplace l'ancienne checklist "bonnes pratiques" séparée, fusionnée dedans le 29/07/2026 pour éliminer la redondance ; chaque étape cochée porte qui l'a réalisée et quand, `completed_response_steps` — + annuaire ANSSI/CERT-FR/CNIL/police-gendarmerie, coordonnées vérifiées le 29/07/2026, contacts perso ajoutables sans code — `IncidentRoadmap.jsx`). Jalons envoyés consultables (contenu/date/auteur, bouton "Consulter"). Rapport final : pièces jointes PDF (5 Mo max, disque + métadonnées, `IncidentAttachment`). **Gestion de crise** (31/07/2026, page séparée `/crises`) : escalade d'un ou plusieurs incidents en crise (`Crisis`, `Incident.crisis_id`) — cellule de crise (rôles nommés), journal de décisions/communications interne-externe (`CrisisTimelineEntry`), jamais d'envoi réel. Cf. docs/INCIDENTS.md § 5ter |
 | **Documentation** | `#e3b341` or | Documents de gouvernance nécessaires à la conformité NIS 2 (31/07/2026) : PSSI, Charte Administrateur, Charte Utilisateur, Organigramme en seed — registre de types ouvert (`DocumentType`), ajoutable sans code, spécifique à ce module (pas géré dans Administration, contrairement à Services/Rôles qui sont consommés par plusieurs modules). Formats acceptés : PDF/Word/Excel/PNG/JPEG (validation par signature de fichier, 10 Mo max, `services/document_storage.py`). **Historique des versions conservé** : chaque upload crée une nouvelle ligne (`Document`), rien n'est supprimé automatiquement — pas de table de versions séparée, la liste triée par date EST l'historique. **Prévisualisation** (PDF/images affichés nativement par le navigateur, `Content-Disposition: inline` — Word/Excel restent en téléchargement, aucune API web ne peut ouvrir l'appli native depuis une page) + **glisser-déposer** (modale d'upload et directement sur la carte d'un type) |
-| **Paramètres** | `#8b949e` gris | Transverse — thème, mode Présentation, section « Compte » (nom/email connecté + déconnexion, en bas de page). Le registre « Analystes » (noms pour les dropdowns `validated_by`...) a déménagé dans Administration (30/07/2026, cf. ci-dessous), plus dans Paramètres directement. Onglet « Services » (RH/DSI/Juridique/Direction en seed, liste ouverte, code couleur) puis onglet « Rôles » juste après (31/07/2026) : organigramme poste → personne → email (`OrganizationRole`, ex. RSSI → Michel Lacroix), poste optionnellement rattaché à un service (couleur de la carte), consommé par Incidents et Gestion de crise pour savoir à qui se référer selon le poste — noms réels, anonymisés en mode Présentation |
+| **Paramètres** | `#8b949e` gris | Transverse — nav à deux volets sans tuile (14/08/2026, même schéma que Notes : icônes à gauche, panneau à droite) : Présentation (mode démo), Apparence (thème), **Compte** (nom/email/déconnexion + changer son email/mot de passe avec indice de force, gérer ses sessions actives, nom d'analyste par défaut), **Intégrations** (statut configuré/non configuré + dernière synchro de NVD/GitHub/AD/SSH/WithSecure/Meraki/PRTG/GLPI/vSphere, lecture seule), **Sécurité** (ligne → Administration, réservée admin, nav elle-même réductible en icônes seules). Le registre « Analystes » (noms pour les dropdowns `validated_by`...) a déménagé dans Administration (30/07/2026, cf. ci-dessous), plus dans Paramètres directement. Onglet « Services » (RH/DSI/Juridique/Direction en seed, liste ouverte, code couleur) puis onglet « Rôles » juste après (31/07/2026) : organigramme poste → personne → email (`OrganizationRole`, ex. RSSI → Michel Lacroix), poste optionnellement rattaché à un service (couleur de la carte), consommé par Incidents et Gestion de crise pour savoir à qui se référer selon le poste — noms réels, anonymisés en mode Présentation |
 
 ⚠️ **Module Bastion / Administration retiré le 30/07/2026** : l'ancien sélecteur « Je suis… » en
 bas de sidebar (`visible_modules`, filtrage de nav par profil, aucun mot de passe ni session) a été
@@ -186,8 +186,8 @@ anonymisée ou non, ne part vers Claude aujourd'hui.
 
 Authentification réelle (30/07/2026, remplace le module Bastion retiré le même jour — sans rapport
 avec le nouveau placeholder « Bastion » du module Sécurité ci-dessus) : compte email/mot de passe
-(`models.py::User`, hash `bcrypt`, **16 caractères minimum**, champ avec bascule afficher/masquer
-`components/PasswordInput.jsx`), session par cookie **HttpOnly** (jamais accessible en JS, jamais dans
+(`models.py::User`, hash `bcrypt`, champ avec bascule afficher/masquer `components/PasswordInput.jsx`),
+session par cookie **HttpOnly** (jamais accessible en JS, jamais dans
 `localStorage`), RBAC **binaire** `admin` / `analyst`. Toutes les routes `/api/*` exigent une session
 valide (`Depends(require_auth)`, posé sur chaque router dans `main.py`), sauf `/api/health` et
 `POST /api/auth/login`. `/api/connections` (lecture), `/api/security/*` (sauf le compteur badge),
@@ -208,6 +208,27 @@ ce déplacement, n'importe quel compte pouvait modifier ce registre depuis Param
 pas déjà (31/07/2026, `routers/users.py::_ensure_analyst`) — simple raccourci de saisie, toujours pas
 de fusion des deux tables. Détail complet du schéma et des endpoints : `docs/ARCHITECTURE.md` §
 Authentification.
+
+**Politique de mot de passe** (14/08/2026, centralisée dans `services/auth.py::validate_password_strength`,
+avant dupliquée en deux endroits avec juste une longueur minimale) : 16 caractères minimum + au moins
+une majuscule, une minuscule, un chiffre et un caractère spécial, appliquée à la création de compte
+(admin) et au changement par soi-même. Le frontend calque un indice de force en temps réel sur
+exactement ces mêmes règles (`components/PasswordStrengthHint.jsx`, Paramètres + écran de changement
+forcé) — à garder synchronisés si la politique change.
+
+**Gestion de son propre compte depuis Paramètres > Compte** (14/08/2026, demande utilisateur — jusque-là
+seule la déconnexion était possible) : changer son email et son mot de passe (mot de passe actuel
+requis dans les deux cas, `PATCH /api/auth/change-email` / `POST /api/auth/change-password`) ; voir et
+révoquer ses propres sessions actives (`GET`/`DELETE /api/auth/sessions`, pendant self-service du
+`POST /api/users/{id}/revoke-sessions` réservé admin sur un *autre* compte) ; nom d'analyste par défaut
+(préférence 100% client, `localStorage`, `contexts/AnalystPreferenceContext.jsx` — met en avant son nom
+dans `ValidateDropdown.jsx`/pré-remplit `AnnotationModal.jsx`, jamais sur une ré-édition d'une
+annotation qui a déjà un validateur enregistré).
+
+**Statut des intégrations externes** (14/08/2026, page Paramètres > Intégrations, `GET
+/api/integrations/status`) : configuré/non configuré (présence de la config, jamais la valeur d'un
+secret) + dernière synchro connue pour NVD/GitHub/AD/SSH/WithSecure/Meraki/PRTG/GLPI/vSphere — lit
+directement `sync_state` plutôt que de rappeler chaque `GET /api/<service>/status` existant.
 
 **Droits d'accès par module/page pour un compte `analyst`** (31/07/2026, `User.allowed_pages`) :
 `admin` voit toujours tout module confondu (inchangé, § ci-dessus). Un `analyst` a par défaut accès
@@ -376,7 +397,9 @@ cybervuln/
     │   │                            Complément à AD/SSH, pas un remplacement (cf. STATUS.md 28/07/2026)
     │   ├── auth.py               ✅ — authentification (30/07/2026) : hash/verify mot de passe (bcrypt),
     │   │                            sessions par cookie (token opaque, hash SHA-256 stocké), verrou
-    │   │                            anti-bruteforce (email + IP, cf. docs/ARCHITECTURE.md)
+    │   │                            anti-bruteforce (email + IP, cf. docs/ARCHITECTURE.md).
+    │   │                            `validate_password_strength()` (14/08/2026) centralise la politique
+    │   │                            (16 car. + majuscule/minuscule/chiffre/spécial), avant dupliquée
     │   ├── audit_attachments.py  ✅ — module Audits (03/08/2026) : pièces jointes PDF/PNG/JPEG (mandat
     │   │                            d'audit ou preuve de finding), validation pure, calqué sur
     │   │                            document_storage.py restreint à ces 3 formats
@@ -428,13 +451,18 @@ cybervuln/
     │   │   organization_roles.py, services.py, documents.py, windows_app_mappings.py, audits.py
     │   │   ✅ (tous montés dans main.py)
     │   ├── auth.py                ✅ — login/logout/me/change-password (30/07/2026), seul router sans
-    │   │                             dependency globale (/login public, le reste protégé par route)
+    │   │                             dependency globale (/login public, le reste protégé par route).
+    │   │                             `/change-email`, `/sessions` (GET/DELETE) ajoutés le 14/08/2026 —
+    │   │                             self-service sur son propre compte, cf. CLAUDE.md § Authentification
     │   ├── users.py               ✅ — CRUD des comptes, réservé admin (30/07/2026)
-    │   └── agents.py              ✅ — module Sécurité > Agents (12/08/2026), protection déclarée par
-    │                                 route comme auth.py/connections.py ci-dessus (pas au niveau du
-    │                                 router) : jetons d'enrôlement (admin), `/enroll` (public, protégé
-    │                                 par le jeton lui-même), `/checkin` (`require_agent`), liste/révocation
-    │                                 (`require_page("/agents")`/admin)
+    │   ├── agents.py              ✅ — module Sécurité > Agents (12/08/2026), protection déclarée par
+    │   │                             route comme auth.py/connections.py ci-dessus (pas au niveau du
+    │   │                             router) : jetons d'enrôlement (admin), `/enroll` (public, protégé
+    │   │                             par le jeton lui-même), `/checkin` (`require_agent`), liste/révocation
+    │   │                             (`require_page("/agents")`/admin)
+    │   └── integrations.py        ✅ — Paramètres > Intégrations (14/08/2026) : `GET /status`, statut
+    │                                 agrégé configuré/non configuré + dernière synchro (lecture directe
+    │                                 de `sync_state`, pas de rappel des `GET /<service>/status` existants)
     ├── tasks/
     │   └── scheduled_tasks.py   ✅ — Celery beat, planning détaillé dans docs/ARCHITECTURE.md
     └── tests/                   ✅ — premiers tests du projet (27/07/2026), sans base de données

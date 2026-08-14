@@ -1,10 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
+import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
 
 export default function ValidateDropdown({ onSelect, detected, label = '✓ Corrigé', initialNote = '' }) {
   // `names` bascule déjà sur FAKE_VALIDATORS en mode Présentation, centralisé dans
   // AnalystContext.jsx (31/07/2026) — plus besoin de le refaire ici.
   const { names } = useAnalysts()
+  // Nom d'analyste par défaut (14/08/2026, demande utilisateur) — pas de valeur
+  // contrôlée à pré-remplir ici (ce menu valide au clic, pas de submit), donc le
+  // préféré est juste remonté en tête + mis en avant visuellement pour un accès
+  // plus rapide, plutôt qu'auto-sélectionné sans confirmation de l'utilisateur.
+  const { preferredAnalyst } = useAnalystPreference()
+  const orderedNames = preferredAnalyst && names.includes(preferredAnalyst)
+    ? [preferredAnalyst, ...names.filter(n => n !== preferredAnalyst)]
+    : names
   const [open, setOpen] = useState(false)
   // Pré-rempli depuis le justificatif technique du patch check (04/08/2026, demande
   // explicite : ne pas laisser l'analyste retaper ce que l'app vient déjà de montrer) —
@@ -104,18 +113,22 @@ export default function ValidateDropdown({ onSelect, detected, label = '✓ Corr
           <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>
             Validé par
           </p>
-          {names.map(name => (
-            <button
-              key={name}
-              onClick={() => select(name)}
-              className="w-full text-left text-xs px-3 py-2.5 transition-colors"
-              style={{ color: 'var(--text-secondary)' }}
-              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(63,185,80,0.1)'; e.currentTarget.style.color = '#3fb950' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)' }}
-            >
-              {name}
-            </button>
-          ))}
+          {orderedNames.map(name => {
+            const isPreferred = name === preferredAnalyst
+            return (
+              <button
+                key={name}
+                onClick={() => select(name)}
+                className="w-full text-left text-xs px-3 py-2.5 transition-colors flex items-center justify-between gap-2"
+                style={{ color: isPreferred ? '#3fb950' : 'var(--text-secondary)', fontWeight: isPreferred ? 600 : 400 }}
+                onMouseEnter={e => { e.currentTarget.style.background = 'rgba(63,185,80,0.1)'; e.currentTarget.style.color = '#3fb950' }}
+                onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isPreferred ? '#3fb950' : 'var(--text-secondary)' }}
+              >
+                {name}
+                {isPreferred && <span className="text-[10px]" style={{ opacity: 0.7 }}>Moi</span>}
+              </button>
+            )
+          })}
         </div>
       )}
     </>

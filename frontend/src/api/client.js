@@ -244,6 +244,12 @@ export const login          = (email, password) => api.post('/auth/login', { ema
 export const logout         = () => api.post('/auth/logout')
 export const me             = () => api.get('/auth/me')
 export const changePassword = (current_password, new_password) => api.post('/auth/change-password', { current_password, new_password })
+export const changeEmail    = (current_password, new_email) => api.patch('/auth/change-email', { current_password, new_email })
+export const mySessions     = () => api.get('/auth/sessions')
+export const revokeMySession = (id) => api.delete(`/auth/sessions/${id}`)
+
+// Statut agrégé des intégrations externes (cf. backend/routers/integrations.py).
+export const integrationsStatus = () => api.get('/integrations/status')
 
 // Comptes utilisateurs (cf. backend/routers/users.py) — réservé au rôle admin côté serveur.
 export const users               = () => api.get('/users')

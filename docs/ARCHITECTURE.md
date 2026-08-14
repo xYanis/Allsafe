@@ -278,6 +278,15 @@ réels, NTP/SSH/verrouillage de compte conformes.
 `POST /api/vsphere/run?import_new_assets=`, `GET /api/vsphere/status` — déclenchement manuel
 uniquement, même précédent que Meraki/PRTG/GLPI (cf. § Planning Celery Beat).
 
+**`GET /api/integrations/status`** (14/08/2026, `routers/integrations.py`, page Paramètres >
+Intégrations) : agrège en un seul appel le statut de NVD/GitHub/AD/SSH/WithSecure/Meraki/PRTG/GLPI/
+vSphere — `{configured: bool}` dérivé de la présence des variables `.env` correspondantes (jamais leur
+valeur), `last_synced_at` lu directement dans `sync_state` (mêmes clés que les endpoints `/status`
+ci-dessus — `withsecure_missing_updates`/`meraki_network_status`/`prtg_network_status`/
+`glpi_inventory`/`vsphere_esxi`/`nvd`). Ouvert à tout connecté (`dependencies=_authed`, comme les
+routers `withsecure`/`meraki`/`prtg`/`glpi`/`vsphere` eux-mêmes) — aucun secret exposé, juste
+configuré/non configuré + une date.
+
 ### Durcissement switches Cisco (13/08/2026)
 
 Angle retenu pour le réseau après évaluation avec l'utilisateur : la plus-value CVE/firmware côté
@@ -533,8 +542,10 @@ created_at  TIMESTAMPTZ
 Remplace le module Bastion (sélecteur « Je suis… », `visible_modules`, retiré le même jour — sans
 rapport avec le nouveau placeholder « Bastion » du module Sécurité, réintroduit la même session pour
 un futur accès jump host aux serveurs critiques, cf. `frontend/src/pages/Bastion.jsx`) —
-authentification réelle : compte email/mot de passe (**16 caractères minimum**, cf.
-`services/auth.py::hash_password`/`routers/auth.py`/`routers/users.py`), session par cookie
+authentification réelle : compte email/mot de passe (politique centralisée dans
+`services/auth.py::validate_password_strength` depuis le 14/08/2026 — **16 caractères minimum +
+majuscule + minuscule + chiffre + caractère spécial**, avant dupliquée en deux endroits avec juste
+une longueur minimale), session par cookie
 **HttpOnly** (`SameSite=Lax`, `Secure` piloté par `COOKIE_SECURE`), RBAC **binaire**
 (`admin`/`analyst`, une simple colonne `CHECK`, pas de table `roles` séparée — deux valeurs ne
 justifient pas cette abstraction). Mot de passe hashé avec `bcrypt`. Champ mot de passe avec bascule
@@ -567,7 +578,8 @@ created_at          TIMESTAMPTZ
 -- comptage anti-bruteforce par email n'a aucun sens). Index sur (email_attempt, created_at)
 -- et (ip_address, created_at) pour ce comptage.
 id            UUID PRIMARY KEY
-event_type    VARCHAR NOT NULL   -- LOGIN_SUCCESS | LOGIN_FAILED | LOGOUT | PASSWORD_CHANGED
+event_type    VARCHAR NOT NULL   -- LOGIN_SUCCESS | LOGIN_FAILED | LOGOUT | PASSWORD_CHANGED |
+                                 -- EMAIL_CHANGED | SESSION_REVOKED (14/08/2026)
 user_id       UUID REFERENCES users(id) ON DELETE SET NULL
 email_attempt VARCHAR
 ip_address    VARCHAR
@@ -602,6 +614,24 @@ pour ne pas casser un environnement de dev sans auth encore configurée).
 **Registre `analysts` inchangé** : les comptes `users` ci-dessus servent à se connecter, le registre
 `analysts` ci-dessus continue d'alimenter les dropdowns d'attribution (`validated_by`...) — deux
 registres distincts, pas de fusion pour cette phase (cf. STATUS.md).
+
+**Self-service sur son propre compte** (14/08/2026, `routers/auth.py`, tous `Depends(require_auth)`
+sur son propre `user`, jamais sur un `user_id` de chemin — contrairement à `routers/users.py` qui
+opère sur n'importe quel compte mais est réservé admin) :
+- `PATCH /api/auth/change-email` — body `{current_password, new_email}`. Vérifie le mot de passe
+  actuel (même garde que `change-password`, un email de connexion est sensible) et l'unicité du
+  nouvel email. Journalise `EMAIL_CHANGED` (`details.new_email`).
+- `GET /api/auth/sessions` — sessions actives du compte connecté, `is_current` calculé en comparant
+  le hash du cookie de la requête à `session_token_hash` de chaque ligne (`services/auth.py::_hash_token`,
+  importé malgré le prefixe `_` — même module, pas d'API publique à préserver).
+- `DELETE /api/auth/sessions/{id}` — révoque une session du compte connecté (404 si elle appartient à
+  un autre compte). Refuse (400) de révoquer la session courante — message renvoyant vers
+  `POST /api/auth/logout`, pour éviter la confusion "je clique révoquer et je me déconnecte moi-même
+  sans comprendre pourquoi". Journalise `SESSION_REVOKED`.
+
+Pendant de `POST /api/users/{id}/revoke-sessions` (`routers/users.py`, admin, sur un *autre* compte) —
+les deux mécanismes coexistent, aucune fusion : l'un pour soi-même sans droits admin, l'autre pour
+gérer les comptes des autres.
 
 ### Déception / honeypots DB (`security_events`, session 24/07/2026)
 
@@ -1358,11 +1388,15 @@ DEL    /api/windows-app-mappings/{id}                  -- réservé admin
 POST /api/auth/login                body: {email, password} -- PUBLIC. Verrou anti-bruteforce,
                                      -- pose le cookie de session HttpOnly. Message d'erreur générique
                                      -- (401) qu'il s'agisse d'un mauvais mot de passe ou d'un compte
-                                     -- inexistant. 429 si verrou anti-bruteforce déclenché. Mot de
-                                     -- passe/change-password : 16 caractères minimum.
+                                     -- inexistant. 429 si verrou anti-bruteforce déclenché.
 POST /api/auth/logout               -- supprime la session serveur + efface le cookie
 GET  /api/auth/me                   -- utilisateur courant (id/email/full_name/role/must_change_password)
 POST /api/auth/change-password      body: {current_password, new_password}
+                                     -- validate_password_strength() : 16 car. + majuscule/minuscule/
+                                     -- chiffre/spécial (14/08/2026, cf. § Authentification ci-dessus)
+PATCH  /api/auth/change-email       body: {current_password, new_email}   -- 14/08/2026, self-service
+GET    /api/auth/sessions           -- sessions actives du compte connecté, is_current inclus
+DEL    /api/auth/sessions/{id}      -- 400 si c'est la session courante (utiliser /logout à la place)
 
 GET    /api/users                   -- réservé admin. CRUD des comptes (session 30/07/2026)
 POST   /api/users                   body: {email, full_name, password, role}

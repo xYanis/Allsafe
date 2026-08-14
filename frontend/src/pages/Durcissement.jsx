@@ -5,6 +5,7 @@ import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
 import { assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 import OsLogo from '../components/OsLogo.jsx'
 import ComplianceChecklist, { complianceSummary } from '../components/ComplianceChecklist.jsx'
 import { MODULES } from '../constants/modules.js'
@@ -184,17 +185,12 @@ export default function Durcissement() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Durcissement{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({filtered.length} / {rows.length})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Conformité CIS-like du parc — compte de service ou agent, lecture seule.
-          </p>
-        </div>
-      </div>
+      <PageHero
+        icon="M6 13.5V3.75m0 9.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 3.75V16.5m12-12V3.75m0 9.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 3.75V16.5m-6-9V3.75m0 3.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 9.75V10.5"
+        title="Durcissement"
+        color="#39c5cf"
+        subtitle="Conformité CIS-like du parc — compte de service ou agent, lecture seule."
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher un actif…"

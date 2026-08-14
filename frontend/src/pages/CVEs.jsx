@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { cves as fetchCves, syncNvd, syncTaskStatus } from '../api/client.js'
+import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import { MODULES } from '../constants/modules.js'
@@ -165,17 +166,13 @@ export default function CVEs() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            CVE <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Toutes les CVE publiées dans les {DAYS_WINDOW} derniers jours (pas seulement celles touchant le parc)
-          </p>
-        </div>
+      <PageHero
+        icon="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+        title="CVE" color="#f85149"
+        subtitle={`Toutes les CVE publiées dans les ${DAYS_WINDOW} derniers jours (pas seulement celles touchant le parc)`}
+      >
         <RefreshDropdown status={syncStatus} onSelect={handleRefresh} />
-      </div>
+      </PageHero>
 
       {syncMsg && syncStatus !== 'idle' && (
         <div className="text-sm px-4 py-3 rounded-xl" style={REFRESH_STYLES[syncStatus]}>{syncMsg}</div>

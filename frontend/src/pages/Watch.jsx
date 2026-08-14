@@ -11,6 +11,7 @@ import WatchProfileModal from '../components/WatchProfileModal.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import DeclareIncidentButton from '../components/DeclareIncidentButton.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import PageHero from '../components/PageHero.jsx'
 import { MODULES } from '../constants/modules.js'
 
 const WATCH_ACCENT = '#58a6ff'
@@ -147,15 +148,43 @@ function Btn({ children, onClick, variant = 'primary', disabled, small }) {
   )
 }
 
-function KpiCard({ label, value, sub, highlight }) {
+// Icônes des KPI — même famille (Heroicons outline) que le reste de l'app.
+const KPI_ICON_PATHS = {
+  warning: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z',
+  clock:   'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+  check:   'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+}
+
+// `accent` porte l'identité propre de chaque KPI (une couleur par carte, pas un
+// gris uniforme) — `highlight` reste la seule alerte rouge prioritaire (état
+// "critique non traité", cf. logique existante), qui écrase l'accent quand vraie.
+// Gabarit très resserré (px-3/py-2, valeur text-base) + rangée forcée à
+// l'horizontale côté conteneur (flex nowrap, cf. appel ci-dessous) : les
+// versions précédentes (grid, plus grand padding) restaient hautes et
+// pouvaient retomber à une tuile par ligne sur un écran étroit.
+function KpiCard({ label, value, sub, highlight, icon, accent = 'var(--text-muted)' }) {
+  const tint = highlight ? '#f85149' : accent
   return (
     <div style={{
       ...CARD,
+      boxShadow: `inset 3px 0 0 0 ${highlight ? '#f85149' : `color-mix(in srgb, ${accent} 50%, transparent)`}`,
       ...(highlight ? { border: '1px solid rgba(248,81,73,0.4)', background: 'rgba(248,81,73,0.05)' } : {}),
-    }} className="px-5 py-4">
-      <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: highlight ? '#f85149' : 'var(--text-muted)' }}>{label}</p>
-      <p className="text-2xl font-bold" style={{ color: highlight ? '#f85149' : 'var(--text-primary)' }}>{value ?? '—'}</p>
-      {sub && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
+    }} className="lift-card group px-3 py-2 min-w-0">
+      <div className="flex items-center gap-1.5 mb-1">
+        {icon && (
+          <span className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-110" style={{
+            background: `color-mix(in srgb, ${tint} 16%, transparent)`,
+            color: tint,
+          }}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={icon} />
+            </svg>
+          </span>
+        )}
+        <p className="text-[10px] font-semibold uppercase tracking-wide truncate" style={{ color: tint }}>{label}</p>
+      </div>
+      <p className="text-base font-bold truncate" style={{ color: highlight ? '#f85149' : 'var(--text-primary)' }}>{value ?? '—'}</p>
+      {sub && <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
     </div>
   )
 }
@@ -523,15 +552,12 @@ export default function Watch() {
     <div className="p-6 space-y-5">
 
       {/* En-tête */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Veille technologique{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Registre de veille auditable — conforme NIS 2</p>
-        </div>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+      <PageHero
+        icon="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+        title="Veille technologique" color={WATCH_ACCENT}
+        subtitle="Registre de veille auditable — conforme NIS 2"
+      >
+        <div className="flex flex-col items-end gap-1">
           <div className="flex items-center gap-2">
             <Btn variant="primary" onClick={handleSync} disabled={syncing}>
               {syncing ? 'Sync…' : 'Synchroniser'}
@@ -554,19 +580,21 @@ export default function Watch() {
               : 'Jamais synchronisé'}
           </span>
         </div>
-      </div>
+      </PageHero>
 
       {/* Message flash */}
       {msg.text && (
         <div className="text-sm px-4 py-3 rounded-xl" style={msgColors[msg.type]}>{msg.text}</div>
       )}
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Critiques non traités" value={criticalUntreated} sub={`dont ${kpis?.by_status?.new ?? 0} nouveaux`} highlight={criticalUntreated > 0} />
-        <KpiCard label="SLA critique dépassé (>48h)" value={kpis?.sla_exceeded}  sub="items critiques sans traitement"  highlight={(kpis?.sla_exceeded ?? 0) > 0} />
-        <KpiCard label="Taux traitement (30j)"  value={kpis ? `${kpis.treatment_rate_pct}%` : null} sub={`${kpis?.period_treated ?? 0} / ${kpis?.period_total ?? 0} traités`} />
-        <KpiCard label="Délai moyen traitement" value={kpis?.avg_treatment_delay_hours != null ? `${kpis.avg_treatment_delay_hours}h` : '—'} sub="sur les 30 derniers jours" />
+      {/* KPIs — rangée forcée à l'horizontale (flex nowrap, pas un grid qui peut
+          retomber à une tuile par ligne sur un écran étroit) ; défile plutôt que de
+          s'empiler verticalement si la place manque vraiment. */}
+      <div className="stagger flex flex-nowrap gap-2 overflow-x-auto pb-1">
+        <div className="flex-1 min-w-[140px]"><KpiCard label="Critiques non traités" value={criticalUntreated} sub={`dont ${kpis?.by_status?.new ?? 0} nouveaux`} highlight={criticalUntreated > 0} icon={KPI_ICON_PATHS.warning} accent="#f85149" /></div>
+        <div className="flex-1 min-w-[140px]"><KpiCard label="SLA critique dépassé (>48h)" value={kpis?.sla_exceeded}  sub="items critiques sans traitement"  highlight={(kpis?.sla_exceeded ?? 0) > 0} icon={KPI_ICON_PATHS.clock} accent="#d29922" /></div>
+        <div className="flex-1 min-w-[140px]"><KpiCard label="Taux traitement (30j)"  value={kpis ? `${kpis.treatment_rate_pct}%` : null} sub={`${kpis?.period_treated ?? 0} / ${kpis?.period_total ?? 0} traités`} icon={KPI_ICON_PATHS.check} accent="#3fb950" /></div>
+        <div className="flex-1 min-w-[140px]"><KpiCard label="Délai moyen traitement" value={kpis?.avg_treatment_delay_hours != null ? `${kpis.avg_treatment_delay_hours}h` : '—'} sub="sur les 30 derniers jours" icon={KPI_ICON_PATHS.clock} accent="#58a6ff" /></div>
       </div>
 
       {/* Filtres */}

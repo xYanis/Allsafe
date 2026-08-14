@@ -1,12 +1,16 @@
+import { MODULES } from '../constants/modules.js'
+import PageHero from '../components/PageHero.jsx'
+
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 
 export default function Bastion() {
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Bastion</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Module à venir</p>
-      </div>
+      <PageHero
+        icon="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+        title="Bastion" color={MODULES.securite.color}
+        subtitle="Module à venir"
+      />
 
       <div style={CARD} className="p-10 flex flex-col items-center gap-3 text-center">
         <svg className="w-8 h-8" fill="none" stroke="var(--text-muted)" viewBox="0 0 24 24">

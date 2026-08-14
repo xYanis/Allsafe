@@ -5,6 +5,7 @@ import PageLoader from '../components/PageLoader.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import AuditFormModal, { AUDIT_TYPES, AUDIT_STATUSES } from '../components/AuditFormModal.jsx'
 import { MODULES } from '../constants/modules.js'
+import PageHero from '../components/PageHero.jsx'
 
 const MODULE_COLOR = MODULES.securite.color
 
@@ -69,22 +70,17 @@ export default function Audits() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Audits{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Cadrage, autorisation, findings et contre-vérification — Allsafe héberge et trace l'audit, ne l'exécute jamais.
-          </p>
-        </div>
+      <PageHero
+        icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+        title="Audits" color={MODULE_COLOR}
+        subtitle="Cadrage, autorisation, findings et contre-vérification — Allsafe héberge et trace l'audit, ne l'exécute jamais."
+      >
         <button onClick={() => setCreateModal(true)}
           className="px-4 py-2 text-sm font-medium rounded-lg"
           style={{ background: MODULE_COLOR, color: MODULES.securite.dark }}>
           + Nouvel audit
         </button>
-      </div>
+      </PageHero>
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}

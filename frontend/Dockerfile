@@ -12,8 +12,11 @@ COPY . .
 EXPOSE 3000
 # Non-root (10/08/2026, cf. AUDIT_SECURITE.md) : `node` déjà présent dans l'image
 # officielle (UID 1000, cohérent avec la propriété des bind mounts ./frontend, 1000:1000
-# côté hôte WSL2/drvfs). `npm install` reste avant, en root — il n'écrit que dans l'image,
-# pas dans un volume monté au runtime, donc aucune réappropriation à faire côté hôte.
+# côté hôte WSL2/drvfs). `npm install` reste avant, en root — mais `node_modules` est un
+# volume anonyme (docker-compose.yml), recréé root:root à chaque recréation du conteneur
+# si on ne le réapproprie pas ici ; sans ce chown, `node` ne peut plus écrire son cache
+# (`node_modules/.vite`) → EACCES en boucle et page blanche côté navigateur (14/08/2026).
+RUN chown -R node:node /app
 USER node
 CMD ["npm", "run", "dev"]
 

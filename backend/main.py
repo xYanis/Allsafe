@@ -28,7 +28,7 @@ from auth_deps import require_admin, require_auth, require_page
 from config import settings
 from database import SessionLocal, init_db
 from models import User, SyncState
-from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents
+from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents, integrations
 from services.auth import hash_password
 from services.cpe_matcher import run_cpe_matching
 from services.patch_checker import run_full_patch_check_cycle, PATCH_CYCLE_STATE_KEY
@@ -256,6 +256,7 @@ app.include_router(audits.router,          prefix="/api/audits",          tags=[
 # (jeton, pas de session) et /checkin (require_agent, en-tête X-Agent-Token) ont chacun leur
 # propre schéma d'auth, incompatible avec un garde-fou uniforme posé ici — cf. routers/agents.py.
 app.include_router(agents.router,          prefix="/api/agents",          tags=["Agents"])
+app.include_router(integrations.router,    prefix="/api/integrations",    tags=["Intégrations"],           dependencies=_authed)
 
 
 @app.get("/api/health")

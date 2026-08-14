@@ -17,7 +17,62 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
-**Dernière session : 12/08/2026** — module Sécurité > Agents construit de bout en bout (demande
+**Dernière session : 14/08/2026** — partie de la session à la demande "on va reprendre tout les
+visuels du module paramètres", élargie en cours de route à Veille/Fuite de données/Notes, puis à des
+fonctionnalités de compte self-service. Chronologie :
+- **`components/PageHero.jsx` (nouveau)** — en-tête compact coloré par module (dégradé + icône + trame
+  de points), extrait dès le 2e usage (Watch.jsx/FuiteDeDonnees.jsx) puis déployé par 5 agents en
+  parallèle sur ~20 pages de contenu (une couleur par module, cf. `constants/modules.js`), en
+  remplacement systématique de l'ancien en-tête `h1`+`p` plat. Réduit deux fois de taille sur retour
+  utilisateur ("c'est un peu grand"), puis le titre recoloré en dégradé + police mono (`--font-mono`)
+  sur retour "je trouve les titres banal" — et le compteur `(N)` retiré du composant ensuite ("pas
+  besoin des chiffres à côté du titre"), touchant les 13 pages qui le passaient.
+- **Veille technologique + Fuite de données — 3 passes successives sur la densité des tuiles KPI**,
+  chacune en réponse à un retour utilisateur précis ("gros et chargé" → "réduit la taille... range-les
+  horizontalement" → grille capée mais espace vide à droite sur Fuite de données avec seulement 3
+  tuiles) : largeur plafonnée via `minmax(x, min(y, 1fr))` (s'étire pour remplir la ligne s'il y a peu
+  de tuiles, sans jamais dépasser le plafond), puis rangée forcée en `flex nowrap` plutôt qu'un `grid`
+  qui pouvait retomber à une tuile par ligne. Une couleur d'identité par KPI/stat (liseré gauche
+  teinté + icône colorée) au lieu du gris/violet uniforme d'avant.
+- **`Notes.jsx` — 3e itération de layout**, demande explicite de reproduire la logique de nav à icônes
+  d'`AdministrationSecurity.jsx` (confirmée malgré les deux tentatives précédentes déjà rejetées le
+  12/08 — cartes puis explorateur à deux volets bordés) : cette fois la nav elle-même reste sans
+  bordure (fond teinté + liseré gauche), ce qui change la donne. Nav des thèmes à gauche + panneau des
+  sujets à droite, sélection simple au lieu de l'accordéon multi-ouvert.
+- **`Settings.jsx` retapé sur le même schéma que Notes.jsx** ("paramètre soit comme la page note sans
+  les tuiles") — nav à icônes sans bordure + panneau unique, plus une carte par réglage. Deux pages
+  oubliées dans le premier passage (Paramètres et Administration elles-mêmes n'avaient pas de
+  `PageHero`) ajoutées après coup. `AdministrationSecurity.jsx` gagne au passage une nav réductible en
+  icônes seules (bouton "Réduire", demande explicite séparée).
+- **Bug réel trouvé en repassant sur Settings.jsx** : le sous-titre affichait encore "Configuration de
+  CyberVuln" — reliquat du rebranding Allsafe du 11/08/2026, jamais retouché sur cette page précise.
+  Corrigé ("Configuration d'Allsafe").
+- **Gestion de son propre compte** (Settings.jsx > Compte, demande explicite "rajoute la possibilité de
+  modifier son compte à côté de déconnecter") : changer son email et son mot de passe, mot de passe
+  actuel requis dans les deux cas. **Politique de mot de passe renforcée** au passage (demande
+  explicite) : `services/auth.py::validate_password_strength` centralise 16 caractères + majuscule +
+  minuscule + chiffre + caractère spécial, avant dupliquée en deux endroits avec juste une longueur
+  minimale. `components/PasswordStrengthHint.jsx` (nouveau) donne un indice de force en direct pendant
+  la saisie, réutilisé aussi sur l'écran de changement de mot de passe forcé.
+- **Deux idées supplémentaires proposées puis validées par l'utilisateur** ("1 et 2 pour l'instant") :
+  **gérer ses propres sessions actives** (`GET`/`DELETE /api/auth/sessions`, pendant self-service du
+  `revoke-sessions` admin déjà existant sur un *autre* compte) et **statut des intégrations externes**
+  en lecture seule (`GET /api/integrations/status`, nouveau router — NVD/GitHub/AD/SSH/WithSecure/
+  Meraki/PRTG/GLPI/vSphere, configuré/non configuré + dernière synchro, jamais un secret).
+- **Nom d'analyste par défaut** (3e idée proposée, validée séparément) : préférence 100% client
+  (`contexts/AnalystPreferenceContext.jsx`, `localStorage`, même patron que Theme/PresentationContext).
+  Appliquée à `ValidateDropdown.jsx` (nom préféré remonté en tête + mis en avant, pas de valeur
+  contrôlée à pré-remplir dans ce composant) et `AnnotationModal.jsx` (le `<select>` "Validé par" se
+  pré-remplit, uniquement si `initialValidator` est vide — jamais sur une ré-édition d'une annotation
+  déjà validée, seul `Dashboard.jsx` passant une valeur existante). Périmètre volontairement limité à
+  ces deux composants sur les 21 qui consomment `useAnalysts()` dans l'app.
+- Tout vérifié par compilation HMR (frontend) + reload (`--reload`, backend) sans erreur au fil de la
+  session ; deux endpoints testés via `curl` (401 attendu sans cookie de session, confirme le montage).
+  Détail technique complet (composants, endpoints, schémas) dans `docs/FRONTEND.md` §
+  `PageHero.jsx` + refonte Paramètres/Veille/Fuite de données + self-service compte (14/08/2026)` et
+  `docs/ARCHITECTURE.md` § Authentification.
+
+**Session précédente : 12/08/2026** — module Sécurité > Agents construit de bout en bout (demande
 explicite, cf. `docs/AGENTS.md` pour le détail complet) : agent Rust `allsafe-agent` pour postes
 Windows/Linux, alternative de collecte au compte de service SSH/WinRM pour les postes qu'il atteint
 mal (éteints, hors réseau, VPN) — jamais un remplacement des serveurs, choix par actif

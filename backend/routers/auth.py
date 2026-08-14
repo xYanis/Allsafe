@@ -15,9 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth_deps import SESSION_COOKIE_NAME, require_auth
 from config import settings
 from database import get_session
-from models import User
+from models import User, UserSession
 from services.auth import (
     MAX_CONCURRENT_SESSIONS,
+    _hash_token,
     count_active_sessions,
     count_recent_failures,
     create_session,
@@ -25,6 +26,7 @@ from services.auth import (
     hash_password,
     is_locked_out,
     record_audit,
+    validate_password_strength,
     verify_password,
 )
 
@@ -51,6 +53,11 @@ class LoginPayload(BaseModel):
 class ChangePasswordPayload(BaseModel):
     current_password: str
     new_password: str
+
+
+class ChangeEmailPayload(BaseModel):
+    current_password: str
+    new_email: str
 
 
 @router.post("/login")
@@ -130,11 +137,78 @@ async def change_password(payload: ChangePasswordPayload, user: User = Depends(r
                            session: AsyncSession = Depends(get_session)):
     if not verify_password(payload.current_password, user.password_hash):
         raise HTTPException(401, "Mot de passe actuel incorrect.")
-    if len(payload.new_password) < 16:
-        raise HTTPException(400, "Le nouveau mot de passe doit faire au moins 16 caractères.")
+    validate_password_strength(payload.new_password)
     user.password_hash = hash_password(payload.new_password)
     user.must_change_password = False
     user.updated_at = datetime.now(timezone.utc)
     await record_audit(session, "PASSWORD_CHANGED", user_id=user.id, email_attempt=user.email)
     await session.commit()
     return {"changed": True}
+
+
+# Modification de l'email de son propre compte (14/08/2026, demande utilisateur) — n'existait
+# pas jusqu'ici : seul un admin pouvait changer l'email d'un compte (PATCH /api/users/{id}),
+# jamais un utilisateur le sien. Même garde-fou que change-password (mot de passe actuel
+# requis) — un email de connexion est une donnée sensible, pas modifiable sur la seule foi
+# du cookie de session.
+@router.patch("/change-email")
+async def change_email(payload: ChangeEmailPayload, user: User = Depends(require_auth),
+                        session: AsyncSession = Depends(get_session)):
+    if not verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(401, "Mot de passe actuel incorrect.")
+    new_email = payload.new_email.strip().lower()
+    if not new_email:
+        raise HTTPException(400, "L'email est obligatoire.")
+    existing = (await session.execute(
+        select(User).where(User.email == new_email, User.id != user.id)
+    )).scalar_one_or_none()
+    if existing:
+        raise HTTPException(409, "Un compte existe déjà avec cet email.")
+    old_email = user.email
+    user.email = new_email
+    user.updated_at = datetime.now(timezone.utc)
+    await record_audit(session, "EMAIL_CHANGED", user_id=user.id, email_attempt=old_email,
+                        details={"new_email": new_email})
+    await session.commit()
+    return {"id": str(user.id), "email": user.email, "full_name": user.full_name,
+            "role": user.role, "must_change_password": user.must_change_password,
+            "allowed_pages": user.allowed_pages}
+
+
+# Sessions actives de son propre compte (14/08/2026, demande utilisateur) — self-service,
+# pendant de POST /api/users/{id}/revoke-sessions (admin, sur un AUTRE compte). Utile pour
+# repérer une connexion oubliée (poste partagé) sans devoir demander à un admin.
+@router.get("/sessions")
+async def list_my_sessions(request: Request, user: User = Depends(require_auth),
+                            session: AsyncSession = Depends(get_session)):
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    current_hash = _hash_token(raw_token) if raw_token else None
+    rows = (await session.execute(
+        select(UserSession).where(UserSession.user_id == user.id).order_by(UserSession.created_at.desc())
+    )).scalars().all()
+    return {"items": [
+        {
+            "id": str(r.id),
+            "ip_address": r.ip_address,
+            "user_agent": r.user_agent,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            "is_current": r.session_token_hash == current_hash,
+        }
+        for r in rows
+    ]}
+
+
+@router.delete("/sessions/{session_id}")
+async def revoke_my_session(session_id: str, request: Request, user: User = Depends(require_auth),
+                             session: AsyncSession = Depends(get_session)):
+    row = await session.get(UserSession, session_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, "Session introuvable.")
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    if raw_token and row.session_token_hash == _hash_token(raw_token):
+        raise HTTPException(400, "Utilisez « Se déconnecter » pour la session en cours.")
+    await session.delete(row)
+    await record_audit(session, "SESSION_REVOKED", user_id=user.id, email_attempt=user.email)
+    await session.commit()
+    return {"revoked": True}

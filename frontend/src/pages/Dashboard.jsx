@@ -5,6 +5,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
 import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates } from '../api/client.js'
+import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import CriticiteBadge from '../components/CriticiteBadge.jsx'
 import ConnectivityDot from '../components/ConnectivityDot.jsx'
@@ -1582,17 +1583,17 @@ export default function Dashboard() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Dashboard</h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Vue d'ensemble de la posture de sécurité</p>
-        </div>
+      <PageHero
+        icon="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
+        title="Dashboard" color="#f85149"
+        subtitle="Vue d'ensemble de la posture de sécurité"
+      >
         <div className="flex items-start gap-2">
           <MatchingCveButton onDone={() => { refreshStats() }} onToast={pushToast} />
           <PatchCheckRunButton selectedAssetIds={selectedAssetIds} onToast={pushToast} />
           <NotificationHistory />
         </div>
-      </div>
+      </PageHero>
 
       {/* Rattrapage : ce qui a basculé automatiquement depuis la dernière visite
           sur ce navigateur (cycle de nuit compris) — cf. useEffect ci-dessus.

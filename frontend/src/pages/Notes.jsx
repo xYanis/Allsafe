@@ -5,6 +5,7 @@ import {
   noteSubjects as fetchNoteSubjects, createNoteSubject, deleteNoteSubject,
 } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 import NoteThemeFormModal from '../components/NoteThemeFormModal.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 
@@ -13,19 +14,25 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('fr-FR') + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
+const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+
 // Prise de notes personnelle structurée (12/08/2026, cf. docs/Notes.md) — Thème > Sujet en
 // Markdown, remplace le glossaire plat initial le même jour. Phase 1 seulement : pas de QCM
 // généré par IA ici (reporté, demande explicite de l'utilisateur).
 //
-// Rendu délibérément SANS carte ni panneau bordé (2e itération, même session — la première
-// passait par des cartes, la deuxième par un explorateur à deux volets bordés, aucune des
-// deux n'a plu) : arborescence façon Notion, à plat sur le fond de page — indentation et
-// surlignage au survol seuls, aucune boîte. Cf. .tree-row dans index.css.
+// 3e itération de layout (14/08/2026, demande explicite — reproduire la nav à icônes
+// d'AdministrationSecurity.jsx) : nav de thèmes à gauche (icône = emoji du thème, teinte =
+// couleur du thème, même gabarit que la nav d'Administration) + panneau de contenu à droite.
+// Les deux tentatives précédentes (cartes, puis explorateur à deux volets bordés) avaient été
+// rejetées — celle-ci diffère : la nav elle-même reste sans bordure (fond teinté + liseré
+// gauche seulement, pas de boîte), comme dans AdministrationSecurity, et non les deux
+// tentatives d'avant. Un seul thème affiché à la fois (sélection simple, pas d'accordéon
+// multi-ouvert) — mêmes lignes .tree-row qu'avant pour les sujets, à l'intérieur du panneau.
 export default function Notes() {
   const navigate = useNavigate()
   const [themes, setThemes] = useState(null)
   const [subjectsByTheme, setSubjectsByTheme] = useState({}) // theme_id -> items[] | undefined tant que pas chargé
-  const [expandedIds, setExpandedIds] = useState(() => new Set())
+  const [selectedThemeId, setSelectedThemeId] = useState(null)
   const [error, setError] = useState('')
   const [themeModal, setThemeModal] = useState(null) // null | 'new' | theme object
   const [deleteThemeTarget, setDeleteThemeTarget] = useState(null)
@@ -45,13 +52,16 @@ export default function Notes() {
     }).catch(() => setError('Impossible de charger les sujets — le serveur a peut-être renvoyé une erreur.'))
   }
 
-  function toggleTheme(themeId) {
-    setExpandedIds(prev => {
-      const next = new Set(prev)
-      if (next.has(themeId)) next.delete(themeId)
-      else { next.add(themeId); if (subjectsByTheme[themeId] === undefined) loadSubjectsFor(themeId) }
-      return next
-    })
+  // Sélectionne le premier thème dès le chargement initial (même défaut que l'onglet
+  // "database" d'AdministrationSecurity) — seulement s'il n'y a pas déjà une sélection.
+  useEffect(() => {
+    if (themes && themes.length > 0 && selectedThemeId == null) selectTheme(themes[0].id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themes])
+
+  function selectTheme(themeId) {
+    setSelectedThemeId(themeId)
+    if (subjectsByTheme[themeId] === undefined) loadSubjectsFor(themeId)
   }
 
   async function handleSaveTheme(payload) {
@@ -63,8 +73,10 @@ export default function Notes() {
 
   async function confirmDeleteTheme() {
     try {
-      await deleteNoteTheme(deleteThemeTarget.id)
+      const deletedId = deleteThemeTarget.id
+      await deleteNoteTheme(deletedId)
       setDeleteThemeTarget(null)
+      if (selectedThemeId === deletedId) setSelectedThemeId(null)
       loadThemes()
     } catch (e) {
       setError(e?.response?.data?.detail || 'Erreur lors de la suppression.')
@@ -99,14 +111,16 @@ export default function Notes() {
 
   if (themes === null) return <PageLoader />
 
+  const selectedTheme = themes.find(t => t.id === selectedThemeId) || null
+  const selectedSubjects = selectedThemeId != null ? subjectsByTheme[selectedThemeId] : undefined
+
   return (
-    <div className="p-6 space-y-5 max-w-2xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Notes</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          Votre prise de notes personnelle — organisez vos fiches de cours par thème.
-        </p>
-      </div>
+    <div className="p-6 space-y-5">
+      <PageHero
+        icon="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"
+        title="Notes" color="#e3b341"
+        subtitle="Votre prise de notes personnelle — organisez vos fiches de cours par thème."
+      />
 
       {error && (
         <div className="text-sm px-4 py-3 rounded-xl" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.2)' }}>
@@ -117,65 +131,88 @@ export default function Notes() {
       {themes.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun thème pour l'instant.</p>
       ) : (
-        <div className="stagger space-y-0.5">
-          {themes.map(t => {
-            const open = expandedIds.has(t.id)
-            const subjects = subjectsByTheme[t.id]
-            return (
-              <div key={t.id}>
-                <button onClick={() => toggleTheme(t.id)} onDoubleClick={() => setThemeModal(t)}
+        <div className="flex flex-col lg:flex-row gap-5 items-start">
+          <nav className="stagger w-full lg:w-64 flex-shrink-0 flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1">
+            {themes.map(t => {
+              const active = t.id === selectedThemeId
+              return (
+                <button key={t.id} onClick={() => selectTheme(t.id)} onDoubleClick={() => setThemeModal(t)}
                   title="Double-clic pour modifier"
-                  className="tree-row group w-full flex items-center gap-2 px-2 py-1.5 text-left"
-                  style={{ '--accent': t.color }}>
-                  <span className="flex-shrink-0 text-xs w-3.5 text-center" style={{ color: 'var(--text-faint)' }}>{open ? '▾' : '▸'}</span>
-                  <span className="flex-shrink-0" style={{ fontSize: 15 }}>{t.icon}</span>
-                  <span className="text-sm font-medium flex-1 min-w-0 truncate" style={{ color: 'var(--text-primary)' }}>{t.name}</span>
-                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{t.subject_count}</span>
+                  className="group flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+                  style={{
+                    background: active ? `color-mix(in srgb, ${t.color} 14%, transparent)` : 'transparent',
+                    boxShadow: active ? `inset 3px 0 0 0 ${t.color}` : 'none',
+                  }}
+                  onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                  onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                >
+                  <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{
+                    background: active ? `color-mix(in srgb, ${t.color} 22%, transparent)` : 'var(--bg-secondary)',
+                    fontSize: 15,
+                  }}>{t.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium truncate" style={{ color: active ? t.color : 'var(--text-primary)' }}>{t.name}</span>
+                    <span className="block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.subject_count} sujet{t.subject_count > 1 ? 's' : ''}</span>
+                  </span>
                   <button onClick={e => { e.stopPropagation(); setDeleteThemeTarget(t) }}
                     className="flex-shrink-0 text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:opacity-70"
                     style={{ color: 'var(--text-faint)' }} title="Supprimer">✕</button>
                 </button>
+              )
+            })}
 
-                {open && (
-                  <div className="route-fade" style={{ paddingLeft: 30 }}>
-                    {subjects === undefined ? (
-                      <div className="py-2"><PageLoader size="sm" /></div>
-                    ) : (
-                      <>
-                        {subjects.map(s => (
-                          <div key={s.id} onClick={() => navigate(`/notes/${s.id}`)}
-                            className="tree-row group flex items-center gap-2 px-2 py-1.5 cursor-pointer"
-                            style={{ '--accent': t.color }}>
-                            <span aria-hidden="true" className="flex-shrink-0 rounded-full" style={{ width: 5, height: 5, background: t.color }} />
-                            <span className="text-sm flex-1 min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{s.title}</span>
-                            <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{fmtDate(s.updated_at)}</span>
-                            <button onClick={e => { e.stopPropagation(); setDeleteSubjectTarget(s) }}
-                              className="flex-shrink-0 text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:opacity-70"
-                              style={{ color: 'var(--text-faint)' }} title="Supprimer">✕</button>
-                          </div>
-                        ))}
-                        <button onClick={() => handleCreateSubject(t.id)} disabled={creatingSubjectFor === t.id}
-                          className="tree-row w-full flex items-center gap-2 px-2 py-1.5 text-left disabled:opacity-50"
-                          style={{ '--accent': t.color, color: 'var(--text-faint)' }}>
-                          <span className="flex-shrink-0 text-sm leading-none w-[5px] text-center">+</span>
-                          <span className="text-sm">Nouveau sujet</span>
-                        </button>
-                      </>
-                    )}
+            <button onClick={() => setThemeModal('new')}
+              className="flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-sm leading-none" style={{ background: 'var(--bg-secondary)', color: 'var(--text-faint)' }}>+</span>
+              <span className="text-sm font-medium" style={{ color: 'var(--text-faint)' }}>Nouveau thème</span>
+            </button>
+          </nav>
+
+          <div style={CARD} className="flex-1 min-w-0 p-6">
+            {!selectedTheme ? (
+              <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Sélectionnez un thème.</p>
+            ) : (
+              <div className="route-fade" key={selectedTheme.id}>
+                <div className="flex items-center gap-2 mb-4">
+                  <span style={{ fontSize: 18 }}>{selectedTheme.icon}</span>
+                  <h2 className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{selectedTheme.name}</h2>
+                </div>
+
+                {selectedSubjects === undefined ? (
+                  <div className="py-2"><PageLoader size="sm" /></div>
+                ) : selectedSubjects.length === 0 ? (
+                  <p className="text-sm mb-2" style={{ color: 'var(--text-muted)' }}>Aucun sujet dans ce thème pour l'instant.</p>
+                ) : (
+                  <div className="space-y-0.5 mb-2">
+                    {selectedSubjects.map(s => (
+                      <div key={s.id} onClick={() => navigate(`/notes/${s.id}`)}
+                        className="tree-row group flex items-center gap-2 px-2 py-1.5 cursor-pointer"
+                        style={{ '--accent': selectedTheme.color }}>
+                        <span aria-hidden="true" className="flex-shrink-0 rounded-full" style={{ width: 5, height: 5, background: selectedTheme.color }} />
+                        <span className="text-sm flex-1 min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{s.title}</span>
+                        <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{fmtDate(s.updated_at)}</span>
+                        <button onClick={e => { e.stopPropagation(); setDeleteSubjectTarget(s) }}
+                          className="flex-shrink-0 text-xs opacity-0 group-hover:opacity-100 transition-opacity hover:opacity-70"
+                          style={{ color: 'var(--text-faint)' }} title="Supprimer">✕</button>
+                      </div>
+                    ))}
                   </div>
                 )}
+
+                <button onClick={() => handleCreateSubject(selectedTheme.id)} disabled={creatingSubjectFor === selectedTheme.id}
+                  className="tree-row w-full flex items-center gap-2 px-2 py-1.5 text-left disabled:opacity-50"
+                  style={{ '--accent': selectedTheme.color, color: 'var(--text-faint)' }}>
+                  <span className="flex-shrink-0 text-sm leading-none w-[5px] text-center">+</span>
+                  <span className="text-sm">Nouveau sujet</span>
+                </button>
               </div>
-            )
-          })}
+            )}
+          </div>
         </div>
       )}
-
-      <button onClick={() => setThemeModal('new')}
-        className="tree-row w-full flex items-center gap-2 px-2 py-1.5 text-left"
-        style={{ '--accent': 'var(--text-faint)', color: 'var(--text-faint)' }}>
-        <span className="flex-shrink-0 text-xs w-3.5 text-center leading-none">+</span>
-        <span className="text-sm font-medium">Nouveau thème</span>
-      </button>
 
       {themeModal && (
         <NoteThemeFormModal initial={themeModal !== 'new' ? themeModal : null} onConfirm={handleSaveTheme} onClose={() => setThemeModal(null)} />

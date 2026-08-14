@@ -334,6 +334,110 @@ avaient déjà leur propre constante `ACCENT` sur `#58a6ff`.
 
 ---
 
+## `PageHero.jsx` + refonte Paramètres/Veille/Fuite de données + self-service compte (14/08/2026)
+
+Enchaînement de demandes explicites de l'utilisateur dans une même session, du visuel (une page
+"chargée" à retravailler) au fonctionnel (gérer son propre compte). Résumé regroupé ici plutôt que
+scindé par page, pour garder la logique de la session lisible d'un coup.
+
+### `components/PageHero.jsx` (nouveau, extrait dès le 2e usage)
+
+En-tête compact pour les pages de travail répétitif (dégradé teinté à la couleur du module, tuile
+d'icône en dégradé + ombre colorée, trame de points `.hero-grid` en fond, titre en dégradé de la
+couleur du module rendu via `useTheme()` — assombri en clair, cf. `dangerColor` d'`AdministrationRow`
+pour la même logique de recalibrage). Props : `icon` (path SVG, peut contenir plusieurs sous-tracés
+`M...z M...z`), `title`, `subtitle`, `color`, `children` (actions à droite). Pas de prop `count` —
+retiré après coup, retour utilisateur ("pas besoin des chiffres à côté du titre").
+
+Sans `children` (Settings.jsx, Notes.jsx), le masque de la trame de points est recentré et élargi
+(`gridMaskPos`/`gridMaskSize` conditionnels) plutôt que de garder le masque resserré à gauche pensé
+pour laisser la place à des boutons — sans ce recentrage, le côté droit de la carte retombait à plat/
+vide ("Paramètres fait comme Notes", retour utilisateur).
+
+Déployé sur la quasi-totalité des pages de contenu (remplace un en-tête `h1`+`p` plat), une couleur
+par module (`constants/modules.js`) : Dashboard/Vulnerabilities/CVEs (rouge), Incidents/Crises
+(marron), Audits/Bastion (vert), Watch/FuiteDeDonnees/SurveillanceIdentites (bleu),
+Documentation/Notes (or), Assets/Inventaire/Durcissement/Agents (cyan), Reports/RapportVeille/
+RapportSurveillance/RapportIncidents (violet), Settings/AdministrationSecurity (gris). Non concerné :
+pages de détail avec leur propre patron retour+titre (`AuditDetail.jsx`, `NoteSubject.jsx`), Login/Home
+(hors `<Layout>`).
+
+### Veille technologique + Fuite de données — densité et couleur
+
+Retour utilisateur : "je trouve ça gros et chargé, les tuiles sont immenses". Trois correctifs
+successifs sur les mêmes cartes KPI/stat :
+- Largeur plafonnée côté grille (`minmax(180px, min(240px, 1fr))` — le `min(...,1fr)` permet aux
+  tuiles de s'étirer pour remplir la ligne quand il y en a peu, sans jamais dépasser le plafond quand
+  il y en a beaucoup — corrige un 2e retour, l'espace vide à droite du bandeau de 3 stats sur Fuite de
+  données avec le plafond fixe précédent).
+- **Rangée forcée à l'horizontale** (`flex flex-nowrap overflow-x-auto`, pas un `grid` qui peut
+  retomber à une tuile par ligne sur un écran étroit) + gabarit très resserré (`px-3/py-2`, valeur
+  `text-base`) — 3e retour ("réduit la taille... range-les horizontalement").
+- Une couleur d'identité par KPI/stat (rouge/ambre/vert/bleu sur Veille, violet/cyan/bleu sur Fuite de
+  données) au lieu du gris/violet uniforme — liseré gauche teinté (`boxShadow: inset 3px 0 0 0 ...`) +
+  icône colorée + micro-interaction (`group-hover:scale-110`).
+- Cartes de résultat (Fuite de données) : `.lift-card` + même liseré gauche teinté par source, pour
+  lire comme un seul système visuel avec les tuiles KPI au-dessus.
+
+### `Notes.jsx` — 3e itération de layout (nav à icônes + panneau, sans les tuiles rejetées)
+
+Cf. commentaire en tête du fichier pour l'historique complet (cartes puis explorateur à deux volets
+bordés, tous deux rejetés le 12/08/2026). Cette 3e tentative diffère des deux précédentes : nav des
+thèmes à gauche **sans bordure** (fond teinté à la couleur du thème + liseré gauche seulement, même
+gabarit que la nav d'`AdministrationSecurity.jsx`), panneau de contenu à droite. Sélection simple (un
+thème affiché à la fois, plus d'accordéon multi-ouvert) — auto-sélection du premier thème au chargement.
+Les sujets restent en lignes `.tree-row` plates à l'intérieur du panneau, pas de tuile par sujet.
+
+### `Settings.jsx` (Paramètres) — nav à deux volets + self-service compte
+
+Même schéma que `Notes.jsx` (nav à icônes sans bordure à gauche, panneau à droite, plus aucune tuile
+par réglage) plutôt que l'ancien empilement de cartes une par section. Sections : Présentation,
+Apparence, **Compte**, **Sessions** (nouveau), **Intégrations** (nouveau), **Sécurité** (lien vers
+Administration, pas un onglet — pas de contenu propre).
+
+- **Compte** : bouton "Modifier" à côté de "Se déconnecter" → déplie deux formulaires indépendants
+  (changer l'email, changer le mot de passe avec `PasswordStrengthHint.jsx`) — chacun son état de
+  soumission/erreur. Juste au-dessus : `<select>` "Nom d'analyste par défaut" (cf.
+  `AnalystPreferenceContext.jsx` ci-dessous).
+- **Sessions** : liste des appareils connectés au compte (`GET /api/auth/sessions`), badge "Cet
+  appareil" sur la session courante, bouton "Révoquer" sur les autres. Chargé à la demande (au premier
+  passage sur la section), pas au montage de la page.
+- **Intégrations** : statut configuré/non configuré + dernière synchro de NVD/GitHub/AD/SSH/
+  WithSecure/Meraki/PRTG/GLPI/vSphere (`GET /api/integrations/status`), lecture seule, aucun secret
+  affiché.
+
+### `AdministrationSecurity.jsx` — nav réductible en icônes seules
+
+Bouton "Réduire" en haut de la colonne de nav (état local, pas persisté — nav secondaire, contrairement
+à la sidebar principale de `Layout.jsx`) : bascule la largeur (`lg:w-64` ↔ `lg:w-16`), masque
+labels/description, ajoute un `title` (tooltip) sur chaque item en mode réduit. Couleur d'accent des
+onglets alignée sur `var(--accent-blue)` au passage (était en `#58a6ff` codé en dur).
+
+### `components/PasswordStrengthHint.jsx` (nouveau)
+
+Barre de force colorée + checklist des 5 critères de `services/auth.py::validate_password_strength`
+(dupliqués en JS — pas de logique partagée possible entre Python et JS, à garder synchronisés si la
+politique change), cochés en direct pendant la saisie. Utilisé dans `Settings.jsx` (changement de mot
+de passe) et `ProtectedRoute.jsx::ForcedPasswordChange` (écran de changement forcé) — le bouton de
+validation de ce dernier passe en `disabled` tant que `passwordMeetsPolicy()` est faux, pour ne plus
+laisser découvrir les critères manquants seulement au rejet serveur.
+
+### `contexts/AnalystPreferenceContext.jsx` (nouveau) — nom d'analyste par défaut
+
+Préférence 100% client (`localStorage`, clé `preferred_analyst`), même patron exact que
+`ThemeContext.jsx`/`PresentationContext.jsx` (lecture lazy au premier rendu, écriture par effet).
+Volontairement séparée du registre `Analyst` (backend) et d'`AnalystContext.jsx` (liste des noms) —
+une préférence d'affichage locale, pas une donnée à synchroniser entre postes. Appliquée à 2
+composants (sur 21 qui consomment `useAnalysts()` dans l'app — périmètre volontairement limité aux
+plus utilisés, pas d'audit systématique des 19 autres) :
+- `ValidateDropdown.jsx` : pas de valeur contrôlée à pré-remplir (menu qui valide au clic, pas de
+  submit) — le nom préféré remonte en tête de liste + mis en avant (gras vert, étiquette "Moi").
+- `AnnotationModal.jsx` : le `<select>` "Validé par" se pré-remplit avec le nom préféré, **seulement**
+  quand `initialValidator` est vide (nouvelle annotation) — sur une ré-édition (seul appelant :
+  `Dashboard.jsx`), `initialValidator` porte déjà le nom réellement enregistré, jamais écrasé.
+
+---
+
 ## Pages
 
 ### Home.jsx (route `/`, page d'accueil — sans `<Layout>`/sidebar)
@@ -849,7 +953,8 @@ Deux détails qui comptent à l'enregistrement :
 
 ### Watch.jsx (route `/veille`, groupe nav CyberVeille) — registre auditable NIS 2
 Détail complet du module (workflow, sources, thèmes, SLA) dans `docs/VEILLE.md`. Ci-dessous, ce qui
-concerne spécifiquement le frontend.
+concerne spécifiquement le frontend. ⚠️ En-tête + KPIs retravaillés le 14/08/2026 (`PageHero`, rangée
+forcée à l'horizontale, une couleur par KPI) — cf. section dédiée plus haut.
 - KPIs (4 cards), filtres multi-sélection (sources en dropdown 4 colonnes, sévérité/thèmes en chips,
   toggle SLA), tableau avec modale de traitement (statut/**sévérité** (session 20/07/2026, cf. ci-dessous)
   /analyste/CVE liée/décision), export CSV
@@ -881,7 +986,9 @@ concerne spécifiquement le frontend.
 
 ### FuiteDeDonnees.jsx (route `/fuite-de-donnees`, groupe nav CyberVeille) — onglet informatif
 Détail complet du module (sources, pays, modèle de données) dans `docs/VEILLE.md` § 9. Ci-dessous, ce
-qui concerne spécifiquement le frontend.
+qui concerne spécifiquement le frontend. ⚠️ En-tête + bandeau de stats + cartes retravaillés le
+14/08/2026 (`PageHero`, grille plafonnée `min(...,1fr)`, liseré coloré par source) — cf. section
+dédiée plus haut.
 - Grille de cards responsive (1/2/3 colonnes), pas de tableau — chaque card : badge source coloré +
   nom de l'entité à côté (extrait via `parseCompany()` pour ransomware.live, titre brut pour les
   autres sources), drapeau pays (`components/FlagIcon.jsx`) en haut à droite, résumé tronqué, date
@@ -1021,13 +1128,12 @@ l'équipe sécurité)
   résumé évolue côté backend. `Bold` renommé `Inline`, gère `**gras**` et `*italique*`
 
 ### Settings.jsx (Paramètres)
-Sections : **Présentation** (switch "Anonyme", `PresentationContext` — cf. section dédiée ci-dessous),
-**Apparence** (toggle dark/light, `ThemeContext`; même composant `Switch` pill que "Anonyme"),
-**Sécurité**, **Compte** (30/07/2026, en bas de page — nom/email connecté + bouton "Se déconnecter",
-`useAuth().logout()`, cf. `docs/ARCHITECTURE.md` § Authentification).
-- La section **Sécurité** ne contient qu'une **ligne cliquable « Administration »** (`AdministrationRow`,
-  icône cadenas + chevron ›) qui **navigue** vers la page dédiée `/settings/administration` — ce n'est
-  plus un panneau déplié à la suite des paramètres (session 24/07/2026).
+⚠️ **Layout à deux volets depuis le 14/08/2026** (nav à icônes + panneau, plus l'empilement de cartes
+décrit historiquement ici) — détail complet dans `## PageHero.jsx + refonte Paramètres/Veille/Fuite de
+données + self-service compte (14/08/2026)` ci-dessus. Sections : Présentation (switch "Anonyme",
+`PresentationContext`), Apparence (toggle dark/light, `ThemeContext`), **Compte** (nom/email + changer
+email/mot de passe + sessions actives + nom d'analyste par défaut), **Sessions**, **Intégrations**,
+**Sécurité** (lien vers Administration, pas un onglet).
 - Pas de gestion de sources/sync ici. L'onglet "Synchronisation" qui existait (Sync NVD, import actifs,
   recalcul scores) a été retiré de la nav, jugé redondant avec le bouton "Actualiser" (7/15j) de la page
   CVE — les endpoints `POST /api/sync/assets`/`POST /api/sync/rescore` restent disponibles côté API.
@@ -1038,7 +1144,9 @@ Page **réservée au rôle admin** — protégée à la fois côté client (`<Pr
 l'écriture `/api/analysts`, cf. `docs/ARCHITECTURE.md` § Authentification). ⚠️ Avant le 30/07/2026 cette
 page était protégée par un mot de passe codé en clair dans le bundle JS (`ACCESS_PASSWORD`), vérifié
 uniquement côté client — un vrai trou de sécurité, fermé avec l'arrivée de l'authentification réelle.
-Lien "← Retour aux paramètres". **Quatre onglets** :
+Lien "← Retour aux paramètres". Nav à icônes verticale (14/08/2026, remplace l'ancienne barre
+d'onglets horizontale — cf. section `PageHero.jsx`/refonte ci-dessus), réductible en icônes seules via
+un bouton "Réduire" en haut de la colonne (état local, non persisté). **Sept onglets** :
 - **Base de données** (`DatabaseTab`, onglet par défaut) : **console de déception / administration BDD**.
   Bandeau d'état (déception active, objets leurres, app en rôle `cbr_app` non-superuser, verrou DDL) +
   bloc **« Alertes à traiter »** (non acquittées, cliquables) au-dessus du **journal `security_events`**
@@ -1056,6 +1164,14 @@ Lien "← Retour aux paramètres". **Quatre onglets** :
 - **Analystes** (`AnalystsTab`, 30/07/2026, déplacé depuis Settings.jsx) : CRUD du registre `analysts`
   (`AnalystFormModal.jsx`, nom seul) — la lecture reste ouverte à tout connecté ailleurs dans l'app, mais
   la gestion (créer/modifier/supprimer) est réservée admin depuis ce déplacement.
+- **Services** (`ServicesTab`, 31/07/2026) : registre RH/DSI/Juridique/Direction (`ServiceFormModal.jsx`,
+  nom + couleur + icône), consommé par l'onglet Rôles et par Incidents/Gestion de crise.
+- **Rôles** (`OrganizationRolesTab`, 31/07/2026) : organigramme poste → personne → email
+  (`OrganizationRoleFormModal.jsx`), poste optionnellement rattaché à un service (couleur de la carte
+  reprise du service).
+- **Correspondances Windows** (`WindowsAppMappingsTab`) : motif de nom d'application Windows → produit
+  CPE (`WindowsAppMappingFormModal.jsx`), consommé par `services/cpe_matcher.py` pour le matching CVE
+  Windows (texte libre des noms d'applis, sans rapport avec les conventions Debian/RPM).
 - **`EventDetailModal` — explication grand public** (session 24/07/2026) : la modale ne montre pas que
   les champs techniques. `explainEvent(e)` génère, par type d'événement, un texte **compréhensible par un
   non-technicien** — « Ce qui s'est passé », « Pourquoi c'est une alerte », un « ✓ bloqué » pour les DDL,
@@ -1214,6 +1330,8 @@ frontend/
     │   ├── PresentationContext.jsx → mode Présentation ("Anonyme"), cf. section dédiée plus haut
     │   ├── AnalystContext.jsx      → registre de noms (cf. models.py::Analyst) pour les dropdowns
     │   │                             d'attribution — indépendant de l'authentification ci-dessous
+    │   ├── AnalystPreferenceContext.jsx → (14/08/2026) "nom d'analyste par défaut" — préférence 100%
+    │   │                             client (`localStorage`), même patron que ThemeContext/PresentationContext
     │   └── AuthContext.jsx         → (30/07/2026) session utilisateur — `me()` au montage, `user`,
     │                                 `loading`, `login()`, `logout()`, `refresh()`. `refresh()` doit
     │                                 être rappelé après qu'un admin modifie SON PROPRE compte (email/
@@ -1247,22 +1365,29 @@ frontend/
     │   │                            export CSV backlog, archives hebdo (déclinées par actif)
     │   ├── RapportVeille.jsx     → Rapports (route /rapport-veille) — export CSV du registre + archives hebdo
     │   ├── RapportSurveillance.jsx → Rapports (route /rapport-surveillance) — archives hebdo
-    │   ├── Settings.jsx          → Paramètres (switch "Anonyme", thème, ligne "Administration", section
-    │   │                            "Compte" en bas de page — nom/email connecté + déconnexion,
-    │   │                            30/07/2026, remplace le badge qui était dans la sidebar)
+    │   ├── Settings.jsx          → Paramètres (14/08/2026, nav à deux volets sans tuile) : Présentation,
+    │   │                            Apparence, Compte (+ changer email/mot de passe, sessions actives,
+    │   │                            nom d'analyste par défaut), Sessions, Intégrations, Sécurité (lien)
     │   └── AdministrationSecurity.jsx → page dédiée (route /settings/administration, réservée admin
     │                              côté client ET serveur depuis le 30/07/2026 — l'ancien verrou mdp
-    │                              client-only est supprimé) : onglets Connexions IP / Base de données
-    │                              (déception) / Utilisateurs / Analystes (registre de noms, déplacé
-    │                              de Settings.jsx le 30/07/2026)
+    │                              client-only est supprimé) : nav à icônes réductible (14/08/2026),
+    │                              7 onglets — Base de données (déception) / Connexions IP / Utilisateurs /
+    │                              Analystes / Services / Rôles / Correspondances Windows
     ├── components/
     │   ├── Layout.jsx           → Sidebar Allsafe (logo cliquable → "/", réductible) + nav à 2 niveaux
     │   │                          (6 groupes colorés + Paramètres, cf. ci-dessous) + <Outlet/> — n'englobe PAS Home.jsx.
     │   │                          Pas de badge utilisateur/déconnexion dans le pied de sidebar (retiré
     │   │                          30/07/2026, cf. Settings.jsx > section Compte)
     │   ├── PasswordInput.jsx    → (30/07/2026) champ mot de passe + bascule afficher/masquer, réutilisé
-    │   │                          sur Login.jsx, le changement de mot de passe forcé (ProtectedRoute.jsx)
-    │   │                          et UserFormModal.jsx — 16 caractères minimum imposé par les appelants
+    │   │                          sur Login.jsx, le changement de mot de passe forcé (ProtectedRoute.jsx),
+    │   │                          UserFormModal.jsx et Settings.jsx — politique de complexité imposée par
+    │   │                          les appelants (cf. PasswordStrengthHint.jsx ci-dessous)
+    │   ├── PasswordStrengthHint.jsx → (14/08/2026) barre de force + checklist des 5 critères de
+    │   │                          `services/auth.py::validate_password_strength`, dupliqués en JS —
+    │   │                          Settings.jsx + ProtectedRoute.jsx::ForcedPasswordChange
+    │   ├── PageHero.jsx         → (14/08/2026) en-tête compact coloré par module, extrait dès le 2e
+    │   │                          usage — déployé sur la quasi-totalité des pages de contenu, cf. section
+    │   │                          dédiée plus haut pour le détail complet
     │   ├── ProtectedRoute.jsx   → (30/07/2026) garde de route : redirige vers /login si pas de session,
     │   │                          prop `role="admin"` optionnelle (redirige vers "/" sinon), affiche un
     │   │                          écran de changement de mot de passe bloquant si `must_change_password`

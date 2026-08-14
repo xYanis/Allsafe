@@ -4,6 +4,7 @@ import PageLoader from '../components/PageLoader.jsx'
 import CrisisFormModal from '../components/CrisisFormModal.jsx'
 import CrisisDetailModal from '../components/CrisisDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
+import PageHero from '../components/PageHero.jsx'
 
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
@@ -58,20 +59,17 @@ export default function Crises() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Gestion de crise{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Escalade en crise — cellule de crise, décisions et communications tracées</p>
-        </div>
+      <PageHero
+        icon="M12 9v3.75m9.303 3.376c.866 1.5-.217 3.374-1.948 3.374H4.645c-1.73 0-2.813-1.874-1.948-3.374L10.697 3.376c.866-1.5 3.032-1.5 3.898 0l7.303 12.75zM12 15.75h.007v.008H12v-.008z"
+        title="Gestion de crise" color={MODULE_COLOR}
+        subtitle="Escalade en crise — cellule de crise, décisions et communications tracées"
+      >
         <button onClick={() => setCreateModal(true)}
           className="px-4 py-2 text-sm font-medium rounded-lg"
           style={{ background: MODULE_COLOR, color: MODULES.incidents.dark }}>
           + Activer une crise
         </button>
-      </div>
+      </PageHero>
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}

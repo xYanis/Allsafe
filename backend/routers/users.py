@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_session
 from models import Analyst, User, UserSession
 from services.access_control import PAGE_KEYS
-from services.auth import hash_password
+from services.auth import hash_password, validate_password_strength
 
 router = APIRouter()
 
@@ -92,8 +92,7 @@ async def create_user(data: UserCreate, session: AsyncSession = Depends(get_sess
         raise HTTPException(400, "Email et nom sont obligatoires.")
     if data.role not in ("admin", "analyst"):
         raise HTTPException(400, "Rôle invalide.")
-    if len(data.password) < 16:
-        raise HTTPException(400, "Le mot de passe doit faire au moins 16 caractères.")
+    validate_password_strength(data.password)
     _validate_allowed_pages(data.allowed_pages)
     existing = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
     if existing:

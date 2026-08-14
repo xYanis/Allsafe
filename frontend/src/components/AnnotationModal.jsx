@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
+import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
 
 // Modale générique de saisie d'annotation, réutilisée pour les actions
 // "⏳ En attente d'un patch correctif", "🚫 Faux positif" et "✓ Corrigé" du
@@ -12,8 +13,13 @@ export default function AnnotationModal({ title, detail, color, subtitle, helpTe
   // `names` bascule déjà sur FAKE_VALIDATORS en mode Présentation, centralisé dans
   // AnalystContext.jsx (31/07/2026) — plus besoin de le refaire ici.
   const { names } = useAnalysts()
+  // Nom d'analyste par défaut (14/08/2026, demande utilisateur) — ne s'applique que
+  // quand `initialValidator` est vide (nouvelle annotation) : sur une ré-édition,
+  // `initialValidator` porte déjà le nom réellement enregistré (cf. Dashboard.jsx,
+  // seul appelant à le passer), jamais écrasé par la préférence.
+  const { preferredAnalyst } = useAnalystPreference()
   const [note, setNote] = useState(initialNote)
-  const [validator, setValidator] = useState(initialValidator)
+  const [validator, setValidator] = useState(initialValidator || (names.includes(preferredAnalyst) ? preferredAnalyst : ''))
   const [reviewDate, setReviewDate] = useState(initialReviewDate)
   const [saving, setSaving] = useState(false)
 

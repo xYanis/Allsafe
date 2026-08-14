@@ -13,6 +13,7 @@ import OsLogo from '../components/OsLogo.jsx'
 import CategoryIcon from '../components/CategoryIcon.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { TYPE_LABELS, merakiModelLabel, assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import { MODULES } from '../constants/modules.js'
@@ -924,15 +925,12 @@ export default function Assets() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Actifs <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>
-              ({filteredAssets.length}{filteredAssets.length !== assetList.length ? ` / ${assetList.length}` : ''})
-            </span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Inventaire des serveurs et postes de travail</p>
-        </div>
+      <PageHero
+        icon="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"
+        title="Actifs"
+        color="#39c5cf"
+        subtitle="Inventaire des serveurs et postes de travail"
+      >
         <div className="flex items-center gap-2 flex-wrap">
           <input
             value={searchName}
@@ -1003,17 +1001,17 @@ export default function Assets() {
             <option value="configured">Configurés uniquement</option>
             <option value="unconfigured">Non configurés uniquement</option>
           </select>
+          <button onClick={() => setShowAddModal(true)}
+            className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+            style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Ajouter un actif
+          </button>
         </div>
-        <button onClick={() => setShowAddModal(true)}
-          className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
-          style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-          Ajouter un actif
-        </button>
-      </div>
+      </PageHero>
 
       {selectedAssetIds.size > 0 && (
         <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg" style={{ background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.25)' }}>

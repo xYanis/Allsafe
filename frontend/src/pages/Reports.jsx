@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { exportCsv, assets as fetchAssets } from '../api/client.js'
 import AssetDropdown from '../components/AssetDropdown.jsx'
+import PageHero from '../components/PageHero.jsx'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, redactText, isFakeId } from '../utils/fakeData.js'
@@ -79,10 +80,11 @@ export default function Reports() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Rapport exécutif CVE</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Résumé exécutif, export CSV et journaux d'accès</p>
-      </div>
+      <PageHero
+        icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+        title="Rapport exécutif CVE" color="#a371f7"
+        subtitle="Résumé exécutif, export CSV et journaux d'accès"
+      />
 
       {error && (
         <div className="text-sm px-4 py-3 rounded-xl flex items-center gap-2"

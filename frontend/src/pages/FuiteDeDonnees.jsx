@@ -10,6 +10,7 @@ import { COUNTRIES } from '../utils/countries.js'
 import { hexToRgba } from '../utils/color.js'
 import PageLoader from '../components/PageLoader.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 // Onglet 100% informatif — aucun rapport avec le registre auditable NIS 2 de
 // Veille technologique (pas de statut/analyste/décision/SLA). Restreint aux
@@ -20,6 +21,43 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 // mentionne occasionnellement une fuite de données.
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const ACCENT = '#a371f7'
+
+// Icônes des KPI/pagination — même famille (Heroicons outline) que le reste de l'app.
+const ICON_PATHS = {
+  leak:    'M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z',
+  sources: 'M21.75 17.25v-.228a4.5 4.5 0 00-.12-1.03l-2.268-9.64a3.375 3.375 0 00-3.285-2.602H7.923a3.375 3.375 0 00-3.285 2.602l-2.268 9.64a4.5 4.5 0 00-.12 1.03v.228m19.5 0a3 3 0 01-3 3H5.25a3 3 0 01-3-3m19.5 0a3 3 0 00-3-3H5.25a3 3 0 00-3 3m16.5 0h.008v.008h-.008v-.008zm-3 0h.008v.008h-.008v-.008z',
+  clock:   'M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z',
+  chevronLeft:  'M15.75 19.5L8.25 12l7.5-7.5',
+  chevronRight: 'M8.25 4.5l7.5 7.5-7.5 7.5',
+}
+
+function Icon({ d, className = 'w-4 h-4' }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
+    </svg>
+  )
+}
+
+// Tuile de stat — même gabarit resserré que KpiCard (Watch.jsx, cf. son commentaire pour
+// le pourquoi de la largeur plafonnée) ; pas d'extraction partagée pour ce petit composant
+// présentationnel dupliqué une 3e fois (cf. Dashboard.jsx/Watch.jsx) — dépasse le cadre
+// d'une passe purement visuelle. `accent` distinct par tuile plutôt qu'un seul violet
+// répété trois fois — plus de vie, chaque stat garde une identité propre au coup d'œil.
+function StatTile({ label, value, sub, icon, accent = ACCENT }) {
+  return (
+    <div style={{ ...CARD, boxShadow: `inset 3px 0 0 0 color-mix(in srgb, ${accent} 50%, transparent)` }} className="lift-card group px-3 py-2 min-w-0">
+      <div className="flex items-center gap-1.5 mb-1">
+        <span className="w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0 transition-transform duration-200 group-hover:scale-110" style={{ background: hexToRgba(accent, 0.16), color: accent }}>
+          <Icon d={icon} className="w-3 h-3" />
+        </span>
+        <p className="text-[10px] font-semibold uppercase tracking-wide truncate" style={{ color: accent }}>{label}</p>
+      </div>
+      <p className="text-base font-bold truncate" style={{ color: 'var(--text-primary)' }}>{value ?? '—'}</p>
+      {sub && <p className="text-[11px] mt-0.5 truncate" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
+    </div>
+  )
+}
 
 const SOURCE_LABELS = {
   zataz: 'ZATAZ',
@@ -205,11 +243,12 @@ export default function FuiteDeDonnees() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          Fuite de données <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({data.total})</span>
-        </h1>
-        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+      <PageHero
+        icon="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+        title="Fuite de données" color={ACCENT}
+        subtitle="Sources dédiées à l'identification de fuites de bases de données"
+      >
+        <div className="flex flex-col items-end gap-1">
           <button onClick={handleSync} disabled={syncing}
             className="px-3 py-2 text-xs font-medium rounded-lg transition-colors disabled:opacity-60"
             style={{ background: ACCENT, color: '#fff' }}
@@ -222,13 +261,20 @@ export default function FuiteDeDonnees() {
               : 'Jamais synchronisé'}
           </span>
         </div>
-      </div>
+      </PageHero>
 
       {msg && (
         <div className="text-sm px-4 py-3 rounded-xl" style={{ background: hexToRgba(ACCENT, 0.1), color: ACCENT, border: `1px solid ${hexToRgba(ACCENT, 0.2)}` }}>
           {msg}
         </div>
       )}
+
+      <div className="stagger flex flex-nowrap gap-2 overflow-x-auto pb-1">
+        <div className="flex-1 min-w-[140px]"><StatTile label="Fuites détectées" value={data.total} icon={ICON_PATHS.leak} accent={ACCENT} /></div>
+        <div className="flex-1 min-w-[140px]"><StatTile label="Sources suivies" value={leakSources.length} sub={`dont ${customSources.length} personnalisée${customSources.length > 1 ? 's' : ''}`} icon={ICON_PATHS.sources} accent="#39c5cf" /></div>
+        <div className="flex-1 min-w-[140px]"><StatTile label="Dernière synchronisation" value={lastSyncedAt ? new Date(lastSyncedAt).toLocaleDateString('fr-FR') : '—'}
+          sub={lastSyncedAt ? new Date(lastSyncedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : 'Jamais synchronisé'} icon={ICON_PATHS.clock} accent="#58a6ff" /></div>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Chip label="Toutes sources" active={!selSource} color={ACCENT} onClick={() => { setSelSource(''); setPage(1) }} />
@@ -278,7 +324,7 @@ export default function FuiteDeDonnees() {
         <CountryDropdown selected={selCountries} onChange={v => { setSelCountries(v); setPage(1) }} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+      <div className="stagger grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(280px, min(380px, 1fr)))' }}>
         {loading && (
           <div style={CARD} className="col-span-full px-5 py-10 text-center">
             <PageLoader size="sm" />
@@ -294,7 +340,7 @@ export default function FuiteDeDonnees() {
           const { company, context } = parseCompany(item)
           return (
             <a key={item.id} href={item.url || '#'} target="_blank" rel="noopener noreferrer"
-              style={CARD} className="flex flex-col px-4 py-4 transition-colors"
+              style={{ ...CARD, boxShadow: `inset 3px 0 0 0 ${hexToRgba(color, 0.55)}` }} className="lift-card flex flex-col px-4 py-4 transition-colors"
               onMouseEnter={e => e.currentTarget.style.background = hexToRgba(ACCENT, 0.04)}
               onMouseLeave={e => e.currentTarget.style.background = 'var(--bg-card)'}
             >
@@ -324,14 +370,14 @@ export default function FuiteDeDonnees() {
       {totalPages > 1 && (
         <div className="flex items-center justify-center gap-3 pt-2">
           <button onClick={() => setPage(p => p - 1)} disabled={page === 1}
-            className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-          >← Préc.</button>
+          ><Icon d={ICON_PATHS.chevronLeft} className="w-3.5 h-3.5" /> Préc.</button>
           <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Page {page} / {totalPages}</span>
           <button onClick={() => setPage(p => p + 1)} disabled={page === totalPages}
-            className="text-xs px-3 py-1.5 rounded-lg disabled:opacity-40"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg disabled:opacity-40 transition-colors"
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
-          >Suiv. →</button>
+          >Suiv. <Icon d={ICON_PATHS.chevronRight} className="w-3.5 h-3.5" /></button>
         </div>
       )}
     </div>

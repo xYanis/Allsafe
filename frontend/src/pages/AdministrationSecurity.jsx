@@ -23,9 +23,31 @@ import WindowsAppMappingFormModal from '../components/WindowsAppMappingFormModal
 import { SERVICE_COLOR_PALETTE } from '../constants/serviceColors.js'
 import ServiceIcon from '../components/ServiceIcon.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+
+// Icônes de la nav d'Administration — même famille (Heroicons outline, viewBox 24,
+// strokeWidth cohérent) que ICONS dans Layout.jsx, dupliquées localement plutôt
+// qu'importées : ce fichier n'a pas besoin du reste du set de la sidebar.
+const TAB_ICON_PATHS = {
+  database: 'M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75',
+  connections: 'M21.75 17.25v-.228a4.5 4.5 0 00-.12-1.03l-2.268-9.64a3.375 3.375 0 00-3.285-2.602H7.923a3.375 3.375 0 00-3.285 2.602l-2.268 9.64a4.5 4.5 0 00-.12 1.03v.228m19.5 0a3 3 0 01-3 3H5.25a3 3 0 01-3-3m19.5 0a3 3 0 00-3-3H5.25a3 3 0 00-3 3m16.5 0h.008v.008h-.008v-.008zm-3 0h.008v.008h-.008v-.008z',
+  users: 'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z',
+  analysts: 'M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z',
+  services: 'M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21m4.5 0v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21',
+  roles: 'M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.933 2.185 2.25 2.25 0 00-3.933-2.185zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z',
+  'windows-mappings': 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25',
+}
+
+function TabIcon({ name }) {
+  return (
+    <svg className="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={TAB_ICON_PATHS[name]} />
+    </svg>
+  )
+}
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -1052,44 +1074,77 @@ export default function AdministrationSecurity() {
   const navigate = useNavigate()
   const { isAnonymous } = usePresentation()
   const [tab, setTab] = useState('database')
+  // Repli icônes seules (demande utilisateur, 14/08/2026) — même idée que la sidebar
+  // principale (Layout.jsx) mais état local, pas persisté : cette nav est secondaire,
+  // pas la navigation globale de l'app.
+  const [navCollapsed, setNavCollapsed] = useState(false)
 
   const TABS = [
-    { key: 'database',    label: 'Base de données' },
-    { key: 'connections', label: 'Connexion' },
-    { key: 'users',       label: 'Utilisateurs' },
-    { key: 'analysts',    label: 'Analystes' },
-    { key: 'services',    label: 'Services' },
-    { key: 'roles',       label: 'Rôles' },
-    { key: 'windows-mappings', label: 'Correspondances Windows' },
+    { key: 'database',    label: 'Base de données',  desc: 'Déception & journal' },
+    { key: 'connections', label: 'Connexions IP',     desc: 'Historique d\'accès' },
+    { key: 'users',       label: 'Utilisateurs',      desc: 'Comptes de connexion' },
+    { key: 'analysts',    label: 'Analystes',         desc: 'Registre de validation' },
+    { key: 'services',    label: 'Services',          desc: 'RH, DSI, Direction...' },
+    { key: 'roles',       label: 'Rôles',             desc: 'Organigramme' },
+    { key: 'windows-mappings', label: 'Correspondances Windows', desc: 'Apps → CPE' },
   ]
 
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <button onClick={() => navigate('/settings')}
-          className="text-xs mb-2 inline-flex items-center gap-1 hover:underline" style={{ color: 'var(--text-muted)' }}>
-          ← Retour aux paramètres
-        </button>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>Administration</h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>Journal de connexion, administration de la base et comptes utilisateurs — réservé aux administrateurs</p>
-      </div>
+      <button onClick={() => navigate('/settings')}
+        className="text-xs -mb-1 inline-flex items-center gap-1 hover:underline" style={{ color: 'var(--text-muted)' }}>
+        ← Retour aux paramètres
+      </button>
+      <PageHero
+        icon="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.964 0a9 9 0 10-11.964 0m11.964 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"
+        title="Administration" color="#8b949e"
+        subtitle="Journal de connexion, administration de la base et comptes utilisateurs — réservé aux administrateurs"
+      />
 
-      <div style={CARD} className="overflow-hidden">
-        <div className="flex gap-1 px-6 pt-4" style={{ borderBottom: '1px solid var(--border)' }}>
-          {TABS.map(t => (
-            <button key={t.key} onClick={() => setTab(t.key)}
-              className="text-sm px-4 py-2 font-medium transition-colors"
-              style={{
-                color: tab === t.key ? '#58a6ff' : 'var(--text-muted)',
-                borderBottom: `2px solid ${tab === t.key ? '#58a6ff' : 'transparent'}`,
-                marginBottom: -1,
-              }}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="flex flex-col lg:flex-row gap-5 items-start">
+        <nav className={`w-full ${navCollapsed ? 'lg:w-16' : 'lg:w-64'} flex-shrink-0 flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 transition-[width] duration-200`}>
+          <button onClick={() => setNavCollapsed(c => !c)} title={navCollapsed ? 'Déplier le menu' : 'Réduire le menu'}
+            className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-lg mb-1 flex-shrink-0 transition-colors"
+            style={{ color: 'var(--text-muted)' }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <svg className="w-4 h-4 flex-shrink-0 transition-transform duration-200" style={{ transform: navCollapsed ? 'rotate(180deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+            {!navCollapsed && <span className="text-xs font-medium">Réduire</span>}
+          </button>
+          {TABS.map(t => {
+            const active = tab === t.key
+            return (
+              <button key={t.key} onClick={() => setTab(t.key)} title={navCollapsed ? t.label : undefined}
+                className="flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
+                style={{
+                  background: active ? 'color-mix(in srgb, var(--accent-blue) 12%, transparent)' : 'transparent',
+                  boxShadow: active ? 'inset 3px 0 0 0 var(--accent-blue)' : 'none',
+                  justifyContent: navCollapsed ? 'center' : 'flex-start',
+                }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+              >
+                <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{
+                  background: active ? 'color-mix(in srgb, var(--accent-blue) 20%, transparent)' : 'var(--bg-secondary)',
+                  color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                }}>
+                  <TabIcon name={t.key} />
+                </span>
+                {!navCollapsed && (
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium truncate" style={{ color: active ? 'var(--accent-blue)' : 'var(--text-primary)' }}>{t.label}</span>
+                    <span className="hidden lg:block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.desc}</span>
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </nav>
 
-        <div className="p-6">
+        <div style={CARD} className="flex-1 min-w-0 p-6">
           {tab === 'connections' ? (
             <ConnectionsTab isAnonymous={isAnonymous} />
           ) : tab === 'users' ? (

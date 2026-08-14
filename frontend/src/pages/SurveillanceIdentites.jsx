@@ -8,6 +8,7 @@ import {
   FAKE_IDENTITIES, FAKE_IDENTITY_MATCHES, FAKE_IP_MATCHES, FAKE_OSINT_MATCHES,
 } from '../utils/fakeData.js'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 
 // Module Surveillance Identités (CyberVeille, couleur bleue #58a6ff) — repère
 // les items de fuite de données concernant l'entreprise, en croisant des
@@ -134,17 +135,11 @@ export default function SurveillanceIdentites() {
 
   return (
     <div className="p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-          Surveillance Identités{' '}
-          <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({matches.total + ipMatches.length + osintMatches.length})</span>
-        </h1>
-        <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-          Fuites de données mentionnant votre entreprise, croisées avec les sources de veille collectées,
-          IP surveillées croisées avec des listes de blocage publiques, et emails/domaines vérifiés
-          contre XposedOrNot et GitHub
-        </p>
-      </div>
+      <PageHero
+        icon="M15 9h3.75M15 12h3.75M15 15h3.75M4.5 19.5h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5zm6-10.125a1.875 1.875 0 11-3.75 0 1.875 1.875 0 013.75 0zm1.294 6.336a6.721 6.721 0 01-3.17.789 6.721 6.721 0 01-3.168-.789 3.376 3.376 0 016.338 0z"
+        title="Surveillance Identités" color={ACCENT}
+        subtitle="Fuites de données mentionnant votre entreprise, croisées avec les sources de veille collectées, IP surveillées croisées avec des listes de blocage publiques, et emails/domaines vérifiés contre XposedOrNot et GitHub"
+      />
 
       {/* Identités surveillées */}
       <div style={CARD} className="p-5 space-y-4">

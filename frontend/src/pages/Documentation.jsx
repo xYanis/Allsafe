@@ -6,6 +6,7 @@ import {
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageLoader from '../components/PageLoader.jsx'
+import PageHero from '../components/PageHero.jsx'
 import DocumentTypeFormModal from '../components/DocumentTypeFormModal.jsx'
 import UploadDocumentModal from '../components/UploadDocumentModal.jsx'
 import DocumentPreviewModal from '../components/DocumentPreviewModal.jsx'
@@ -198,16 +199,11 @@ export default function Documentation() {
 
   return (
     <div className="p-6 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
-            Documentation Entreprise{' '}
-            <span className="font-normal text-lg" style={{ color: 'var(--text-muted)' }}>({types.length})</span>
-          </h1>
-          <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
-            Documents de gouvernance nécessaires à la conformité NIS 2 — PSSI, chartes, organigramme...
-          </p>
-        </div>
+      <PageHero
+        icon="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+        title="Documentation Entreprise" color={MODULE_COLOR}
+        subtitle="Documents de gouvernance nécessaires à la conformité NIS 2 — PSSI, chartes, organigramme..."
+      >
         {isAdmin && (
           <button onClick={() => setShowAddType(true)}
             className="px-4 py-2 text-sm font-medium rounded-lg"
@@ -215,7 +211,7 @@ export default function Documentation() {
             + Ajouter un type de document
           </button>
         )}
-      </div>
+      </PageHero>
 
       {error && (
         <div className="text-sm px-4 py-3 rounded-xl" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.2)' }}>

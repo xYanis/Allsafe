@@ -38,6 +38,59 @@ build-frontend:
     # stage "build") en plus du stage nginx — même image que frontend-prod en local.
     - docker build -t $FRONTEND_IMAGE --target prod ./frontend
 
+build-agent:
+  # 17/08/2026 — build croisé de l'agent (.exe/.msi Windows + .deb Linux), jamais fait avant
+  # (le seul chemin de build était manuel, cf. agent/README.md). Ajouté après un build local
+  # WSL2 systématiquement bloqué sur la compilation C de `ring` (dépendance de reqwest,
+  # inchangée) — reproductible même avec un mingw-w64 système propre, jamais en rejouant la
+  # même commande à la main : symptôme propre à cet environnement WSL2, pas à `ring` lui-même
+  # ni à ce code. Un vrai conteneur Docker (ce job) est le test qui manquait pour trancher —
+  # et sert désormais de pipeline de build reproductible, plus besoin de dépendre du poste
+  # de dev pour produire un `.msi`/`.deb` de release.
+  #
+  # image dédiée (pas `docker:24-cli` comme les jobs ci-dessus, qui ne parlent qu'au daemon
+  # Docker de l'hôte) : ce job a besoin d'un vrai environnement Rust, pas de builder une image
+  # Docker. ⚠️ **`rust:1-trixie` obligatoire, pas `rust:1-bookworm`** — vérifié en conditions
+  # réelles (conteneur, 17/08/2026) : `wixl` 0.101 (Debian bookworm/stable) ne comprend pas du
+  # tout l'élément `<Environment>` de `wix/main.wxs` et **plante** ("unhandled child Component
+  # node Environment", ne produit aucun `.msi`) — seul `wixl` 0.106 (Debian trixie, testing) le
+  # supporte. Écart constaté entre deux versions Debian du même outil, à revérifier si l'image
+  # de base change un jour.
+  stage: build
+  image: rust:1-trixie
+  rules:
+    # Coûteux (install mingw-w64/wixl/msitools/cargo-deb à chaque run, pas de cache) et sans
+    # rapport avec le reste du dépôt — ne tourne que si l'agent Rust a changé, pas à chaque
+    # commit backend/frontend.
+    - changes:
+        - agent/**/*
+  script:
+    # msitools (paquet séparé de wixl, fournit `msiinfo`) : nécessaire seulement pour les
+    # vérifications post-build ci-dessous, pas pour construire le `.msi` lui-même.
+    - apt-get update && apt-get install -y --no-install-recommends mingw-w64 wixl msitools
+    # gcc-mingw-w64 est un paquet "alternatives" (posix/win32) — Rust exige le runtime posix
+    # (`x86_64-pc-windows-gnu` ne supporte pas le modèle de threads win32), jamais garanti par
+    # défaut après un `apt-get install` frais (constaté en session : bascule sur win32 par défaut).
+    - update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+    - update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+    - rustup target add x86_64-pc-windows-gnu
+    - cargo install cargo-deb --locked
+    - cd agent
+    - cargo build --release --target x86_64-pc-windows-gnu
+    - wixl -a x64 -v wix/main.wxs -o allsafe-agent.msi
+    - cargo deb
+    # Vérifications déjà connues pour être silencieusement cassées côté wixl/msitools par le
+    # passé (cf. README § Build) — le job échoue net plutôt que de publier un artefact
+    # défectueux sans le signaler.
+    - "msiinfo suminfo allsafe-agent.msi | grep -q 'Template: x64;1033'"
+    - msiinfo export allsafe-agent.msi Environment | grep -q INSTALLFOLDER
+  artifacts:
+    paths:
+      - agent/target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
+      - agent/allsafe-agent.msi
+      - agent/target/debian/*.deb
+    expire_in: 1 week
+
 test-backend:
   stage: verify
   needs: ["build-backend"]

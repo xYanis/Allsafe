@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
   listAgents, createEnrollmentToken, listEnrollmentTokens, deleteEnrollmentToken,
-  revokeAgent, deleteAgent, requestAgentScan, assets as fetchAssets,
+  revokeAgent, deleteAgent, assets as fetchAssets,
 } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -24,22 +24,41 @@ function StatusBadge({ value }) {
   </span>
 }
 
+// Pastille de couleur plutôt qu'un pill texte (17/08/2026, demande explicite — moins de
+// bruit visuel dans la colonne) : le sens (à jour/mise à jour dispo) reste accessible via
+// le tooltip au survol. Version en police mono (--font-mono) — lisibilité/alignement d'un
+// numéro de version, cohérent avec le reste de l'app (titres PageHero notamment) — et dans
+// la même couleur que la pastille juste à côté, plutôt qu'un gris neutre découplé du sens
+// qu'elle porte.
 function VersionBadge({ version, outdated }) {
   if (!version) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+  const color = outdated ? '#d29922' : '#3fb950'
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span style={{ color: 'var(--text-secondary)' }}>{version}</span>
-      {outdated ? (
-        <span title="Une version plus récente de l'agent est disponible"
-          style={{ background: 'rgba(210,153,34,0.12)', color: '#d29922', border: '1px solid rgba(210,153,34,0.3)', borderRadius: 6, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
-          Mise à jour dispo
-        </span>
-      ) : (
-        <span title="Ce poste tourne la dernière version publiée de l'agent"
-          style={{ background: 'rgba(63,185,80,0.12)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.3)', borderRadius: 6, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
-          À jour
-        </span>
-      )}
+      <span style={{ color, fontFamily: 'var(--font-mono)' }}>{version}</span>
+      <span
+        title={outdated ? "Une version plus récente de l'agent est disponible" : "Ce poste tourne la dernière version publiée de l'agent"}
+        style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block', background: color }}
+      />
+    </span>
+  )
+}
+
+// État du jeton d'enrôlement ayant servi à créer cet agent (17/08/2026, demande explicite —
+// distinct du statut de l'agent lui-même, qui ne dit rien du jeton une fois l'enrôlement fait).
+const TOKEN_STATUS_STYLES = {
+  active:    { color: '#3fb950', label: 'Actif',   title: "Le jeton d'enrôlement est toujours valide (non expiré, non épuisé)." },
+  expired:   { color: '#8b949e', label: 'Expiré',  title: "Le jeton d'enrôlement a dépassé sa date d'expiration." },
+  exhausted: { color: '#8b949e', label: 'Épuisé',  title: "Le jeton d'enrôlement a atteint son nombre maximal d'utilisations." },
+  revoked:   { color: '#f85149', label: 'Révoqué', title: "Le jeton d'enrôlement a été révoqué après l'enrôlement." },
+}
+
+function TokenStateBadge({ status }) {
+  const s = TOKEN_STATUS_STYLES[status] || TOKEN_STATUS_STYLES.revoked
+  return (
+    <span className="inline-flex items-center gap-1.5" title={s.title}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block', background: s.color }} />
+      <span style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
     </span>
   )
 }
@@ -388,7 +407,8 @@ function TokenModal({ assetList, onClose, onCreated }) {
                 <p className="text-xs mt-1.5" style={{ color: 'var(--text-muted)' }}>
                   À lancer en administrateur (Windows) / root (Linux), depuis le dossier contenant
                   le script — le script vérifie les droits et affiche l'erreur à l'écran s'il en manque.
-                  Poste isolé sans script sous la main : <code>allsafe-agent enroll --token &lt;JETON&gt; --server &lt;URL&gt;</code> après installation manuelle du <code>.msi</code>/<code>.deb</code>.
+                  Windows sans script sous la main : <code>allsafe-agent.exe</code> seul suffit — double-clic
+                  (fenêtre demandant serveur + jeton) ou <code>allsafe-agent.exe install --token &lt;JETON&gt; --server &lt;URL&gt;</code>.
                 </p>
               </div>
             </div>
@@ -462,11 +482,6 @@ export default function Agents() {
     load()
   }
 
-  async function handleRequestScan(agent) {
-    await requestAgentScan(agent.id)
-    load()
-  }
-
   async function handleDeleteToken() {
     await deleteEnrollmentToken(deleteTokenTarget.id)
     setDeleteTokenTarget(null)
@@ -508,7 +523,7 @@ export default function Agents() {
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Hôte', 'OS', 'Distribution', 'Actif lié', 'Version', 'Dernier contact', 'Statut', ''].map(h => (
+                {['Hôte', 'OS', 'Distribution', 'Actif lié', 'Version', 'Dernier contact', 'Statut', 'État', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{h}</th>
                 ))}
               </tr>
@@ -516,7 +531,7 @@ export default function Agents() {
             <tbody>
               {!loading && agentList.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
+                  <td colSpan={9} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucun agent enrôlé</p>
                     <p className="text-xs">Générez un jeton d'enrôlement pour poser l'agent sur un poste</p>
                   </td>
@@ -538,21 +553,8 @@ export default function Agents() {
                     </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap"><StatusBadge value={a.status} /></td>
+                  <td className="px-4 py-3 text-xs whitespace-nowrap"><TokenStateBadge status={a.token_status} /></td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {isAdmin && a.status === 'enrolled' && (
-                      a.pending_scan_requested_at ? (
-                        <span className="text-xs px-2.5 py-1.5 rounded-lg font-medium mr-1.5" title="Récupéré au prochain sondage de l'agent (jusqu'à 60s), puis au check-in qui suit"
-                          style={{ background: 'rgba(88,166,255,0.1)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)' }}>
-                          Scan demandé
-                        </span>
-                      ) : (
-                        <button onClick={() => handleRequestScan(a)}
-                          className="text-xs px-2.5 py-1.5 rounded-lg font-medium mr-1.5"
-                          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                          Scanner maintenant
-                        </button>
-                      )
-                    )}
                     {isAdmin && a.status === 'enrolled' && (
                       <button onClick={() => setRevokeTarget(a)}
                         className="text-xs px-2.5 py-1.5 rounded-lg font-medium"

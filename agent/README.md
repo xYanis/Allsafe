@@ -29,6 +29,55 @@ Docker (ex. `127.0.0.1:8000` dans `docker-compose.yml`), c'est le port du **fron
 schéma `http://` ou `https://` obligatoire (`hhtp://` ou toute coquille dans le schéma fait
 échouer l'appel avec `URL scheme is not allowed`, avant même la moindre tentative réseau).
 
+## Installation directe (17/08/2026 — sans .msi ni script, un seul .exe)
+
+> ⚠️ **NON VÉRIFIÉ EN COMPILATION** (pas de toolchain Rust/mingw-w64 disponible au moment de
+> l'écriture) — cf. `src/install.rs`/`src/gui.rs` pour le détail. À builder et tester avant
+> de considérer ce mode acquis, cf. docs/AGENTS.md § Vérification.
+
+Pensé pour les **actifs critiques** (jeton unique par actif, cf. § Installation rapide
+ci-dessous pour le cas parc/non-critique) : un seul fichier `allsafe-agent.exe` à copier sur
+le poste (`agent/dist/` ou compilé soi-même), aucun `.msi`/script à côté.
+
+- **Double-clic, sans argument** → ouvre une petite fenêtre (URL du serveur + jeton),
+  demande l'élévation UAC automatiquement (manifeste `requireAdministrator`, `build.rs`).
+  Bouton "Installer" : service Windows + PATH système + enrôlement, en un clic.
+- **Ligne de commande équivalente** (même effet, pratique pour scripter) :
+  ```powershell
+  .\allsafe-agent.exe install --token <JETON> --server http://<hôte-allsafe>:3000
+  ```
+- **Désinstallation** : `allsafe-agent.exe uninstall` (admin) — arrête/désenregistre le
+  service et retire le `PATH`. Ne supprime pas les fichiers (un exe ne peut pas se
+  supprimer lui-même en cours d'exécution) — à faire à la main si besoin
+  (`Program Files\Allsafe Agent`, `%ProgramData%\allsafe-agent`).
+
+L'exécutable se copie lui-même vers `Program Files\Allsafe Agent\allsafe-agent.exe` au
+premier lancement (même emplacement que le `.msi`, pour que les deux voies restent
+interchangeables) — inutile de le placer soi-même à cet endroit avant.
+
+## Build "bulk" — jeton réutilisable pré-rempli dans le .msi
+
+Pensé pour les **actifs non-critiques** (un seul jeton réutilisable pour tout le lot,
+déployé silencieusement par GPO "Installation de logiciels", cf. échange du 17/08/2026) :
+
+1. Générer un jeton réutilisable ("Réutilisable (parc)") depuis Inventaire > Agents,
+   `max_uses` = taille réelle du lot, expiration courte = fenêtre de déploiement réelle
+   (cf. docs/AGENTS.md § Sécurité — ne pas laisser un `.msi` valable indéfiniment).
+2. Créer `enroll-defaults.json` à côté de `wix/main.wxs` :
+   ```json
+   { "server": "http://<hôte-allsafe>:3000", "token": "<JETON_REUTILISABLE>" }
+   ```
+3. Ajouter ce fichier au `<Component>` de `wix/main.wxs` (même dossier `INSTALLFOLDER` que
+   l'exécutable), puis rebuilder le `.msi` normalement (`wixl -a x64 ...`).
+4. Au premier démarrage du service sur chaque poste, `daemon.rs::bootstrap_from_defaults`
+   détecte l'absence de configuration existante + la présence de ce fichier, et s'auto-
+   enrôle avec — aucune interaction, aucun jeton à saisir sur chaque poste.
+
+⚠️ Un `.msi` "bulk" contient le jeton en clair (extractible du fichier) — traiter ce build
+comme un artefact jetable (révoquer le jeton une fois le parc déployé), pas un fichier à
+garder indéfiniment sur un partage. Le `.msi`/l'`.exe` "normaux" (sans `enroll-defaults.json`)
+n'embarquent jamais rien — ce fichier n'existe que dans ce build dédié.
+
 ## Installation rapide (recommandée — script)
 
 **17/08/2026** : plutôt que les commandes manuelles ci-dessous, `agent/deploy/update-agent.ps1`/
@@ -176,6 +225,13 @@ rustup target add x86_64-pc-windows-gnu
 cargo build --release --target x86_64-pc-windows-gnu
 # → target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
 ```
+
+⚠️ **NON VÉRIFIÉ EN COMPILATION** (17/08/2026, cf. `install.rs`/`gui.rs`) : `build.rs`
+embarque désormais un manifeste `requireAdministrator` via [`winres`](https://crates.io/crates/winres)
+— nécessite `windres` sur le `PATH` (fourni par `mingw-w64` ci-dessus, pas de paquet
+supplémentaire). La fenêtre graphique (`native-windows-gui`) ajoute aussi une dépendance de
+build — premier build à surveiller pour d'éventuelles erreurs de compilation (feature flags
+non affinés, cf. `Cargo.toml`) ou d'édition de liens spécifiques à `windows-gnu`.
 
 Le `.msi` est généré avec [`wixl`](https://gitlab.gnome.org/GNOME/msitools) (paquet Debian/
 Ubuntu `wixl`, alternative libre au WiX Toolset officiel qui est Windows-only/.NET) à partir

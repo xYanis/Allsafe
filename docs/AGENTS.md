@@ -24,6 +24,20 @@
 > **recommandée**, y compris pour un premier poste isolé, pas seulement les mises à jour planifiées
 > (§ Installation rapide, `agent/README.md`). La modale « Jeton d'enrôlement » (page Agents) génère
 > désormais la commande one-liner correspondante (token + URL serveur déjà substitués).
+>
+> **17/08/2026 — auto-installation Windows + fenêtre graphique, non vérifiées en
+> compilation** (pas de toolchain Rust/mingw-w64 disponible au moment de l'écriture,
+> `agent/src/install.rs`/`gui.rs`/`build.rs`) : `allsafe-agent.exe install --token ...
+> --server ...` (ou l'exécutable lancé sans argument, qui ouvre une fenêtre demandant
+> serveur + jeton) installe le service Windows + le `PATH` + enrôle depuis un seul fichier
+> `.exe`, sans `.msi` ni script — pensé pour les **actifs critiques** (jeton unique par
+> actif). Un build "bulk" du `.msi` (jeton réutilisable pré-rempli, `enroll-defaults.json`,
+> cf. `agent/README.md` § Build bulk) couvre le cas **actifs non-critiques** (déploiement
+> GPO silencieux, un seul jeton pour tout le lot — à traiter comme jetable : expiration
+> courte, `max_uses` borné, révocation post-rollout). Le `.msi`/`wixl`/GPO "Installation de
+> logiciels" restent le chemin recommandé pour un vrai déploiement de parc — cette nouvelle
+> voie comble le cas poste isolé sans script à portée de main. **À builder et tester avant
+> tout déploiement réel** (cf. § Vérification).
 
 ## Contexte
 

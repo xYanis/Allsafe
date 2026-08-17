@@ -17,6 +17,10 @@ mod config;
 mod daemon;
 mod model;
 #[cfg(target_os = "windows")]
+mod gui;
+#[cfg(target_os = "windows")]
+mod install;
+#[cfg(target_os = "windows")]
 mod service;
 
 use anyhow::{Context, Result};
@@ -54,9 +58,32 @@ enum Commands {
     #[cfg(target_os = "windows")]
     #[command(hide = true)]
     ServiceRun,
+    /// Auto-installation (17/08/2026, cf. install.rs) : copie l'exécutable vers un
+    /// emplacement stable, enregistre le service Windows + le PATH système, puis enrôle
+    /// si `--token`/`--server` sont fournis. Sans eux, ouvre la fenêtre graphique de
+    /// saisie (gui.rs) — comme un lancement sans aucun argument (double-clic).
+    #[cfg(target_os = "windows")]
+    Install {
+        #[arg(long)]
+        token: Option<String>,
+        #[arg(long)]
+        server: Option<String>,
+    },
+    /// Arrête et désenregistre le service Windows + retire l'entrée PATH (ne supprime pas
+    /// les fichiers, cf. install.rs).
+    #[cfg(target_os = "windows")]
+    Uninstall,
 }
 
 fn main() -> Result<()> {
+    // Lancement sans aucun argument (double-clic sur l'exe, cf. gui.rs) — interceptée
+    // avant `Cli::parse()` puisque `Commands` exige normalement une sous-commande et
+    // échouerait avec une erreur clap plutôt que d'ouvrir la fenêtre graphique.
+    #[cfg(target_os = "windows")]
+    if std::env::args().len() <= 1 {
+        return gui::run_install_wizard();
+    }
+
     let cli = Cli::parse();
 
     // Le dispatch SCM (`service_dispatcher::start`, cf. service.rs) est bloquant et doit
@@ -66,6 +93,25 @@ fn main() -> Result<()> {
     #[cfg(target_os = "windows")]
     if matches!(cli.command, Commands::ServiceRun) {
         return service::run().context("échec du service Windows");
+    }
+
+    // `install`/`uninstall` gèrent eux-mêmes leur runtime tokio (`gui.rs` en construit un
+    // ponctuel par clic, `install::install` est appelée directement ici) — même raisonnement
+    // que `ServiceRun` ci-dessus, pas de dépendance à celui construit plus bas pour `run()`.
+    #[cfg(target_os = "windows")]
+    match &cli.command {
+        Commands::Install { token: None, server: None } => return gui::run_install_wizard(),
+        Commands::Install { token: Some(_), server: None } | Commands::Install { token: None, server: Some(_) } => {
+            anyhow::bail!(
+                "--token et --server doivent être fournis ensemble (ou aucun des deux pour ouvrir la fenêtre graphique)."
+            );
+        }
+        Commands::Install { token, server } => {
+            let rt = tokio::runtime::Runtime::new().context("construction du runtime tokio")?;
+            return rt.block_on(install::install(token.clone(), server.clone()));
+        }
+        Commands::Uninstall => return install::uninstall(),
+        _ => {}
     }
 
     let rt = tokio::runtime::Runtime::new().context("construction du runtime tokio")?;
@@ -104,5 +150,7 @@ async fn run(command: Commands) -> Result<()> {
         }
         #[cfg(target_os = "windows")]
         Commands::ServiceRun => unreachable!("interceptée avant la création du runtime tokio, cf. main()"),
+        #[cfg(target_os = "windows")]
+        Commands::Install { .. } | Commands::Uninstall => unreachable!("interceptée avant `run()`, cf. main()"),
     }
 }

@@ -110,7 +110,25 @@ def _token_dict(t: AgentEnrollmentToken) -> dict:
     }
 
 
-def _agent_dict(a: Agent, asset_name: Optional[str] = None, asset_os: Optional[str] = None, asset_os_version: Optional[str] = None) -> dict:
+def _token_status(token: Optional[AgentEnrollmentToken]) -> str:
+    """État du jeton d'enrôlement ayant servi à créer cet agent (17/08/2026, demande
+    explicite — colonne "État" de la page Agents, à côté du statut de l'agent lui-même qui
+    ne dit rien du jeton). `None` (`Agent.enrollment_token_id` mis à NULL par
+    `ON DELETE SET NULL`, cf. `delete_enrollment_token` ci-dessous) : le jeton a été
+    explicitement révoqué après coup, distinct d'expiré/épuisé."""
+    if token is None:
+        return "revoked"
+    if token.expires_at and token.expires_at <= datetime.now(timezone.utc):
+        return "expired"
+    if token.use_count >= token.max_uses:
+        return "exhausted"
+    return "active"
+
+
+def _agent_dict(
+    a: Agent, asset_name: Optional[str] = None, asset_os: Optional[str] = None,
+    asset_os_version: Optional[str] = None, token: Optional[AgentEnrollmentToken] = None,
+) -> dict:
     return {
         "id": str(a.id),
         "asset_id": str(a.asset_id) if a.asset_id else None,
@@ -135,6 +153,7 @@ def _agent_dict(a: Agent, asset_name: Optional[str] = None, asset_os: Optional[s
         "last_gap_failed_attempts": a.last_gap_failed_attempts,
         "revoked_at": a.revoked_at.isoformat() if a.revoked_at else None,
         "revoked_by": a.revoked_by,
+        "token_status": _token_status(token),
     }
 
 
@@ -345,10 +364,15 @@ async def checkin(
 @router.get("")
 async def list_agents(session: AsyncSession = Depends(get_session), _user: User = Depends(require_page("/agents"))):
     rows = (await session.execute(
-        select(Agent, Asset.name, Asset.os, Asset.os_version)
-        .outerjoin(Asset, Agent.asset_id == Asset.id).order_by(Agent.enrolled_at.desc())
+        select(Agent, Asset.name, Asset.os, Asset.os_version, AgentEnrollmentToken)
+        .outerjoin(Asset, Agent.asset_id == Asset.id)
+        .outerjoin(AgentEnrollmentToken, Agent.enrollment_token_id == AgentEnrollmentToken.id)
+        .order_by(Agent.enrolled_at.desc())
     )).all()
-    return {"items": [_agent_dict(a, asset_name, asset_os, asset_os_version) for a, asset_name, asset_os, asset_os_version in rows]}
+    return {"items": [
+        _agent_dict(a, asset_name, asset_os, asset_os_version, token)
+        for a, asset_name, asset_os, asset_os_version, token in rows
+    ]}
 
 
 @router.post("/{agent_id}/revoke")

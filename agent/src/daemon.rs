@@ -7,6 +7,7 @@
 //! agent.*` pour les mises à jour.
 
 use std::time::{Duration, Instant};
+use anyhow::Context;
 use tokio::time::sleep;
 
 use crate::api;
@@ -23,7 +24,7 @@ pub async fn run() -> ! {
     let mut last_checkin: Option<Instant> = None;
 
     loop {
-        let cfg = match AgentConfig::load() {
+        let cfg = match load_or_bootstrap().await {
             Ok(cfg) => cfg,
             Err(e) => {
                 eprintln!("allsafe-agent: agent non enrôlé, nouvelle tentative dans {}s ({e:#})", POLL_INTERVAL.as_secs());
@@ -53,6 +54,47 @@ pub async fn run() -> ! {
 
         sleep(POLL_INTERVAL).await;
     }
+}
+
+/// Jeton "bulk" pré-rempli (17/08/2026, `.msi` de déploiement pour un parc non-critique,
+/// cf. docs/AGENTS.md § Installation rapide) — si aucune identité n'existe encore
+/// (première exécution du service) et qu'un fichier `enroll-defaults.json` est présent à
+/// côté de l'exécutable, l'agent s'enrôle seul avec son contenu. Absent par défaut : ni le
+/// `.msi` "normal" ni l'`.exe` autonome (`install.rs`) n'en embarquent — seul un build
+/// "bulk" dédié en ajoute un, cf. § Build bulk dans agent/README.md.
+async fn load_or_bootstrap() -> anyhow::Result<AgentConfig> {
+    if let Ok(cfg) = AgentConfig::load() {
+        return Ok(cfg);
+    }
+    bootstrap_from_defaults().await
+}
+
+async fn bootstrap_from_defaults() -> anyhow::Result<AgentConfig> {
+    let exe = std::env::current_exe().context("chemin de l'exécutable courant")?;
+    let defaults_path = exe.with_file_name("enroll-defaults.json");
+    let raw = std::fs::read_to_string(&defaults_path)
+        .with_context(|| format!("agent non enrôlé et pas de {} (poste isolé — enrôler manuellement)", defaults_path.display()))?;
+
+    #[derive(serde::Deserialize)]
+    struct EnrollDefaults {
+        server: String,
+        token: String,
+    }
+    let defaults: EnrollDefaults = serde_json::from_str(&raw).context("enroll-defaults.json invalide")?;
+
+    let hostname = collect::hostname();
+    if hostname.is_empty() {
+        anyhow::bail!("impossible de déterminer le nom d'hôte local");
+    }
+    let os = collect::os_name();
+    let resp = api::enroll(&defaults.server, &defaults.token, &hostname, os)
+        .await
+        .context("échec de l'auto-enrôlement via enroll-defaults.json")?;
+
+    let cfg = AgentConfig { server: defaults.server, credential: resp.credential, hostname, os: os.to_string() };
+    cfg.save().context("échec de la sauvegarde de la configuration locale")?;
+    println!("allsafe-agent: auto-enrôlé via enroll-defaults.json (agent_id={}).", resp.agent_id);
+    Ok(cfg)
 }
 
 async fn do_checkin(cfg: &AgentConfig) -> anyhow::Result<u32> {

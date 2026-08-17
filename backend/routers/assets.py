@@ -13,6 +13,8 @@ from services.scoring import recalculate_scores_for_asset
 from services.cpe_matcher import get_installed_package_vulnerabilities
 from services.network_protocol_check import check_all_network_assets
 from services.switch_hardening import run_switch_hardening_checks
+from services.web_hardening import run_all_website_checks
+from services.os_eol import check_os_eol
 from tasks.scheduled_tasks import run_cpe_matching_for_asset_task
 
 router = APIRouter()
@@ -46,6 +48,9 @@ class AssetCreate(BaseModel):
     os: Optional[str] = None
     os_version: Optional[str] = None
     asset_type: str = "server"
+    # URL du site (17/08/2026, asset_type="website" uniquement) — seule donnée nécessaire
+    # pour ce type d'actif, cf. services/web_hardening.py.
+    url: Optional[str] = None
     tags: dict = {}
     cpe_list: list = []
     # Méthode de collecte active (12/08/2026, module Agents) — service_account (compte de
@@ -136,6 +141,15 @@ async def trigger_switch_hardening_check():
     ci-dessus) et met à jour `Asset.last_scan`. Déclenchement manuel, pas
     planifié (même précédent que Meraki/PRTG/GLPI)."""
     return await run_switch_hardening_checks()
+
+
+@router.post("/web-hardening/run")
+async def trigger_web_hardening_check():
+    """Checks de durcissement web passifs (en-têtes HTTP, protocole TLS — cf.
+    services/web_hardening.py) sur tous les actifs `asset_type="website"`. Écrit
+    `Asset.web_compliance`. Déclenchement manuel, pas planifié (même précédent que
+    network-protocol-check/switch-hardening ci-dessus)."""
+    return await run_all_website_checks()
 
 
 @router.get("/{asset_id}/pending-updates")
@@ -382,6 +396,15 @@ def _asset_dict(
         # lancé, ou pour un actif serveur (concept sans objet, il a déjà `compliance`
         # dans last_scan_result via son propre scan SSH/WinRM).
         "network_compliance": a.network_compliance,
+        # Site web (17/08/2026, asset_type="website") — même principe que network_compliance
+        # juste au-dessus : ces actifs n'ont ni OS ni scan SSH/WinRM, checks 100% passifs
+        # (en-têtes HTTP, protocole TLS — cf. services/web_hardening.py).
+        "url": a.url,
+        "web_compliance": a.web_compliance,
+        # OS en fin de support (17/08/2026) — calculé à la volée depuis os/os_version déjà
+        # connus, pas stocké : recalculé à chaque lecture pour rester exact même sans nouveau
+        # scan (cf. services/os_eol.py). None si l'OS ne correspond à aucune entrée connue.
+        "os_eol_check": check_os_eol(a.os, a.os_version),
         "scan_username": a.scan_username,
         "has_scan_password": bool(a.scan_password_encrypted),
         # État réseau (Meraki, cf. services/meraki_matcher.py) — None si l'actif n'a

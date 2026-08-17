@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import { cves as fetchCves, syncNvd, syncTaskStatus } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
+import ExploitBadge from '../components/ExploitBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import { MODULES } from '../constants/modules.js'
 
@@ -106,7 +107,7 @@ const REFRESH_STYLES = {
 export default function CVEs() {
   const [data, setData] = useState({ items: [], total: 0 })
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState({ severity: '', search: '', min_cvss: '' })
+  const [filters, setFilters] = useState({ severity: '', search: '', min_cvss: '', kev: false, msf_module: false })
   const [loading, setLoading] = useState(false)
   const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMsg, setSyncMsg] = useState('')
@@ -119,6 +120,8 @@ export default function CVEs() {
     if (filters.severity) params.severity = filters.severity
     if (filters.search)   params.search   = filters.search
     if (filters.min_cvss) params.min_cvss = filters.min_cvss
+    if (filters.kev) params.kev = true
+    if (filters.msf_module) params.msf_module = true
     fetchCves(params).then(r => setData(r.data)).finally(() => setLoading(false))
   }, [page, filters])
 
@@ -200,6 +203,22 @@ export default function CVEs() {
           onChange={e => setFilter('min_cvss', e.target.value)}
           style={{ ...INPUT_STYLE, width: 100 }}
         />
+        {/* KEV/maturité d'exploit (17/08/2026) — toggles booléens, pas un <select> :
+            filtre binaire, pas un ensemble de valeurs dérivées du parc (cf. osOptions). */}
+        <button
+          onClick={() => setFilter('kev', !filters.kev)}
+          className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+          style={filters.kev
+            ? { background: 'rgba(248,81,73,0.12)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }
+            : { background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+        >⚠ KEV uniquement</button>
+        <button
+          onClick={() => setFilter('msf_module', !filters.msf_module)}
+          className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+          style={filters.msf_module
+            ? { background: 'rgba(163,113,247,0.12)', color: '#a371f7', border: '1px solid rgba(163,113,247,0.3)' }
+            : { background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
+        >Metasploit uniquement</button>
       </div>
 
       {/* Tableau */}
@@ -232,7 +251,12 @@ export default function CVEs() {
                   <td className="px-4 py-3 max-w-xs truncate text-xs" style={{ color: 'var(--text-muted)' }} title={c.description}>{c.description || '—'}</td>
                   <td className="px-4 py-3 font-bold" style={{ color: cvssColor(c.cvss_score) }}>{c.cvss_score ?? '—'}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{c.epss_score != null ? (c.epss_score * 100).toFixed(1) + '%' : '—'}</td>
-                  <td className="px-4 py-3"><SeverityBadge value={c.severity} /></td>
+                  <td className="px-4 py-3">
+                    <div style={{ display: 'inline-grid', justifyItems: 'start', gap: 4, position: 'relative' }}>
+                      <SeverityBadge value={c.severity} />
+                      <ExploitBadge kev={c.kev} kevRansomware={c.kev_ransomware} msfModule={c.msf_module} msfRank={c.msf_best_rank} spread />
+                    </div>
+                  </td>
                   <td className="px-4 py-3">
                     <span className="text-xs px-2 py-0.5 rounded-md uppercase font-medium" style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
                       {c.source || '—'}

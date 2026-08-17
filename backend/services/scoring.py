@@ -1,6 +1,9 @@
 """
 Scoring des vulnérabilités
 Formule : risk_score = min(cvss × epss × multiplicateur_criticite, 10.0)
+
+Les trois fonctions de recalcul ci-dessous calculent aussi `cvss_bte` (score CVSS-BTE réel,
+cf. services/cvss_bte.py) dans la même boucle — pas un second passage sur le parc.
 """
 
 import asyncio
@@ -13,6 +16,7 @@ from sqlalchemy.orm import load_only
 
 from database import SessionLocal
 from models import Asset, CVE, Vulnerability
+from services.cvss_bte import compute_cvss_bte
 
 logger = logging.getLogger(__name__)
 
@@ -25,9 +29,16 @@ logger = logging.getLogger(__name__)
 _RESCORE_BATCH_SIZE = 2000
 _RESCORE_YIELD_EVERY = 500
 
+# cvss_bte (17/08/2026) : calculé dans la même boucle que risk_score, pas un second passage
+# sur tout le parc — colonnes CVE.cvss_vector/kev/msf_module et Vulnerability.status/cvss_bte*
+# ajoutées aux options ci-dessous pour ça, cf. services/cvss_bte.py.
 _RESCORE_LOAD_OPTIONS = (
-    load_only(Vulnerability.id, Vulnerability.asset_id, Vulnerability.cve_id, Vulnerability.risk_score, raiseload=True),
-    load_only(CVE.id, CVE.cvss_score, CVE.epss_score, raiseload=True),
+    load_only(
+        Vulnerability.id, Vulnerability.asset_id, Vulnerability.cve_id, Vulnerability.status,
+        Vulnerability.risk_score, Vulnerability.cvss_bte, Vulnerability.cvss_bte_vector,
+        raiseload=True,
+    ),
+    load_only(CVE.id, CVE.cvss_score, CVE.epss_score, CVE.cvss_vector, CVE.kev, CVE.msf_module, raiseload=True),
     load_only(Asset.id, Asset.tags, raiseload=True),
 )
 
@@ -98,11 +109,16 @@ async def recalculate_all_scores(db: AsyncSession | None = None) -> dict:
             for vuln, cve, asset in rows:
                 criticite = (asset.tags or {}).get("criticite", "moyenne")
                 new_score = calculate_risk_score(cve.cvss_score, cve.epss_score, criticite)
+                new_bte, new_bte_vector = compute_cvss_bte(
+                    cve.cvss_vector, cve.kev, cve.msf_module, vuln.status, criticite,
+                )
 
-                if new_score == vuln.risk_score:
+                if new_score == vuln.risk_score and new_bte == vuln.cvss_bte:
                     skipped += 1
                 else:
                     vuln.risk_score = new_score
+                    vuln.cvss_bte = new_bte
+                    vuln.cvss_bte_vector = new_bte_vector
                     updated += 1
 
                 n += 1
@@ -151,8 +167,13 @@ async def recalculate_scores_for_asset(asset_id: UUID, db: AsyncSession) -> dict
     updated = 0
     for vuln, cve in result.all():
         new_score = calculate_risk_score(cve.cvss_score, cve.epss_score, criticite)
-        if new_score != vuln.risk_score:
+        new_bte, new_bte_vector = compute_cvss_bte(
+            cve.cvss_vector, cve.kev, cve.msf_module, vuln.status, criticite,
+        )
+        if new_score != vuln.risk_score or new_bte != vuln.cvss_bte:
             vuln.risk_score = new_score
+            vuln.cvss_bte = new_bte
+            vuln.cvss_bte_vector = new_bte_vector
             updated += 1
 
     await db.commit()
@@ -184,8 +205,13 @@ async def recalculate_scores_for_cve(cve_id: UUID, db: AsyncSession) -> dict:
     for vuln, asset in result.all():
         criticite = (asset.tags or {}).get("criticite", "moyenne")
         new_score = calculate_risk_score(cve.cvss_score, cve.epss_score, criticite)
-        if new_score != vuln.risk_score:
+        new_bte, new_bte_vector = compute_cvss_bte(
+            cve.cvss_vector, cve.kev, cve.msf_module, vuln.status, criticite,
+        )
+        if new_score != vuln.risk_score or new_bte != vuln.cvss_bte:
             vuln.risk_score = new_score
+            vuln.cvss_bte = new_bte
+            vuln.cvss_bte_vector = new_bte_vector
             updated += 1
 
     await db.commit()

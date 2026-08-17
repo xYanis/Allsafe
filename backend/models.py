@@ -4,7 +4,7 @@ CVE, Asset, Vulnerability, Feed
 """
 
 # models/cve.py
-from sqlalchemy import Column, String, Float, DateTime, Text, JSON
+from sqlalchemy import Column, String, Float, DateTime, Text, JSON, Boolean, Integer, Date
 from sqlalchemy.dialects.postgresql import UUID
 import uuid
 from database import Base
@@ -26,6 +26,16 @@ class CVE(Base):
     cpe         = Column(JSON, default=list)
     source      = Column(String, default="nvd")
     raw_data    = Column(JSON)
+    # KEV (17/08/2026) — CISA Known Exploited Vulnerabilities, cf. services/kev_fetcher.py.
+    kev             = Column(Boolean, nullable=False, default=False)
+    kev_date_added  = Column(Date)
+    kev_ransomware  = Column(Boolean, nullable=False, default=False)
+    # Maturité d'exploit (17/08/2026) — présence dans Metasploit, cf.
+    # services/exploit_maturity_fetcher.py. msf_best_rank : échelle native du framework
+    # (0=manual, 600=excellent), pas une échelle réinventée.
+    msf_module       = Column(Boolean, nullable=False, default=False)
+    msf_best_rank    = Column(Integer)
+    msf_module_count = Column(Integer, nullable=False, default=0)
 
 
 # models/asset.py
@@ -82,6 +92,12 @@ class Asset(Base):
     # `last_scan_result` — ces actifs ne passent jamais par un scan SSH/WinRM, il n'y a
     # pas de "dernier scan" au même sens. Cf. services/network_protocol_check.py.
     network_compliance = Column(JSON)
+    # Site web (17/08/2026, asset_type="website") — même principe que network_compliance
+    # juste au-dessus : ces actifs n'ont ni OS ni scan SSH/WinRM, checks 100% passifs
+    # (en-têtes HTTP, protocole TLS). `url` est la seule donnée nécessaire pour ce type
+    # d'actif. Cf. services/web_hardening.py.
+    url             = Column(String)
+    web_compliance  = Column(JSON)
     # Badge "Nouveau" sur Actifs (13/08/2026) — server_default plutôt qu'un défaut Python
     # (uuid.uuid4() ci-dessus est un défaut Python volontairement, mais une date de création
     # doit rester exacte même pour une ligne insérée hors SQLAlchemy). Les actifs déjà en base
@@ -105,6 +121,10 @@ class Vulnerability(Base):
     cve_id       = Column(UUID(as_uuid=True), ForeignKey("cves.id"), nullable=False, index=True)
     status       = Column(String, default="open")     # open / in_progress / patched / accepted_risk / awaiting_fix / false_positive
     risk_score   = Column(Float)
+    # CVSS-BTE (17/08/2026) — score CVSS v3.1 Temporal+Environmental réel, par (CVE, actif),
+    # coexiste avec risk_score (formule maison) sans le remplacer, cf. services/cvss_bte.py.
+    cvss_bte        = Column(Float)
+    cvss_bte_vector = Column(String)   # ex. "E:H/RL:X/RC:C/CR:H/IR:H/AR:H" — traçabilité
     detected_at  = Column(DateTime(timezone=True))
     patched_at   = Column(DateTime(timezone=True))
     awaiting_fix_at = Column(DateTime(timezone=True))  # date de passage en "awaiting_fix"

@@ -7,6 +7,7 @@ import {
 import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
+import ExploitBadge from '../components/ExploitBadge.jsx'
 import CriticiteBadge from '../components/CriticiteBadge.jsx'
 import ConnectivityDot from '../components/ConnectivityDot.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
@@ -2302,7 +2303,12 @@ export default function Dashboard() {
                         })()}
                       </td>
                     )}
-                    <td className="px-4 py-3"><SeverityBadge value={v.cve?.severity} /></td>
+                    <td className="px-4 py-3">
+                      <div style={{ display: 'inline-grid', justifyItems: 'start', gap: 4, position: 'relative' }}>
+                        <SeverityBadge value={v.cve?.severity} />
+                        <ExploitBadge kev={v.cve?.kev} kevRansomware={v.cve?.kev_ransomware} msfModule={v.cve?.msf_module} msfRank={v.cve?.msf_best_rank} compact spread />
+                      </div>
+                    </td>
                     <td className="px-4 py-3 font-semibold" style={{ color: cvssColor(v.cve?.cvss_score) }}>{v.cve?.cvss_score ?? '—'}</td>
                     <td className="px-4 py-3 text-xs font-semibold" style={{ color: epssColor(v.cve?.epss_score) }}>{v.cve?.epss_score != null ? (v.cve.epss_score * 100).toFixed(1) + '%' : '—'}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>{v.cve?.published ? new Date(v.cve.published).toLocaleDateString('fr-FR') : '—'}</td>
@@ -2433,7 +2439,12 @@ export default function Dashboard() {
                       )}
                       {renderOtherInstancesBadge(v)}
                     </td>
-                    <td className="px-4 py-3"><SeverityBadge value={v.cve?.severity} /></td>
+                    <td className="px-4 py-3">
+                      <div style={{ display: 'inline-grid', justifyItems: 'start', gap: 4, position: 'relative' }}>
+                        <SeverityBadge value={v.cve?.severity} />
+                        <ExploitBadge kev={v.cve?.kev} kevRansomware={v.cve?.kev_ransomware} msfModule={v.cve?.msf_module} msfRank={v.cve?.msf_best_rank} compact spread />
+                      </div>
+                    </td>
                     <td className="px-4 py-3 font-semibold" style={{ color: cvssColor(v.cve?.cvss_score) }}>{v.cve?.cvss_score ?? '—'}</td>
                     <td className="px-4 py-3 text-xs font-semibold" style={{ color: epssColor(v.cve?.epss_score) }}>{v.cve?.epss_score != null ? (v.cve.epss_score * 100).toFixed(1) + '%' : '—'}</td>
                     <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>
@@ -2577,7 +2588,12 @@ export default function Dashboard() {
                           {isFalsePositive ? 'Faux positif' : 'Patched'}
                         </span>
                       </td>
-                      <td className="px-4 py-3"><SeverityBadge value={v.cve?.severity} /></td>
+                      <td className="px-4 py-3">
+                        <div style={{ display: 'inline-grid', justifyItems: 'start', gap: 4, position: 'relative' }}>
+                          <SeverityBadge value={v.cve?.severity} />
+                          <ExploitBadge kev={v.cve?.kev} kevRansomware={v.cve?.kev_ransomware} msfModule={v.cve?.msf_module} msfRank={v.cve?.msf_best_rank} compact spread />
+                        </div>
+                      </td>
                       <td className="px-4 py-3 font-semibold" style={{ color: cvssColor(v.cve?.cvss_score) }}>{v.cve?.cvss_score ?? '—'}</td>
                       <td className="px-4 py-3 text-xs font-semibold" style={{ color: epssColor(v.cve?.epss_score) }}>{v.cve?.epss_score != null ? (v.cve.epss_score * 100).toFixed(1) + '%' : '—'}</td>
                       <td className="px-4 py-3" style={{ color: 'var(--text-secondary)' }}>

@@ -17,7 +17,172 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
-**Dernière session : 14/08/2026** — partie de la session à la demande "on va reprendre tout les
+**Dernière session : 17/08/2026** — trois signaux d'exploitation ajoutés (demande explicite,
+référence donnée par l'utilisateur : ce que fait Cyberwatch — "CVSS-B, CVSS-BTE, EPSS, maturité
+d'exploit"). CVSS-B (`cvss_score`) et EPSS existaient déjà, seuls les trois autres sont neufs :
+- **KEV** (`services/kev_fetcher.py`) — catalogue CISA "Known Exploited Vulnerabilities", fait
+  constaté (pas une prédiction comme l'EPSS). Source publique gratuite sans clé, export JSON
+  régénéré au fil de l'eau. `cves.kev`/`kev_date_added`/`kev_ransomware`, sync quotidienne
+  (Celery beat 3h45).
+- **Maturité d'exploit** (`services/exploit_maturity_fetcher.py`) — présence dans le framework
+  Metasploit (métadonnées publiques du dépôt, BSD-3-Clause), équivalent gratuit de la
+  définition même de Cyberwatch ("rouge = présent dans Metasploit"). Read-only, aucun code
+  d'exploitation téléchargé ni exécuté (cf. CLAUDE.md §1). `cves.msf_module`/`msf_best_rank`/
+  `msf_module_count`, sync hebdomadaire (dimanche 5h45).
+- Les deux : filtres `kev`/`msf_module` sur `GET /cves` et `GET /vulnerabilities` (index
+  partiels), badge partagé `components/ExploitBadge.jsx` (CVEs.jsx + Vulnerabilities.jsx),
+  statut affiché dans Paramètres > Intégrations, déclenchement manuel `POST /api/sync/kev` /
+  `POST /api/sync/exploit-maturity`.
+- **CVSS-BTE** (`services/cvss_bte.py`, nouveau) — score CVSS v3.1 Temporal+Environnemental
+  réel, par `(CVE, actif)` contrairement à `cvss_score` (générique), porté par
+  `Vulnerability.cvss_bte`/`cvss_bte_vector`. Coexiste avec `risk_score` (formule maison) sans
+  le remplacer — calculé dans la même boucle que `scoring.py::recalculate_all_scores`/
+  `_for_asset`/`_for_cve`, pas un second passage sur le parc. Calcul via la librairie pip
+  `cvss` (Red Hat Product Security, LGPLv3+) plutôt qu'une réimplémentation main de l'arrondi
+  CVSS v3.1 — source connue de bugs subtils. Périmètre limité à Temporal (E/RL/RC) +
+  Environmental Requirements (CR/IR/AR), pas de Modified Base Metrics. Dérivation automatique :
+  E depuis `kev`/`msf_module` (H/F/X), RL depuis `awaiting_fix*` (U/X), RC toujours C, CR/IR/AR
+  depuis `asset.tags["criticite"]` (même dimension métier que `risk_score`, réutilisée sur les
+  3 axes). `kev_fetcher.py`/`exploit_maturity_fetcher.py` déclenchent désormais un rescore en
+  fin de sync (même schéma qu'`epss_fetcher.py`) puisque `E` en dépend directement. Exposé par
+  l'API (`sort_by=cvss_bte`) sans colonne dédiée dans le tableau — même traitement que
+  `risk_score`, qui n'en a pas non plus. Détail complet (dérivation, formule) dans
+  `docs/MATCHING.md` § Exploitation active / § CVSS-BTE.
+- **Vérification, conditions réelles (session coupée puis reprise le jour même, une fois Docker
+  Desktop relancé par l'utilisateur)** : rebuild backend nécessaire (`cvss` absent de l'image
+  existante) — `docker compose up -d --build backend`, démarrage propre. `compute_cvss_bte`
+  testé en direct dans le conteneur sur un vecteur connu (Log4Shell) : `kev=True` → 10.0,
+  `msf_module=True` → 9.7, `awaiting_fix` → RL:U correct, vecteur absent → `(None, None)` — mêmes
+  résultats qu'en dehors de Docker. `recalculate_all_scores()` rejoué sur le vrai parc : 119 761
+  vulnérabilités mises à jour ; vérifié en base — `cvss_bte` renseigné sur 119 761/122 558
+  vulns ouvertes/en cours, les 2 797 restantes sont toutes des CVE en vecteur CVSS v2 (repli
+  attendu, confirmé par requête dédiée). `POST /api/sync/kev` (1665 entrées CISA) et
+  `POST /api/sync/exploit-maturity` (3147 CVE, 7138 modules Metasploit) déclenchés réellement
+  via une session admin temporaire (créée en base, supprimée après coup, même procédé que le
+  22/07) : 200 OK, `rescore` inclus dans la réponse. `GET /vulnerabilities?sort_by=cvss_bte` :
+  200, tri appliqué. Suite `pytest` complète : **208 passés**, y compris
+  `test_every_api_route_requires_auth_or_admin` — confirme que les deux nouveaux endpoints
+  `/sync/kev`/`/sync/exploit-maturity` héritent bien de la protection du router comme prévu,
+  sans dependency oubliée.
+  ⚠️ **Piège rencontré, déjà documenté ailleurs dans ce fichier** : au redémarrage de Docker
+  Desktop, le watcher `--reload` du backend a crashé une fois
+  (`WatchfilesRustInternalError: Input/output error`, flakiness bind-mount WSL2/Docker Desktop
+  déjà vue sur ce projet) — résolu par le rebuild qui était de toute façon nécessaire pour la
+  dépendance `cvss`, pas d'action séparée requise.
+- **Capture d'écran demandée par l'utilisateur pour voir le rendu réel** — occasion de repérer
+  un trou de couverture : `ExploitBadge.jsx` n'était câblé que sur CVEs.jsx/Vulnerabilities.jsx,
+  pas sur les 3 tableaux de qualification du Dashboard (CRITICAL à revalider, faux positifs,
+  en attente de correctif) alors que `_vuln_dict()` renvoie déjà kev/msf_module dans `v.cve`
+  pour ces 3 endpoints (`critical-review-candidates`/`false-positive-candidates`/
+  `awaiting-fix-candidates`). Ajouté aux 3 (même schéma que les deux autres pages). Icône
+  ajoutée au pill Metasploit sur demande explicite ("met le logo ou un icon pour métasploit") —
+  1er jet : viseur générique en SVG inline (`TargetIcon`), signalé à l'utilisateur la réserve
+  de marque (crâne Rapid7 déposé, produit positionné comme alternative commerciale à
+  Cyberwatch cf. CLAUDE.md § Contexte). **Confirmé malgré la réserve** ("intègre le vrai
+  logo") : remplacé par le tracé officiel via Simple Icons (`simple-icons/simple-icons`,
+  licence CC0 — voie standard pour identifier un outil tiers dans une UI, badges "tech stack"
+  GitHub/shields.io, pas une capture directe du brand kit Rapid7) — `MetasploitLogo`, même
+  composant, juste le SVG interne remplacé.
+  Vérifié par capture d'écran réelle (même procédé Playwright/Docker que ci-dessus) : CVE-2015-
+  1635 (CRITICAL, 9.8) avec les deux pills — ⚠ KEV et le vrai logo Metasploit — côte à côte.
+- **Suite immédiate, débordement signalé** ("dans le dashboard metasploit déborde de sévérité
+  pour aller dans la colonne score") : les 3 tableaux du Dashboard sont plus étroits que
+  Vulnerabilities.jsx/CVEs.jsx (colonne Sévérité 90px). Nouveau prop `compact` sur
+  `ExploitBadge.jsx` — pill Metasploit réduite au logo seul, texte retiré, passé uniquement
+  depuis les 3 call sites Dashboard (Vulnérabilités/CVE gardent le texte complet). Puis
+  ("pareil pour KEV... qu'il soit pareil que metasploit pour être cohérant") : même traitement
+  sur le pill KEV en mode `compact` — `⚠` seul, "KEV"/"Ransomware" retirés du texte visible
+  (toujours dans le `title` au survol). Vérifié par capture réelle : les deux pills tiennent
+  désormais dans la colonne Sévérité sans déborder sur Score.
+- **Suite, alignement demandé** ("kev aligné à gauche de critical, pareil pour metasploit à
+  droite, avec de l'espacement entre les deux") : 1er essai — pills KEV/Metasploit écartées via
+  `justify-content: space-between` sur toute la largeur du conteneur (nouveau prop `spread`,
+  parent passé en `flex-col w-full`) — **rejeté** ("pas comme ça, je préférais avant") : sans
+  effet visible, le tableau (`table-layout` auto, pas de largeur de colonne fixée) dimensionne
+  la colonne Sévérité exactement à la largeur du contenu le plus large (déjà KEV+Metasploit
+  collés), donc aucun espace disponible à répartir — `spread` retiré entièrement (code mort).
+  **Fait à la place** : logo Metasploit agrandi (`w-3 h-3` → `w-3.5 h-3.5`) + espacement fixe
+  entre les deux pills porté à 10px — insuffisant ("je veux que les logos fassent la même
+  taille et metasploit n'est pas aligné à droite de critical") : deux défauts distincts restaient.
+  **Cause racine identifiée par mesure de bounding box réelle** (`page.locator(...).boundingBox()`,
+  pas une estimation visuelle) : le pill KEV mesurait 26px de haut contre 20px pour Metasploit —
+  l'emoji "⚠" (texte, métriques de police/line-height) ne peut jamais garantir la même taille
+  qu'un SVG voisin, quel que soit le réglage de `width`/`height` tenté dessus. **Corrigé à la
+  racine** : `KevIcon` (nouveau, heroicons `exclamation-triangle`, mêmes `viewBox`/dimensions que
+  `MetasploitLogo`) remplace l'emoji partout, garantissant une taille strictement identique par
+  construction (même mécanisme SVG des deux côtés) plutôt qu'un rapprochement au pixel près.
+  **Alignement, 2e tentative, robuste cette fois** : `spread` réintroduit mais en `minWidth: 70`
+  fixe sur le `<span>` d'`ExploitBadge` lui-même (~largeur du badge "CRITICAL", la plus large des
+  4 sévérités) plutôt qu'un `width:'100%'` d'un parent — ce composant n'a alors plus besoin de
+  connaître la largeur de son ancêtre (le point qui avait fait échouer la 1ère tentative), aucun
+  changement necessaire sur les 5 wrappers `SeverityBadge`/`ExploitBadge` des pages. Vérifié par
+  mesure réelle après coup : pills KEV/Metasploit strictement identiques (26×20px chacun),
+  bord droit du pill Metasploit à 598px contre 592.8px pour CRITICAL sur le Dashboard (compact,
+  écart de 5px = alignement visuel) — la page Vulnérabilités/CVE (texte complet) dépasse toujours
+  au-delà de CRITICAL comme avant (le texte "Metasploit" est intrinsèquement plus large que 70px,
+  comportement inchangé et jamais signalé comme un problème sur ces deux pages).
+- **Ajustement, débordement résiduel signalé** ("le logo metasploit dépasse de critical") : les
+  5px d'écart mesurés ci-dessus étaient dans le mauvais sens — `SPREAD_MIN_WIDTH` (70) dépassait
+  légèrement la largeur réelle de "CRITICAL" (64.8px mesuré). Ramené à 63.
+- **Signalé de nouveau, cette fois lié au zoom navigateur** ("il est aligné à critical [zoomé] et
+  quand je dézoome il s'éloigne" + captures d'écran Critical.png/Critical2.png à l'appui) : `kev`
+  restait parfait (confirmé par l'utilisateur, jamais retouché) mais `metasploit` dérivait —
+  **cause racine trouvée en testant à plusieurs niveaux de zoom navigateur simulés**
+  (`document.body.style.zoom`, pas juste un survol visuel) : le wrapper (`SeverityBadge` +
+  `ExploitBadge`) était en `display: 'grid'`, un conteneur **block** par défaut — `width: auto`
+  d'un bloc s'étire pour remplir tout le parent (`<td>`, dimensionné par le contenu le plus
+  large de toute la colonne sur `table-layout` auto), pas seulement la largeur du badge de
+  sévérité qu'il contient. À zoom=1 l'écart était minime par coïncidence (1.6px), mais à
+  zoom=0.5 il montait à 57px — `SPREAD_MIN_WIDTH` n'y était pour rien, ce n'était jamais la
+  bonne cause sur les 2 tentatives précédentes. **Corrigé** : `display: 'inline-grid'` au lieu de
+  `'grid'` — conteneur en grille mais **inline** (se limite à son propre contenu, comme
+  n'importe quel élément inline), donc systématiquement aussi large que `SeverityBadge` quelle
+  que soit la sévérité, la largeur de la colonne du tableau ou le zoom.
+  **Repensé au passage** : `spread` n'utilise plus de largeur calculée/partagée du tout —
+  seul `Metasploit` passe en `position: absolute, right: 0, bottom: 0` (ancré au bord droit du
+  wrapper, recalculé à chaque rendu), `KEV` reste dans le flux normal de la grille comme avant
+  (n'y touche pas, conforme à la demande explicite). Un espaceur invisible (mêmes dimensions que
+  le pill KEV) est rendu quand Metasploit est seul (sans KEV) en mode `spread`, pour que le
+  conteneur ait quand même la hauteur nécessaire à l'ancrage `bottom: 0` — cas réel en base
+  (CVE avec `msf_module=true` mais `kev=false`).
+  **Revérifié à 5 niveaux de zoom** (`1, 0.8, 0.67, 1.25, 0.5`, mesure `boundingBox()` réelle,
+  pas visuelle) : écart KEV/CRITICAL et Metasploit/CRITICAL strictement à **0.00px** aux 5
+  niveaux — plus de dérive, cause racine réellement éliminée (pas un simple recalibrage de
+  constante comme les 2 tentatives précédentes). Capture à zoom 67% confirmée visuellement
+  alignée, identique au zoom 100%. Aucune erreur console sur Vulnérabilités/CVE/Dashboard après
+  le changement de structure.
+
+**Session précédente : 17/08/2026 (même date, partie antérieure)** — reprise de deux points de
+dette identifiés en fin de session précédente (§ Dette identifiée ci-dessous) :
+- **CVE `react-router-dom`/`esbuild-dev`, corrigées** : montée `react-router-dom` 6.30.4 → 7.18.2,
+  `vite` 5.4.21 → 7.3.6, `@vitejs/plugin-react` 4.x → 5.2.0 (compatible vite 4-7, contrairement à la
+  6.x qui n'accepte que vite 8). Vérifié avant de coder : aucune route splat (`path="*"` réduite à un
+  redirect `/`, seul cas du projet), aucune navigation relative (`navigate('..')`/`to=".."`) — le
+  changement de comportement par défaut des "future flags" v6→v7 (résolution relative dans les
+  routes splat) ne concerne donc pas ce routeur, upgrade sans risque identifié. `npm audit` : 6
+  vulnérabilités → 0 (react-router-dom, esbuild, vite corrigées par la montée majeure ; `dompurify`/
+  `nanoid` en plus, patch mineur non lié). **Piège rencontré** : le premier rebuild d'image
+  (`docker compose up -d --build frontend`) gardait Vite 5.4.21 au démarrage malgré `package.json`
+  à jour — le volume anonyme `/app/node_modules` (posé pour survivre aux recréations de conteneur,
+  cf. `docker-compose.yml`) avait persisté l'ancien `node_modules` par-dessus celui fraîchement
+  installé dans l'image. Supprimé explicitesement (`docker volume rm`) avant de relancer le service
+  pour forcer la reprise du contenu de l'image — à refaire à chaque futur changement de dépendance
+  frontend, un simple `--build` ne suffit pas avec ce montage. Vérifié : conteneur sain (`Vite v7.3.6
+  ready`), `npm run build` propre (827 modules), résolution runtime de `react-router-dom` confirmée
+  via le bundle pré-optimisé de Vite (`/node_modules/.vite/deps/react-router-dom.js`, 200, aucune
+  erreur de dépendance dans les logs). Pas de vérification navigateur (Playwright installé mais
+  bibliothèques système du Chromium headless absentes, pas d'accès root pour les poser — même
+  limite que les sessions précédentes).
+- **`GET /false-positive-candidates` lent, faux problème — la note "Points ouverts" du 03/08/2026
+  n'avait jamais été corrigée après les deux correctifs qui l'ont réglée entre-temps** (two-phase
+  du 28/07, cache process du 08/08 — cf. entrées correspondantes ci-dessous) : mesuré en conditions
+  réelles avec une session admin temporaire (créée en base, supprimée après coup) — **5,45s à froid,
+  66ms à chaud** (TTL 5 min), loin des ~18s notés. Section "Points ouverts" et "Dette identifiée"
+  corrigées en conséquence ci-dessous. Aucun code changé — juste la documentation remise en accord
+  avec l'état réel, cf. leçon déjà tirée le 22/07/2026 sur ce même risque (une affirmation de
+  blocage recopiée d'une session à l'autre sans revérification contre la base).
+
+**Session du 14/08/2026** — partie de la session à la demande "on va reprendre tout les
 visuels du module paramètres", élargie en cours de route à Veille/Fuite de données/Notes, puis à des
 fonctionnalités de compte self-service. Chronologie :
 - **`components/PageHero.jsx` (nouveau)** — en-tête compact coloré par module (dégradé + icône + trame
@@ -1884,9 +2049,13 @@ après coup — pas de code direct, `DELETE` SQL sur une simple ligne de log, sa
 
 ## 🔭 Points ouverts
 
-🐢 **`GET /false-positive-candidates` lent** (~18s constaté en direct, 03/08/2026) : pas de
-régression connue (le calcul revérifie `still_matches` par profil d'actif, cf. sa docstring) mais
-jamais mesuré à ce point avant — désormais visible côté Dashboard puisque la case "Faux positifs
+✅ **`GET /false-positive-candidates` lent (~18s constaté en direct, 03/08/2026) — RÉSOLU**,
+correction de doc le 17/08/2026 : jamais remis à jour après les deux correctifs qui l'ont réglé
+(two-phase du 28/07, cache process du 08/08, cf. entrées correspondantes plus bas). Remesuré le
+17/08 : 5,45s à froid / 66ms à chaud (TTL 5 min). Rien à faire de plus, le Dashboard sonde toutes
+les 30s donc quasi toujours en cache chaud. Note d'origine conservée ci-dessous pour l'historique :
+pas de régression connue (le calcul revérifie `still_matches` par profil d'actif, cf. sa docstring)
+mais jamais mesuré à ce point avant — désormais visible côté Dashboard puisque la case "Faux positifs
 proposés" en dépend directement (cf. § invariants, correctif du filtre vidé à tort). À profiler si
 ça devient gênant en usage réel ; candidat naturel : mémoïser par cycle plutôt que par requête HTTP.
 
@@ -2332,15 +2501,17 @@ session à l'autre — cf. principe déjà énoncé pour l'audit de cohérence, 
   `generate_report`. Ni table, ni endpoint, ni tâche, ni écran à ajouter.
 
 **Dette identifiée** :
-- **Correctifs de sécurité — 5 des 6 faits, le dernier volontairement différé** : audit défensif du
-  24/07 dans `AUDIT_SECURITE.md` (racine). #1 SSRF, #2 clé d'hôte SSH, #3 TLS LDAP, #4 `defusedxml`,
-  #6 secrets par défaut → corrigés et testés en conditions réelles le 27/07/2026. **Seul #5
-  (`.gitignore` avant tout `git init`) reste en attente**, par choix explicite de l'utilisateur tant
-  qu'il n'y a pas de repo git. `pip-audit`/`npm audit` passés le même jour : CVE restantes sur
-  starlette/python-multipart **corrigées** (bump `fastapi` 0.115.0→0.140.0) ; CVE `react-router-dom`/
-  `esbuild`-dev restent ouvertes (nécessitent une montée de version majeure potentiellement cassante,
-  pas validée). Durcissement runtime Docker (`cap_drop`, `no-new-privileges`, limites mémoire/CPU)
-  fait le même jour — cf. invariants ci-dessus pour les deux pièges rencontrés en le faisant.
+- ~~**Correctifs de sécurité — 5 des 6 faits, le dernier volontairement différé**~~ **les 6 faits** :
+  audit défensif du 24/07 dans `AUDIT_SECURITE.md` (racine). #1 SSRF, #2 clé d'hôte SSH, #3 TLS LDAP,
+  #4 `defusedxml`, #6 secrets par défaut → corrigés et testés en conditions réelles le 27/07/2026.
+  #5 (`.gitignore` avant tout `git init`) différé tant qu'il n'y avait pas de repo git — **fait**
+  depuis (`git init` posé le 14/08/2026, `.gitignore` en place). `pip-audit`/`npm audit` passés le
+  27/07 : CVE restantes sur starlette/python-multipart **corrigées** (bump `fastapi` 0.115.0→0.140.0).
+  CVE `react-router-dom`/`esbuild`-dev, laissées ouvertes le 27/07 faute de valider une montée
+  majeure potentiellement cassante — **corrigées le 17/08/2026** (`react-router-dom` 7.18.2, `vite`
+  7.3.6, `npm audit` à 0 vulnérabilité, cf. entrée de session ci-dessus). Durcissement runtime Docker
+  (`cap_drop`, `no-new-privileges`, limites mémoire/CPU) fait le même jour (27/07) — cf. invariants
+  ci-dessus pour les deux pièges rencontrés en le faisant.
 - ~~**Table d'historique des statuts**~~ **fait le 27/07/2026** — `vulnerability_status_history`,
   cf. § Historique des changements de statut ci-dessus. A immédiatement servi à diagnostiquer
   CVE-2026-55199 (bascule automatique artificielle d'un test, repérée en un coup d'œil).

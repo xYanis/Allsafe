@@ -17,6 +17,8 @@ async def list_cves(
     search: str | None = None,
     matched_only: bool = Query(True, description="Restreindre aux CVE affectant au moins un actif du parc"),
     days: int | None = Query(None, ge=1, le=365, description="Restreindre aux CVE publiées dans les N derniers jours"),
+    kev: bool = Query(False, description="Restreindre aux CVE exploitées activement (CISA KEV)"),
+    msf_module: bool = Query(False, description="Restreindre aux CVE avec un module Metasploit disponible"),
     session: AsyncSession = Depends(get_session),
 ):
     q = select(CVE).order_by(CVE.published.desc())
@@ -34,6 +36,12 @@ async def list_cves(
         ))
     if days:
         q = q.where(CVE.published >= datetime.now(timezone.utc) - timedelta(days=days))
+    # KEV/maturité d'exploit (17/08/2026) : filtres booléens, s'appuient sur les index
+    # partiels posés dans schema_patches.sql (idx_cves_kev/idx_cves_msf_module).
+    if kev:
+        q = q.where(CVE.kev.is_(True))
+    if msf_module:
+        q = q.where(CVE.msf_module.is_(True))
 
     total = await session.scalar(select(func.count()).select_from(q.subquery()))
     cves = (await session.execute(q.offset((page - 1) * per_page).limit(per_page))).scalars().all()
@@ -65,6 +73,12 @@ def _cve_dict(c: CVE, full: bool = False) -> dict:
         "epss_score": c.epss_score,
         "published": c.published.isoformat() if c.published else None,
         "source": c.source,
+        # KEV/maturité d'exploit (17/08/2026) — scalaires légers, dans le dict de base
+        # (pas réservés à full=True) : nécessaires au badge en vue liste (CVEs.jsx).
+        "kev": c.kev,
+        "kev_ransomware": c.kev_ransomware,
+        "msf_module": c.msf_module,
+        "msf_best_rank": c.msf_best_rank,
     }
     if full:
         d.update({
@@ -72,5 +86,7 @@ def _cve_dict(c: CVE, full: bool = False) -> dict:
             "references": c.references,
             "cpe": c.cpe,
             "modified": c.modified.isoformat() if c.modified else None,
+            "kev_date_added": c.kev_date_added.isoformat() if c.kev_date_added else None,
+            "msf_module_count": c.msf_module_count,
         })
     return d

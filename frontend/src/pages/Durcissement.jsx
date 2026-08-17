@@ -25,9 +25,17 @@ const MODULE_HOVER = `${MODULES.inventaire.color}0a`
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 
 function checksFor(asset) {
-  return asset.asset_type === 'network'
+  // web_compliance (17/08/2026, asset_type="website") : même principe que network_compliance
+  // ci-dessous — ni OS ni scan SSH/WinRM, checks passifs propres (en-têtes HTTP, TLS).
+  const base = asset.asset_type === 'network'
     ? asset.network_compliance?.checks || []
+    : asset.asset_type === 'website'
+    ? asset.web_compliance?.checks || []
     : asset.last_scan_result?.compliance?.checks || []
+  // os_eol_check (17/08/2026) : calculé serveur-side à la volée (routers/assets.py::_asset_dict,
+  // jamais stocké) depuis os/os_version déjà connus — préfixé plutôt qu'ajouté à la fin, c'est
+  // le check le plus actionnable quand il est présent (warn = OS en fin de support).
+  return asset.os_eol_check ? [asset.os_eol_check, ...base] : base
 }
 
 function SummaryBadges({ summary }) {

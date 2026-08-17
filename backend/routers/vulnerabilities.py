@@ -119,11 +119,17 @@ _CANDIDATE_LOAD_OPTIONS = (
         Vulnerability.false_positive_at, Vulnerability.accepted_risk_until,
         Vulnerability.validated_by, Vulnerability.notes,
         Vulnerability.ai_analysis, Vulnerability.patch_check_result,
+        # cvss_bte/cvss_bte_vector (17/08/2026) : _vuln_dict() les lit désormais
+        # inconditionnellement (cf. son commentaire) — obligatoires ici sous peine de
+        # RaisedException sur ces trois endpoints candidats.
+        Vulnerability.cvss_bte, Vulnerability.cvss_bte_vector,
         raiseload=True,
     ),
     load_only(
         CVE.id, CVE.cve_id, CVE.severity, CVE.cvss_score, CVE.epss_score, CVE.published,
         CVE.description, CVE.cpe,          # cpe + description = entrées de still_matches
+        # KEV/maturité d'exploit (17/08/2026) : mêmes raisons que cvss_bte ci-dessus.
+        CVE.kev, CVE.kev_ransomware, CVE.msf_module, CVE.msf_best_rank,
         raiseload=True,                    # exclut surtout raw_data (377 Mo) et references
     ),
     load_only(
@@ -238,7 +244,9 @@ async def list_vulnerabilities(
     validated_by: Optional[str] = None,
     search: Optional[str] = None,   # recherche sur l'identifiant CVE (ex: deep-link du bandeau de rattrapage)
     max_age_years: Optional[int] = Query(None, ge=1, le=50),
-    sort_by: Optional[str] = Query("score", pattern="^(score|date|severity)$"),
+    kev: bool = Query(False, description="Restreindre aux CVE exploitées activement (CISA KEV)"),
+    msf_module: bool = Query(False, description="Restreindre aux CVE avec un module Metasploit disponible"),
+    sort_by: Optional[str] = Query("score", pattern="^(score|date|severity|cvss_bte)$"),
     sort_dir: Optional[str] = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
     per_page: int = Query(50, ge=1, le=200),
@@ -255,6 +263,7 @@ async def list_vulnerabilities(
         "score":    Vulnerability.risk_score,
         "date":     CVE.published,
         "severity": severity_order,
+        "cvss_bte": Vulnerability.cvss_bte,
     }.get(sort_by, Vulnerability.risk_score)
     order_expr = sort_col.desc() if sort_dir == "desc" else sort_col.asc()
 
@@ -299,6 +308,10 @@ async def list_vulnerabilities(
         # couper à la collecte aurait recréé le même trou qu'on vient de combler.
         cutoff = datetime.now(timezone.utc) - timedelta(days=365 * max_age_years)
         q = q.where(CVE.published >= cutoff)
+    if kev:
+        q = q.where(CVE.kev.is_(True))
+    if msf_module:
+        q = q.where(CVE.msf_module.is_(True))
 
     total = await session.scalar(select(func.count()).select_from(q.subquery()))
     rows = (await session.execute(q.offset((page - 1) * per_page).limit(per_page))).all()
@@ -1053,6 +1066,11 @@ def _vuln_dict(
         "resolved_elsewhere_count": resolved_elsewhere_count,
         "patched_elsewhere_count": patched_elsewhere_count,
         "risk_score": v.risk_score,
+        # CVSS-BTE (17/08/2026) — score CVSS v3.1 Temporal+Environmental réel, coexiste avec
+        # risk_score sans le remplacer (cf. docs/MATCHING.md § CVSS-BTE). None tant que
+        # services/scoring.py ne l'a pas encore calculé (rescore requis après migration).
+        "cvss_bte": v.cvss_bte,
+        "cvss_bte_vector": v.cvss_bte_vector,
         "detected_at": v.detected_at.isoformat() if v.detected_at else None,
         "patched_at": v.patched_at.isoformat() if v.patched_at else None,
         "awaiting_fix_at": v.awaiting_fix_at.isoformat() if v.awaiting_fix_at else None,
@@ -1079,6 +1097,13 @@ def _vuln_dict(
             "epss_score": c.epss_score,
             "published": c.published.isoformat() if c.published else None,
             "description": c.description[:200] if c.description else None,
+            # KEV/maturité d'exploit (17/08/2026) — badge de priorisation, cf.
+            # components/ExploitBadge.jsx. kev_date_added volontairement omis ici (réservé à
+            # CVEs.jsx via _cve_dict full=True), pour ne pas alourdir chaque ligne de vuln.
+            "kev": c.kev,
+            "kev_ransomware": c.kev_ransomware,
+            "msf_module": c.msf_module,
+            "msf_best_rank": c.msf_best_rank,
         },
         "asset": {
             "id": str(a.id),

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, recommend, script, patchCheck, criticalReviewCandidates, falsePositiveCandidates, bulkFalsePositive, awaitingFixCandidates, bulkAwaitingFix, bulkAcceptedRisk, getVulnStatusHistory, getVulnOtherInstances } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
+import ExploitBadge from '../components/ExploitBadge.jsx'
 import StatusBadge, { STATUS_LABELS } from '../components/StatusBadge.jsx'
 import AnalysisModal from '../components/AnalysisModal.jsx'
 import ValidateDropdown from '../components/ValidateDropdown.jsx'
@@ -76,7 +77,7 @@ export default function Vulnerabilities() {
   const { names: ANALYSTS } = useAnalysts()
   const [data, setData] = useState({ items: [], total: 0 })
   const [page, setPage] = useState(1)
-  const [filters, setFilters] = useState({ status: 'open', severity: '', validated_by: '', max_age_years: '', search: '' })
+  const [filters, setFilters] = useState({ status: 'open', severity: '', validated_by: '', max_age_years: '', search: '', kev: false, msf_module: false })
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Deep-link depuis le bandeau de rattrapage (Dashboard) : ?cve=CVE-XXXX ouvre
@@ -216,6 +217,8 @@ export default function Vulnerabilities() {
       if (filters.validated_by) params.validated_by = filters.validated_by
       if (filters.search)       params.search       = filters.search
       if (filters.max_age_years) params.max_age_years = filters.max_age_years
+      if (filters.kev) params.kev = true
+      if (filters.msf_module) params.msf_module = true
       const ageCutoff = filters.max_age_years ? Date.now() - filters.max_age_years * 365 * 86400000 : null
       fetchVulns(params).then(r => {
         const realItems = (r.data.items || []).map(anonymizeVuln)
@@ -225,6 +228,8 @@ export default function Vulnerabilities() {
           if (filters.validated_by && v.validated_by !== filters.validated_by) return false
           if (filters.search && !v.cve?.cve_id?.toLowerCase().includes(filters.search.trim().toLowerCase())) return false
           if (ageCutoff && v.cve?.published && new Date(v.cve.published).getTime() < ageCutoff) return false
+          if (filters.kev && !v.cve?.kev) return false
+          if (filters.msf_module && !v.cve?.msf_module) return false
           return true
         })
         const merged = sortVulnList([...realItems, ...fakeItems], sort)
@@ -238,6 +243,8 @@ export default function Vulnerabilities() {
     if (filters.validated_by) params.validated_by = filters.validated_by
     if (filters.search)       params.search       = filters.search
     if (filters.max_age_years) params.max_age_years = filters.max_age_years
+    if (filters.kev) params.kev = true
+    if (filters.msf_module) params.msf_module = true
     fetchVulns(params).then(r => setData(r.data)).finally(() => setLoading(false))
   }, [page, filters, sort, isAnonymous])
 
@@ -420,7 +427,7 @@ export default function Vulnerabilities() {
     padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
   }
 
-  const hasFilters = filters.status || filters.severity || filters.validated_by || filters.max_age_years || filters.search
+  const hasFilters = filters.status || filters.severity || filters.validated_by || filters.max_age_years || filters.search || filters.kev || filters.msf_module
 
   // Badge "déjà résolu ailleurs" (04/08/2026) — `resolved_elsewhere_count` vient
   // du serveur (une seule requête groupée par page, cf. routers/vulnerabilities.py),
@@ -619,8 +626,32 @@ export default function Vulnerabilities() {
             Masquer les CVE {'>'} 2 ans
           </span>
         </label>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none"
+          title="CISA KEV — exploitation active confirmée dans la nature"
+        >
+          <input type="checkbox" checked={filters.kev}
+            onChange={e => setFilter('kev', e.target.checked)}
+            className="w-3.5 h-3.5"
+            style={{ accentColor: '#f85149' }}
+          />
+          <span className="text-xs font-medium" style={{ color: filters.kev ? '#f85149' : 'var(--text-secondary)' }}>
+            ⚠ KEV
+          </span>
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer select-none"
+          title="Module Metasploit disponible"
+        >
+          <input type="checkbox" checked={filters.msf_module}
+            onChange={e => setFilter('msf_module', e.target.checked)}
+            className="w-3.5 h-3.5"
+            style={{ accentColor: '#a371f7' }}
+          />
+          <span className="text-xs font-medium" style={{ color: filters.msf_module ? '#a371f7' : 'var(--text-secondary)' }}>
+            Metasploit
+          </span>
+        </label>
         {hasFilters && (
-          <button onClick={() => { setFilters({ status: '', severity: '', validated_by: '', max_age_years: '', search: '' }); setPage(1) }}
+          <button onClick={() => { setFilters({ status: '', severity: '', validated_by: '', max_age_years: '', search: '', kev: false, msf_module: false }); setPage(1) }}
             className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
           >Réinitialiser</button>
@@ -676,7 +707,12 @@ export default function Vulnerabilities() {
                       )}
                     </div>
                   </td>
-                  <td className="px-4 py-3"><SeverityBadge value={v.cve?.severity} /></td>
+                  <td className="px-4 py-3">
+                    <div style={{ display: 'inline-grid', justifyItems: 'start', gap: 4, position: 'relative' }}>
+                      <SeverityBadge value={v.cve?.severity} />
+                      <ExploitBadge kev={v.cve?.kev} kevRansomware={v.cve?.kev_ransomware} msfModule={v.cve?.msf_module} msfRank={v.cve?.msf_best_rank} compact spread />
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-semibold" style={{ color: 'var(--text-primary)' }}>{v.cve?.cvss_score ?? '—'}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
                     {v.cve?.published ? new Date(v.cve.published).toLocaleDateString('fr-FR') : '—'}
@@ -722,7 +758,10 @@ export default function Vulnerabilities() {
               <div className="flex items-start justify-between gap-2">
                 <a href={`https://nvd.nist.gov/vuln/detail/${v.cve?.cve_id}`} target="_blank" rel="noopener noreferrer"
                   className="font-mono text-sm font-semibold hover:underline" style={{ color: '#58a6ff' }}>{v.cve?.cve_id}</a>
-                <SeverityBadge value={v.cve?.severity} />
+                <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                  <SeverityBadge value={v.cve?.severity} />
+                  <ExploitBadge kev={v.cve?.kev} kevRansomware={v.cve?.kev_ransomware} msfModule={v.cve?.msf_module} msfRank={v.cve?.msf_best_rank} />
+                </div>
               </div>
               <p className="text-sm truncate flex items-center gap-2" style={{ color: 'var(--text-secondary)' }}>
                 <ConnectivityDot assetType={v.asset?.asset_type} reachable={v.asset?.scan_reachable} error={v.asset?.scan_error} />

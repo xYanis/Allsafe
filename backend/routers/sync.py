@@ -15,6 +15,8 @@ from services.cpe_matcher import (
 from services.nvd_fetcher import run_nvd_sync_by_id, run_nvd_backfill_by_cpe
 from services.scoring import recalculate_all_scores, recalculate_scores_for_cve
 from services.epss_fetcher import run_epss_sync
+from services.kev_fetcher import run_kev_sync
+from services.exploit_maturity_fetcher import run_exploit_maturity_sync
 
 router = APIRouter()
 
@@ -146,3 +148,19 @@ async def trigger_epss_sync():
     resterait basé sur les anciens epss_score déjà chargés en mémoire tant qu'un
     /rescore séparé n'est pas déclenché à la main."""
     return await run_epss_sync()
+
+
+@router.post("/kev")
+async def trigger_kev_sync():
+    """Télécharge le catalogue CISA KEV complet et met à jour cves.kev/kev_date_added/
+    kev_ransomware pour les CVE déjà en base, puis relance le rescore (cvss_bte en dépend
+    via la métrique temporelle E — cf. services/kev_fetcher.py/cvss_bte.py)."""
+    return await run_kev_sync()
+
+
+@router.post("/exploit-maturity")
+async def trigger_exploit_maturity_sync():
+    """Télécharge les métadonnées de modules Metasploit et met à jour cves.msf_module/
+    msf_best_rank/msf_module_count pour les CVE déjà en base, puis relance le rescore
+    (cf. services/exploit_maturity_fetcher.py/cvss_bte.py)."""
+    return await run_exploit_maturity_sync()

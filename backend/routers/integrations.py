@@ -57,5 +57,14 @@ async def integrations_status(user: User = Depends(require_auth), session: Async
         {"key": "vsphere", "label": "vSphere / ESXi",
          "configured": bool(settings.VCENTER_URL),
          "last_synced_at": _iso(last_synced.get("vsphere_esxi"))},
+        # KEV/maturité d'exploit (17/08/2026) : sources publiques gratuites sans clé, comme
+        # NVD/EPSS — toujours "configured" (rien à paramétrer), affichées ici surtout pour
+        # la date de dernière synchro.
+        {"key": "kev", "label": "CISA KEV (exploitation active)",
+         "configured": True,
+         "last_synced_at": _iso(last_synced.get("kev"))},
+        {"key": "exploit_maturity", "label": "Maturité d'exploit (Metasploit)",
+         "configured": True,
+         "last_synced_at": _iso(last_synced.get("exploit_maturity"))},
     ]
     return {"items": items}

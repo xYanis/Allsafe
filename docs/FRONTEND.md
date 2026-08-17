@@ -909,6 +909,15 @@ Deux détails qui comptent à l'enregistrement :
 - Colonnes : CVE ID, description (tronquée), CVSS, EPSS, Badge sévérité, source, date
 - Clic sur une ligne → panneau latéral détail CVE
 
+**KEV + maturité d'exploit (17/08/2026)** : `components/ExploitBadge.jsx` (nouveau, partagé avec
+Vulnerabilities.jsx) affiché à côté de `SeverityBadge` — pill rouge "⚠ KEV" (+ "· Ransomware" si
+`kev_ransomware`) si la CVE est dans le catalogue CISA KEV (exploitation active confirmée), pill
+violette "Metasploit" (+ "(fiable)" si `msf_best_rank >= 400`) si un module Metasploit la
+référence. Deux toggles booléens dans la barre de filtres (pas un `<select>`, filtre binaire) —
+`kev`/`msf_module` en query params, filtrés server-side (`GET /cves`, index partiels
+`idx_cves_kev`/`idx_cves_msf_module`). Cf. `docs/MATCHING.md` § Exploitation active pour les
+sources et la logique des fetchers.
+
 ### Assets.jsx
 - Table : nom, OS, type, source (Badge, dont "Ajout manuel" en violet), dernier scan, apps (badge
   cliquable → modale sans re-scanner), nb vulns ouvertes (barre), actions
@@ -1101,9 +1110,13 @@ correctif"/"Marquer corrigé"/"Risque accepté") ne correspondait plus à rien d
 cf. § Stack Frontend, aucun composant Tremor n'est utilisé dans l'app.**
 
 - Barre "Filtres" : statut, sévérité, valideur (`ANALYSTS`, `validated_by`), checkbox "Masquer les
-  CVE > 2 ans" (`max_age_years`, session 20/07/2026, cf. `docs/ARCHITECTURE.md`)
+  CVE > 2 ans" (`max_age_years`, session 20/07/2026, cf. `docs/ARCHITECTURE.md`), checkboxes
+  "⚠ KEV"/"Metasploit" (17/08/2026, même schéma checkbox que `max_age_years` — filtre binaire côté
+  serveur, `GET /vulnerabilities?kev=true&msf_module=true`)
 - Table triable (sévérité/score/date), colonnes CVE / Actif / Statut / Sévérité / Score / Publié /
-  Détecté / Date patch (si filtre = patched) / Validé par (idem) / Actions
+  Détecté / Date patch (si filtre = patched) / Validé par (idem) / Actions. Colonne Sévérité porte
+  aussi `components/ExploitBadge.jsx` (17/08/2026, partagé avec CVEs.jsx) — pill KEV/Metasploit à
+  côté de `SeverityBadge`, même carte mobile. Cf. `docs/MATCHING.md` § Exploitation active.
 - Actions par ligne : "Analyser" (`POST /api/analysis/cve`), "🔍 Patch check", "Recommandation"
   (`POST /api/remediation/recommend`), "Script" (`POST /api/remediation/script`), puis soit
   `ValidateDropdown` "✓ Corrigé" (bascule `patched`) soit "↩ Réouvrir" (vuln déjà `patched`)

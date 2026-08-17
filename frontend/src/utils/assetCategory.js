@@ -5,7 +5,8 @@
 // cellulaire, MT=capteur, MV=caméra, Z=passerelle télétravail). PRTG ne remonte
 // aucun modèle exploitable par device (cf. STATUS.md 04/08/2026) : reste générique.
 
-export const TYPE_LABELS = { server: 'Serveur', workstation: 'Poste', network: 'Réseau' }
+// website (17/08/2026) : checks de durcissement web passifs, cf. services/web_hardening.py.
+export const TYPE_LABELS = { server: 'Serveur', workstation: 'Poste', network: 'Réseau', website: 'Site web' }
 
 const MERAKI_MODEL_LABELS = {
   MR: 'Borne Wi-Fi', MX: 'Pare-feu / Routeur', MS: 'Switch',
@@ -39,6 +40,7 @@ export function assetCategory(asset) {
 const CATEGORY_STYLES = {
   'Serveur':                { background: 'rgba(88,166,255,0.12)',  color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)'  },
   'Poste':                  { background: 'rgba(163,113,247,0.12)', color: '#a371f7', border: '1px solid rgba(163,113,247,0.3)' },
+  'Site web':               { background: 'rgba(210,153,34,0.12)',  color: '#d29922', border: '1px solid rgba(210,153,34,0.3)'  },
   'Borne Wi-Fi':            { background: 'rgba(63,185,80,0.12)',   color: '#3fb950', border: '1px solid rgba(63,185,80,0.3)'  },
   'Pare-feu / Routeur':     { background: 'rgba(248,81,73,0.12)',   color: '#f85149', border: '1px solid rgba(248,81,73,0.3)'  },
   'Switch':                 { background: 'rgba(57,197,207,0.12)',  color: '#39c5cf', border: '1px solid rgba(57,197,207,0.3)'  },

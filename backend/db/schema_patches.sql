@@ -702,3 +702,36 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_token_id UUID REFERENCES 
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
 UPDATE assets SET created_at = '2020-01-01T00:00:00Z' WHERE created_at IS NULL;
 ALTER TABLE assets ALTER COLUMN created_at SET DEFAULT now();
+
+-- KEV (17/08/2026, cf. docs/MATCHING.md § Exploitation active) — CISA Known Exploited
+-- Vulnerabilities, source publique gratuite sans clé (services/kev_fetcher.py). Index partiel
+-- (pas un index plein sur 191k lignes dont l'immense majorité est kev=false) pour que le filtre
+-- "KEV" reste rapide sur CVEs.jsx/Vulnerabilities.jsx.
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS kev BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS kev_date_added DATE;
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS kev_ransomware BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS idx_cves_kev ON cves(kev) WHERE kev = true;
+
+-- Maturité d'exploit (17/08/2026, même session) — présence dans le framework Metasploit
+-- (services/exploit_maturity_fetcher.py), équivalent gratuit de la définition même de
+-- Cyberwatch ("rouge = présent dans Metasploit"). msf_best_rank reprend l'échelle de fiabilité
+-- native du framework (0=manual à 600=excellent), pas une échelle réinventée.
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS msf_module BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS msf_best_rank INTEGER;
+ALTER TABLE cves ADD COLUMN IF NOT EXISTS msf_module_count INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS idx_cves_msf_module ON cves(msf_module) WHERE msf_module = true;
+
+-- CVSS-BTE (17/08/2026, même session) — score CVSS v3.1 Temporal+Environmental réel, par
+-- (CVE, actif) donc porté par Vulnerability et non CVE (cf. services/cvss_bte.py). Coexiste
+-- avec risk_score existant (formule maison cvss×epss×criticité) sans le remplacer — décision
+-- utilisateur, cf. plan de session. cvss_bte_vector conserve le détail E/RL/RC/CR/IR/AR pour
+-- traçabilité, même esprit que patch_check_result.
+ALTER TABLE vulnerabilities ADD COLUMN IF NOT EXISTS cvss_bte FLOAT;
+ALTER TABLE vulnerabilities ADD COLUMN IF NOT EXISTS cvss_bte_vector VARCHAR;
+
+-- Durcissement étoffé (17/08/2026, cf. docs/AGENTS.md § Checks collectés) — nouveau type
+-- d'actif "website" : `url` est la seule donnée nécessaire, `web_compliance` porte ses checks
+-- passifs (en-têtes HTTP, protocole TLS), même principe que `network_compliance` déjà en place
+-- pour asset_type="network" (cf. services/web_hardening.py).
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS url VARCHAR;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS web_compliance JSON;

@@ -103,7 +103,7 @@ function osCell(asset) {
   return { label, style: osFamilyStyle(asset.os) || null }
 }
 
-const EMPTY_FORM = { name: '', hostname: '', ip_address: '', os: '', os_version: '', asset_type: 'server', criticite: 'moyenne', scan_username: '', scan_password: '', collection_method: 'service_account' }
+const EMPTY_FORM = { name: '', hostname: '', ip_address: '', os: '', os_version: '', asset_type: 'server', url: '', criticite: 'moyenne', scan_username: '', scan_password: '', collection_method: 'service_account' }
 
 const inputStyle = {
   width: '100%', background: 'var(--bg-secondary)', border: '1px solid var(--border)',
@@ -124,6 +124,7 @@ function AssetFormModal({ asset, onClose, onSaved }) {
   const [form, setForm] = useState(asset ? {
     name: asset.name || '', hostname: asset.hostname || '', ip_address: asset.ip_address || '',
     os: asset.os || '', os_version: asset.os_version || '', asset_type: asset.asset_type || 'server',
+    url: asset.url || '',
     criticite: asset.tags?.criticite || 'moyenne',
     scan_username: asset.scan_username || '', scan_password: '',
     collection_method: asset.collection_method || 'service_account',
@@ -137,7 +138,11 @@ function AssetFormModal({ asset, onClose, onSaved }) {
     e.preventDefault()
     setError('')
     if (!form.name.trim()) { setError('Le nom est obligatoire.'); return }
-    if (!form.hostname.trim() && !form.ip_address.trim()) {
+    // Site web (17/08/2026) : ni hostname/IP ni scan SSH/WinRM, seule l'URL est requise
+    // (cf. services/web_hardening.py, checks 100% passifs — pas de connexion à l'actif).
+    if (form.asset_type === 'website') {
+      if (!form.url.trim()) { setError("L'URL est obligatoire pour un site web.") ; return }
+    } else if (!form.hostname.trim() && !form.ip_address.trim()) {
       setError('Renseigne au moins un hostname ou une adresse IP.')
       return
     }
@@ -150,6 +155,7 @@ function AssetFormModal({ asset, onClose, onSaved }) {
         os: form.os.trim() || null,
         os_version: form.os_version.trim() || null,
         asset_type: form.asset_type,
+        url: form.url.trim() || null,
         collection_method: form.collection_method,
         // Merge, pas d'écrasement : ne remplace que la clé criticite, préserve
         // d'éventuels autres tags déjà présents sur l'actif.
@@ -187,34 +193,12 @@ function AssetFormModal({ asset, onClose, onSaved }) {
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label style={labelStyle}>Hostname (FQDN)</label>
-              <input style={inputStyle} value={form.hostname} onChange={e => set('hostname', e.target.value)} placeholder="srv-prod-01.domaine.local" autoComplete="off" />
-            </div>
-            <div>
-              <label style={labelStyle}>Adresse IP</label>
-              <input style={inputStyle} value={form.ip_address} onChange={e => set('ip_address', e.target.value)} placeholder="10.0.1.50" autoComplete="off" />
-            </div>
-          </div>
-          <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>Au moins un des deux, nécessaire pour la connexion WinRM/SSH.</p>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label style={labelStyle}>OS</label>
-              <input style={inputStyle} value={form.os} onChange={e => set('os', e.target.value)} placeholder="Windows Server" autoComplete="off" />
-            </div>
-            <div>
-              <label style={labelStyle}>Version OS</label>
-              <input style={inputStyle} value={form.os_version} onChange={e => set('os_version', e.target.value)} placeholder="2019" autoComplete="off" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
               <label style={labelStyle}>Type d'actif</label>
               <select style={inputStyle} value={form.asset_type} onChange={e => set('asset_type', e.target.value)}>
                 <option value="server">Serveur</option>
                 <option value="workstation">Poste de travail</option>
                 <option value="network">Réseau</option>
+                <option value="website">Site web</option>
               </select>
             </div>
             <div>
@@ -230,52 +214,89 @@ function AssetFormModal({ asset, onClose, onSaved }) {
             Pondère le score de risque des vulnérabilités de cet actif (×1.5 / ×1.0 / ×0.7).
           </p>
 
-          <div>
-            <label style={labelStyle}>Méthode de collecte</label>
-            <select style={inputStyle} value={form.collection_method} onChange={e => set('collection_method', e.target.value)}>
-              <option value="service_account">Compte de service (SSH/WinRM)</option>
-              <option value="agent">Agent posé sur le poste</option>
-            </select>
-          </div>
-          {form.collection_method === 'agent' && (
-            <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>
-              {isEdit
-                ? <>Générez un jeton d'enrôlement pour cet actif depuis <Link to="/agents" className="hover:underline" style={{ color: MODULE_COLOR }}>Sécurité &gt; Agents</Link>.</>
-                : "Une fois l'actif créé, générez un jeton d'enrôlement depuis Sécurité > Agents pour l'installer sur le poste."}
-            </p>
-          )}
-
-          {/* Champs SSH uniquement : ignorés côté Windows (compte de service WinRM partagé,
-              cf. services/asset_scanner.py::_scan_windows qui ne prend même pas ces paramètres)
-              — masqués plutôt que juste étiquetés "SSH" dès que l'OS ressemble à du Windows
-              (même détection que le backend, `_scan_windows` vs `_scan_linux`), pour ne pas
-              laisser croire qu'ils changent quoi que ce soit sur un actif Windows (10/08/2026,
-              confusion réelle constatée : modifier ces champs sur un actif Windows n'avait
-              aucun effet, remonté par l'utilisateur). */}
-          {/windows/i.test(form.os) ? (
-            <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(88,166,255,0.08)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
-              Actif Windows : le scan utilise toujours le compte de service WinRM partagé
-              (<code>WINRM_USER</code>/<code>WINRM_PASSWORD</code> dans <code>.env</code>) —
-              pas d'identifiants par actif possible ici.
+          {form.asset_type === 'website' ? (
+            // Site web (17/08/2026) : ni hostname/IP ni scan SSH/WinRM — juste l'URL, checks
+            // 100% passifs (en-têtes HTTP, protocole TLS — cf. services/web_hardening.py).
+            <div>
+              <label style={labelStyle}>URL *</label>
+              <input style={inputStyle} value={form.url} onChange={e => set('url', e.target.value)} placeholder="https://exemple.fr" autoComplete="off" />
+              <p className="text-xs mt-1" style={{ color: 'var(--text-faint, var(--text-muted))' }}>
+                Checks passifs uniquement (en-têtes de sécurité HTTP, protocole TLS) — aucune tentative d'injection.
+              </p>
             </div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label style={labelStyle}>Utilisateur SSH (optionnel, Linux uniquement)</label>
-                  <input style={inputStyle} value={form.scan_username} onChange={e => set('scan_username', e.target.value)} placeholder="compte partagé par défaut" autoComplete="off" />
+                  <label style={labelStyle}>Hostname (FQDN)</label>
+                  <input style={inputStyle} value={form.hostname} onChange={e => set('hostname', e.target.value)} placeholder="srv-prod-01.domaine.local" autoComplete="off" />
                 </div>
                 <div>
-                  <label style={labelStyle}>Mot de passe SSH (optionnel, Linux uniquement)</label>
-                  <input type="password" style={inputStyle} value={form.scan_password} onChange={e => set('scan_password', e.target.value)}
-                    placeholder={isEdit && asset.has_scan_password ? '•••••• (laisser vide pour conserver)' : 'clé SSH partagée par défaut'}
-                    autoComplete="new-password" />
+                  <label style={labelStyle}>Adresse IP</label>
+                  <input style={inputStyle} value={form.ip_address} onChange={e => set('ip_address', e.target.value)} placeholder="10.0.1.50" autoComplete="off" />
                 </div>
               </div>
-              <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>
-                Phase de test — identifiants stockés chiffrés en base, prioritaires sur la clé SSH partagée du parc. À terme : clé SSH par machine.
-                Sans effet sur un actif Windows (WinRM utilise toujours le compte de service partagé).
-              </p>
+              <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>Au moins un des deux, nécessaire pour la connexion WinRM/SSH.</p>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label style={labelStyle}>OS</label>
+                  <input style={inputStyle} value={form.os} onChange={e => set('os', e.target.value)} placeholder="Windows Server" autoComplete="off" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Version OS</label>
+                  <input style={inputStyle} value={form.os_version} onChange={e => set('os_version', e.target.value)} placeholder="2019" autoComplete="off" />
+                </div>
+              </div>
+
+              <div>
+                <label style={labelStyle}>Méthode de collecte</label>
+                <select style={inputStyle} value={form.collection_method} onChange={e => set('collection_method', e.target.value)}>
+                  <option value="service_account">Compte de service (SSH/WinRM)</option>
+                  <option value="agent">Agent posé sur le poste</option>
+                </select>
+              </div>
+              {form.collection_method === 'agent' && (
+                <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>
+                  {isEdit
+                    ? <>Générez un jeton d'enrôlement pour cet actif depuis <Link to="/agents" className="hover:underline" style={{ color: MODULE_COLOR }}>Sécurité &gt; Agents</Link>.</>
+                    : "Une fois l'actif créé, générez un jeton d'enrôlement depuis Sécurité > Agents pour l'installer sur le poste."}
+                </p>
+              )}
+
+              {/* Champs SSH uniquement : ignorés côté Windows (compte de service WinRM partagé,
+                  cf. services/asset_scanner.py::_scan_windows qui ne prend même pas ces paramètres)
+                  — masqués plutôt que juste étiquetés "SSH" dès que l'OS ressemble à du Windows
+                  (même détection que le backend, `_scan_windows` vs `_scan_linux`), pour ne pas
+                  laisser croire qu'ils changent quoi que ce soit sur un actif Windows (10/08/2026,
+                  confusion réelle constatée : modifier ces champs sur un actif Windows n'avait
+                  aucun effet, remonté par l'utilisateur). */}
+              {/windows/i.test(form.os) ? (
+                <div className="text-xs px-3 py-2 rounded-lg" style={{ background: 'rgba(88,166,255,0.08)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                  Actif Windows : le scan utilise toujours le compte de service WinRM partagé
+                  (<code>WINRM_USER</code>/<code>WINRM_PASSWORD</code> dans <code>.env</code>) —
+                  pas d'identifiants par actif possible ici.
+                </div>
+              ) : (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label style={labelStyle}>Utilisateur SSH (optionnel, Linux uniquement)</label>
+                      <input style={inputStyle} value={form.scan_username} onChange={e => set('scan_username', e.target.value)} placeholder="compte partagé par défaut" autoComplete="off" />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Mot de passe SSH (optionnel, Linux uniquement)</label>
+                      <input type="password" style={inputStyle} value={form.scan_password} onChange={e => set('scan_password', e.target.value)}
+                        placeholder={isEdit && asset.has_scan_password ? '•••••• (laisser vide pour conserver)' : 'clé SSH partagée par défaut'}
+                        autoComplete="new-password" />
+                    </div>
+                  </div>
+                  <p className="text-xs -mt-2" style={{ color: 'var(--text-faint, var(--text-muted))' }}>
+                    Phase de test — identifiants stockés chiffrés en base, prioritaires sur la clé SSH partagée du parc. À terme : clé SSH par machine.
+                    Sans effet sur un actif Windows (WinRM utilise toujours le compte de service partagé).
+                  </p>
+                </>
+              )}
             </>
           )}
 

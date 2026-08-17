@@ -123,6 +123,24 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=30, hour=3),
         "options": {"queue": "default"},
     },
+
+    # KEV — CISA Known Exploited Vulnerabilities (services/kev_fetcher.py), export JSON
+    # régénéré au fil de l'eau côté CISA, pas d'API incrémentale. 3h45 : juste après EPSS
+    # (3h30), avant la sauvegarde (4h).
+    "kev-sync-daily": {
+        "task": "tasks.scheduled_tasks.sync_kev",
+        "schedule": crontab(minute=45, hour=3),
+        "options": {"queue": "default"},
+    },
+
+    # Maturité d'exploit — présence dans Metasploit (services/exploit_maturity_fetcher.py).
+    # Hebdomadaire (pas quotidien comme EPSS/KEV) : le catalogue de modules évolue lentement,
+    # pas de valeur à reparser ~11 Mo chaque jour. Dimanche 5h45, après WithSecure (5h30).
+    "exploit-maturity-sync-weekly": {
+        "task": "tasks.scheduled_tasks.sync_exploit_maturity",
+        "schedule": crontab(minute=45, hour=5, day_of_week=0),
+        "options": {"queue": "default"},
+    },
 }
 
 
@@ -488,6 +506,51 @@ def sync_epss(self):
         return stats
     except Exception as exc:
         logger.error(f"Erreur synchronisation EPSS: {exc}")
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(
+    name="tasks.scheduled_tasks.sync_kev",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=600,
+    soft_time_limit=300,
+    time_limit=360,
+)
+def sync_kev(self):
+    import asyncio
+    logger.info("Démarrage synchronisation KEV")
+    try:
+        from services.kev_fetcher import run_kev_sync
+        stats = asyncio.run(run_kev_sync())
+        logger.info(f"Synchronisation KEV terminée : {stats}")
+        return stats
+    except Exception as exc:
+        logger.error(f"Erreur synchronisation KEV: {exc}")
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(
+    name="tasks.scheduled_tasks.sync_exploit_maturity",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=600,
+    soft_time_limit=600,
+    time_limit=720,
+)
+def sync_exploit_maturity(self):
+    """soft_time_limit/time_limit plus larges que les autres tâches de ce fichier : le fichier
+    de métadonnées Metasploit (~11 Mo, ~7000 modules) est plus long à télécharger/parser qu'un
+    export EPSS/KEV."""
+    import asyncio
+    logger.info("Démarrage synchronisation maturité d'exploit (Metasploit)")
+    try:
+        from services.exploit_maturity_fetcher import run_exploit_maturity_sync
+        stats = asyncio.run(run_exploit_maturity_sync())
+        logger.info(f"Synchronisation maturité d'exploit terminée : {stats}")
+        return stats
+    except Exception as exc:
+        logger.error(f"Erreur synchronisation maturité d'exploit: {exc}")
         raise self.retry(exc=exc)
 
 

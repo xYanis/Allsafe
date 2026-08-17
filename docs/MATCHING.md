@@ -1,5 +1,6 @@
 # MATCHING.md
-## Charger pour les tâches : cpe_matcher.py, scoring.py, remediation.py, patch_checker.py
+## Charger pour les tâches : cpe_matcher.py, scoring.py, remediation.py, patch_checker.py,
+## cvss_bte.py, kev_fetcher.py, exploit_maturity_fetcher.py
 
 ---
 
@@ -467,6 +468,65 @@ Vérifié isolément (`calculate_risk_score(9.8, 0.5, "haute")` = 7.35 = 4.9 × 
 bout sur les scores réels du parc n'a pas pu être observé en direct — l'EPSS est à 0/absent pour les
 CVE actuellement liées aux deux actifs de test, ce qui annule le produit quelle que soit la criticité
 (caractéristique du jeu de données, pas un bug).
+
+---
+
+## Exploitation active — kev_fetcher.py / exploit_maturity_fetcher.py
+
+Deux signaux gratuits ajoutés le 17/08/2026, équivalents de ce que fait Cyberwatch (référence
+explicite de l'utilisateur : CVSS-B, CVSS-BTE, EPSS, "maturité d'exploit — rouge = présent dans
+Metasploit"). Tous deux ne créent jamais de CVE, n'en mettent à jour que celles déjà en base
+(`cves.cve_id`) — même principe qu'`epss_fetcher.py`.
+
+- **KEV** (`kev_fetcher.py`) — catalogue CISA "Known Exploited Vulnerabilities" : un **fait
+  constaté**, pas une prédiction (contrairement à l'EPSS). Source publique gratuite sans clé,
+  export JSON complet régénéré au fil de l'eau. Deux passes bulk UPDATE (réinitialise les CVE
+  retirées du catalogue avant d'appliquer le feed courant, cf. docstring du fichier).
+  `cves.kev`/`kev_date_added`/`kev_ransomware`. Sync quotidienne (Celery beat, 3h45).
+- **Maturité d'exploit** (`exploit_maturity_fetcher.py`) — présence dans le framework
+  Metasploit (fichier de métadonnées public du dépôt, BSD-3-Clause). Read-only, threat intel
+  publique : seuls le nom du module, les CVE référencées et le rang de fiabilité natif du
+  framework (`rank`, 0=manual à 600=excellent) sont extraits — aucun code d'exploitation
+  téléchargé ni exécuté (cf. CLAUDE.md §1). `cves.msf_module`/`msf_best_rank`/`msf_module_count`.
+  Sync hebdomadaire (dimanche 5h45) — le catalogue de modules évolue lentement, pas de valeur à
+  reparser ~11 Mo chaque jour.
+
+Les deux exposent un filtre booléen sur `GET /cves` et `GET /vulnerabilities` (`kev`/
+`msf_module`, index partiels `idx_cves_kev`/`idx_cves_msf_module`) et un badge partagé côté
+frontend (`components/ExploitBadge.jsx`, cf. `docs/FRONTEND.md`). Déclenchement manuel :
+`POST /api/sync/kev` / `POST /api/sync/exploit-maturity` (même forme que `/epss`).
+
+## CVSS-BTE — cvss_bte.py
+
+Score CVSS v3.1 **Temporal + Environnemental réel**, par `(CVE, actif)` — donc porté par
+`Vulnerability.cvss_bte`/`cvss_bte_vector`, pas par `CVE` (contrairement à `cvss_score`,
+générique et identique pour tout le monde). **Coexiste avec `risk_score` sans le remplacer** —
+formules distinctes, calculées côte à côte dans les mêmes fonctions de recalcul (`scoring.py`,
+pas un second passage sur le parc, cf. commentaire sur `_RESCORE_LOAD_OPTIONS`).
+
+Calcul via la librairie `cvss` (Red Hat Product Security, LGPLv3+) plutôt qu'une
+réimplémentation main de l'arrondi CVSS v3.1 (`round_up`), source connue de bugs subtils.
+
+Périmètre volontairement limité à **Temporal (E/RL/RC) + Environmental Requirements
+(CR/IR/AR)** — pas de Modified Base Metrics (MAV/MAC/...), non dérivables automatiquement de ce
+qu'Allsafe connaît d'un actif. Dérivation automatique (`compute_cvss_bte`) :
+
+| Métrique | Source | Règle |
+|---|---|---|
+| E (Exploit Code Maturity) | `CVE.kev`/`msf_module` | `kev` → `H` ; sinon `msf_module` → `F` (un module intégré à un framework majeur correspond à la définition CVSS de "Functional exploit code available", indépendamment de son `rank` de fiabilité) ; sinon `X` |
+| RL (Remediation Level) | `Vulnerability.status` | `awaiting_fix`/`awaiting_fix_partial` (aucun correctif publié, cf. CLAUDE.md §1) → `U` ; sinon `X` |
+| RC (Report Confidence) | — | toujours `C` (CVE publiées par NVD, source confirmée) — même multiplicateur que `X` (1.0), gardé explicite pour la traçabilité du vecteur |
+| CR/IR/AR | `asset.tags["criticite"]` | `haute→H`, `moyenne→M`, `faible→L`, défaut `X` — même dimension métier que `risk_score` (§ Criticité métier ci-dessus), réutilisée sur les 3 axes plutôt que d'inventer 3 réglages séparés |
+
+`None` si `CVE.cvss_vector` est absent ou n'est pas un vecteur v3.0/3.1 (`CVSS:3.`) — CVE notée
+en v2 seulement, la lib `cvss` ne couvre pas ce cas ici (même repli que `risk_score` sur
+`cvss_score is None`).
+
+Recalculé automatiquement à chaque sync KEV/maturité d'exploit (les deux appellent
+`recalculate_all_scores()` en fin de fonction, `E` en dépend directement) et à chaque
+`/rescore`/scan d'actif/sync CVE ciblée, comme `risk_score`. Exposé par l'API
+(`GET /vulnerabilities`, `sort_by=cvss_bte`) sans colonne dédiée dans le tableau pour l'instant —
+même traitement que `risk_score`, qui n'en a pas non plus (sert uniquement au tri par défaut).
 
 ---
 

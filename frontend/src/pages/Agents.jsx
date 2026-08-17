@@ -29,10 +29,15 @@ function VersionBadge({ version, outdated }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span style={{ color: 'var(--text-secondary)' }}>{version}</span>
-      {outdated && (
+      {outdated ? (
         <span title="Une version plus récente de l'agent est disponible"
           style={{ background: 'rgba(210,153,34,0.12)', color: '#d29922', border: '1px solid rgba(210,153,34,0.3)', borderRadius: 6, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
           Mise à jour dispo
+        </span>
+      ) : (
+        <span title="Ce poste tourne la dernière version publiée de l'agent"
+          style={{ background: 'rgba(63,185,80,0.12)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.3)', borderRadius: 6, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
+          À jour
         </span>
       )}
     </span>
@@ -233,6 +238,22 @@ function TokenModal({ assetList, onClose, onCreated }) {
     setCopied(true)
   }
 
+  // Commandes prêtes à coller (17/08/2026) — avant, seule la commande `allsafe-agent
+  // enroll` nue était affichée : sur un poste Windows non élevé, `msiexec /qn` échoue en
+  // silence (incident réel, poste aos12) et `allsafe-agent` n'est de toute façon pas dans
+  // le PATH tant que le .msi n'a pas été reconstruit avec le correctif PATH (wix/main.wxs).
+  // `update-agent.ps1`/`.sh` (agent/deploy/) téléchargent le paquet eux-mêmes, vérifient
+  // l'élévation/root et affichent leurs erreurs à l'écran au lieu de les faire disparaître
+  // — un seul script à copier sur le poste, plus besoin du .msi/.deb à côté.
+  const serverOrigin = window.location.origin
+  const winCmd = result ? `.\\update-agent.ps1 -Server ${serverOrigin} -EnrollToken ${result.token}` : ''
+  const linuxCmd = result ? `sudo ./update-agent.sh ${serverOrigin} ${result.token}` : ''
+  const [copiedCmd, setCopiedCmd] = useState('')
+  function copyCmd(text, key) {
+    navigator.clipboard?.writeText(text)
+    setCopiedCmd(key)
+  }
+
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4 animate-backdrop-in modal-backdrop" onClick={result ? undefined : onClose}>
       <div className="max-w-lg w-full rounded-2xl flex flex-col animate-modal-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
@@ -336,9 +357,40 @@ function TokenModal({ assetList, onClose, onCreated }) {
                   {copied ? 'Copié ✓' : 'Copier'}
                 </button>
               </div>
-              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                Sur le poste : <code>allsafe-agent enroll --token &lt;JETON&gt; --server &lt;URL&gt;</code>
-              </p>
+              <div className="pt-1">
+                <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={labelStyle}>
+                  Sur le poste (script <code>agent/deploy/</code> — télécharge et installe le paquet lui-même)
+                </label>
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs w-14 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>Windows</span>
+                    <code className="flex-1 text-xs px-2.5 py-2 rounded-lg break-all" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                      {winCmd}
+                    </code>
+                    <button onClick={() => copyCmd(winCmd, 'win')}
+                      className="text-xs px-2.5 py-2 rounded-lg font-medium flex-shrink-0"
+                      style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                      {copiedCmd === 'win' ? 'Copié ✓' : 'Copier'}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs w-14 flex-shrink-0" style={{ color: 'var(--text-muted)' }}>Linux</span>
+                    <code className="flex-1 text-xs px-2.5 py-2 rounded-lg break-all" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
+                      {linuxCmd}
+                    </code>
+                    <button onClick={() => copyCmd(linuxCmd, 'linux')}
+                      className="text-xs px-2.5 py-2 rounded-lg font-medium flex-shrink-0"
+                      style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                      {copiedCmd === 'linux' ? 'Copié ✓' : 'Copier'}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: 'var(--text-muted)' }}>
+                  À lancer en administrateur (Windows) / root (Linux), depuis le dossier contenant
+                  le script — le script vérifie les droits et affiche l'erreur à l'écran s'il en manque.
+                  Poste isolé sans script sous la main : <code>allsafe-agent enroll --token &lt;JETON&gt; --server &lt;URL&gt;</code> après installation manuelle du <code>.msi</code>/<code>.deb</code>.
+                </p>
+              </div>
             </div>
             <div className="px-6 py-4 flex items-center justify-end" style={{ borderTop: '1px solid var(--border)' }}>
               <button onClick={onClose}

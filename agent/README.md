@@ -29,7 +29,27 @@ Docker (ex. `127.0.0.1:8000` dans `docker-compose.yml`), c'est le port du **fron
 schéma `http://` ou `https://` obligatoire (`hhtp://` ou toute coquille dans le schéma fait
 échouer l'appel avec `URL scheme is not allowed`, avant même la moindre tentative réseau).
 
-## Installation
+## Installation rapide (recommandée — script)
+
+**17/08/2026** : plutôt que les commandes manuelles ci-dessous, `agent/deploy/update-agent.ps1`/
+`.sh` téléchargent le paquet depuis Allsafe, l'installent et enrôlent le poste en une seule
+commande — vérifient l'élévation (Windows)/root (Linux) et affichent les erreurs à l'écran au
+lieu de les faire disparaître dans un log (cause d'une install `.msi` `/qn` silencieusement
+échouée en conditions réelles, poste `aos12`, 17/08/2026). Seul le script (petit fichier texte)
+doit être transféré sur le poste, pas le `.msi`/`.deb` :
+
+```powershell
+# Windows, PowerShell en admin
+.\update-agent.ps1 -Server http://<hôte-allsafe>:3000 -EnrollToken <JETON>
+```
+```bash
+# Linux, root
+sudo ./update-agent.sh http://<hôte-allsafe>:3000 <JETON>
+```
+
+La modale « Jeton d'enrôlement » (page Agents) génère ces deux commandes prêtes à copier, jeton
+et URL déjà substitués. Les instructions manuelles ci-dessous restent valables pour un poste
+isolé sans accès au script, ou pour comprendre ce que le script fait sous le capot.
 
 ### Linux (.deb)
 
@@ -72,10 +92,21 @@ allsafe-agent enroll --token <JETON> --server http://<hôte-allsafe>:3000
 Restart-Service AllsafeAgent   # prend le relais tout seul ensuite (check-in horaire)
 ```
 
-À lancer depuis un PowerShell/invite de commandes **admin** — mêmes accès protégés que
-côté Linux (`net localgroup administrators`, `manage-bde`, clés de registre HKLM). Le service
+À lancer depuis un PowerShell/invite de commandes **admin** (fenêtre ouverte via "Exécuter en
+tant qu'administrateur" — être membre du groupe Administrateurs ne suffit pas, l'UAC filtre le
+jeton par défaut) — mêmes accès protégés que côté Linux (`net localgroup administrators`,
+`manage-bde`, clés de registre HKLM). Sans élévation, `msiexec /qn` échoue **sans le moindre
+message** (constaté en conditions réelles, poste `aos12`, 17/08/2026) ; pour diagnostiquer un
+échec, relancer avec un journal : `msiexec /i allsafe-agent.msi /l*v install.log`. Le service
 (13/08/2026, `wix/main.wxs::ServiceInstall`) est enregistré et démarré automatiquement par le
 `.msi` — rien à faire de plus, `Get-Service AllsafeAgent` pour vérifier.
+
+⚠️ **`allsafe-agent` hors `PATH`** : avant le correctif du 17/08/2026 (`wix/main.wxs::Environment`,
+à vérifier après rebuild — `msiinfo export allsafe-agent.msi Environment`), le `.msi` n'ajoutait
+pas `Program Files\Allsafe Agent` au `PATH` système. Sur un `.msi` construit avant ce correctif
+(ou si la vérification échoue), utiliser le chemin complet :
+`& "C:\Program Files\Allsafe Agent\allsafe-agent.exe" enroll ...`. Même après le correctif, une
+fenêtre PowerShell **déjà ouverte** ne relit pas le `PATH` — en ouvrir une nouvelle après l'install.
 
 **Alternative sans service (Planificateur de tâches)** — pour qui préfère ne pas laisser
 tourner un process résident :

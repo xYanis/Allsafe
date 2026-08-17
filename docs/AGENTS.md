@@ -13,6 +13,17 @@
 > (compilation croisée, `.deb`/`.msi` inspectés, `wixl` confirmé honorer `ServiceInstall`) — **le
 > comportement du service lui-même sur un vrai poste reste à valider** (installation, démarrage,
 > arrêt propre au reboot/désinstall) avant de considérer ce mode pleinement acquis.
+>
+> **17/08/2026 — friction d'installation manuelle corrigée**, suite à un enrôlement réel (poste
+> `aos12`) où `msiexec /qn` non-élevé a échoué en silence puis `allsafe-agent` s'est révélé hors
+> `PATH` : `wix/main.wxs` ajoute désormais `INSTALLFOLDER` au `PATH` système (**.msi existant dans
+> `agent/dist/` pas encore rebuild avec ce correctif — à faire, `wixl -a x64`, puis vérifier
+> `msiinfo export allsafe-agent.msi Environment`**) ; `agent/deploy/update-agent.ps1`/`.sh`
+> vérifient désormais l'élévation/root en tout premier et affichent leurs erreurs à l'écran (avant :
+> uniquement loggées en fichier, invisibles en usage manuel) — devenus la méthode d'installation
+> **recommandée**, y compris pour un premier poste isolé, pas seulement les mises à jour planifiées
+> (§ Installation rapide, `agent/README.md`). La modale « Jeton d'enrôlement » (page Agents) génère
+> désormais la commande one-liner correspondante (token + URL serveur déjà substitués).
 
 ## Contexte
 

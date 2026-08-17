@@ -10,7 +10,13 @@
   réutilisable "parc", cf. docs/AGENTS.md § Enrôlement à l'échelle, embarqué dans cette
   même tâche planifiée GPO) — sans lui, un poste non enrôlé reste signalé dans le log.
 
-  Usage : update-agent.ps1 [-Server http://hôte-allsafe:3000] [-EnrollToken <jeton>]
+  **17/08/2026 — aussi la commande recommandée pour un premier poste isolé** (au lieu du
+  `msiexec` + `allsafe-agent enroll` manuels documentés dans agent/README.md § Installation) :
+  ce script télécharge le .msi, l'installe et enrôle en une seule commande, avec des erreurs
+  visibles à l'écran plutôt que le silence de `msiexec /qn` (incident réel, poste aos12 —
+  échec d'install sans élévation resté invisible jusqu'à relancer avec `/l*v` à la main).
+
+  Usage : update-agent.ps1 -Server http://hôte-allsafe:3000 -EnrollToken <jeton>
 #>
 param(
     [string]$Server = "http://192.168.105.84:3000",
@@ -23,8 +29,26 @@ $configFile = "$env:ProgramData\allsafe-agent\agent.json"
 $stateDir   = "$env:ProgramData\allsafe-agent"
 $logFile    = "$stateDir\update.log"
 
+# Élévation (17/08/2026) — sans ce contrôle, `msiexec`/`Uninstall-Package`/`Restart-Service`
+# échouent en silence sous un jeton non-admin (être membre du groupe Administrateurs ne
+# suffit pas : il faut une session PowerShell lancée "en tant qu'administrateur", UAC).
+# Vérifié et arrêté ICI, avant toute action, plutôt que de laisser echouer plus loin un
+# `Start-Process msiexec ... -Wait` dont le code de sortie n'était pas contrôlé.
+$isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isElevated) {
+    Write-Error "Ce script doit tourner dans un PowerShell lancé « en tant qu'administrateur » (élévation UAC) — être membre du groupe Administrateurs ne suffit pas. Ferme cette fenêtre et rouvre PowerShell via clic droit > Exécuter en tant qu'administrateur."
+    exit 1
+}
+
 New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
-function Log($msg) { "$(Get-Date -Format o)  $msg" | Out-File -FilePath $logFile -Append -Encoding utf8 }
+# Miroir console (17/08/2026) : avant, tout partait uniquement dans update.log — en usage
+# manuel/interactif (premier poste), un échec silencieux dans le fichier est aussi invisible
+# qu'un `msiexec /qn` sans log. Write-Host garde le comportement GPO/planifié inchangé (le
+# fichier reste la trace faisant foi) tout en rendant l'exécution manuelle diagnosticable.
+function Log($msg) {
+    "$(Get-Date -Format o)  $msg" | Out-File -FilePath $logFile -Append -Encoding utf8
+    Write-Host $msg
+}
 
 try {
     $latestVersion = (Invoke-RestMethod "$Server/api/agents/latest/version" -TimeoutSec 15).version
@@ -62,8 +86,15 @@ if ($installedVersion -ne $latestVersion) {
     if ($installed) {
         $installed | Uninstall-Package -Force | Out-Null
     }
-    Start-Process msiexec.exe -ArgumentList "/i `"$tmp`" /qn /l*v `"$stateDir\install.log`"" -Wait
+    $msiProcess = Start-Process msiexec.exe -ArgumentList "/i `"$tmp`" /qn /l*v `"$stateDir\install.log`"" -Wait -PassThru
     Remove-Item $tmp -ErrorAction SilentlyContinue
+    # Code de sortie contrôlé (17/08/2026) — avant, un échec silencieux de msiexec (droits,
+    # msi corrompu...) laissait le script continuer comme si l'install avait réussi, jusqu'à
+    # l'échec du `& $exe enroll` plus bas sans lien évident avec la vraie cause.
+    if ($msiProcess.ExitCode -ne 0) {
+        Log "Échec de l'installation (code $($msiProcess.ExitCode)) — détail dans $stateDir\install.log"
+        exit 1
+    }
     Log "Installation terminée."
 } else {
     Log "Déjà à jour ($installedVersion)."
@@ -73,7 +104,7 @@ if (-not (Test-Path $configFile)) {
     if ($EnrollToken) {
         Log "Agent non enrôlé — enrôlement avec le jeton fourni…"
         try {
-            & $exe enroll --token $EnrollToken --server $Server *>> $logFile
+            & $exe enroll --token $EnrollToken --server $Server 2>&1 | Tee-Object -FilePath $logFile -Append
             Log "Enrôlement réussi."
             Restart-Service AllsafeAgent -ErrorAction SilentlyContinue
         } catch {

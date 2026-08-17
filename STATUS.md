@@ -3345,3 +3345,47 @@ en masse comme les blocklists IP). `routers/identities.py` expose `osint_matches
 `GET /identities/matches`, `SurveillanceIdentites.jsx` affiche une nouvelle section tableau. Testé de
 bout en bout en conditions réelles (Playwright + curl) : validation email, appel XposedOrNot réel, cache
 (148ms au 2e appel), affichage, suppression — 31/31 tests toujours au vert.
+
+---
+
+## Vérification "agent = sur-ensemble strict du compte de service" + incident runner CI (17/08/2026)
+
+**Vérification demandée par l'utilisateur, pas prise sur la foi de la doc** : comparaison check par
+check entre `asset_scanner.py` (compte de service, Python) et `agent/src/collect/{linux,windows}.rs`
+(agent Rust) — suite à la brèche trouvée plus tôt dans la session sur les ports risqués (agent pas
+synchronisé, corrigée dans `f2279bb`). Extraction des 4 listes de checks par grep, puis diff manuel.
+
+- **Linux** : les 6 checks du compte de service sont tous dans les 14 de l'agent. Sur-ensemble
+  confirmé, aucune surprise.
+- **Windows** : premier passage en faux négatif — un grep sur `Check::new("...")` ne trouvait que 15
+  checks côté agent contre 14 côté compte de service, avec 8 manquants en apparence (`rdp_nla`, `smb1`,
+  `smb_signing_server/client`, `smb_guest_auth`, `smb_encryption`, `llmnr`, `firewall`). En relisant
+  `windows.rs:247-312` directement : ces 8 checks existent bel et bien, construits via un helper
+  différent (`registry_bool_check(...)`) que le grep ne capturait pas. Total réel côté agent : 23
+  checks. Les 14 du compte de service y sont tous. **Sur-ensemble strict confirmé sur les deux OS**,
+  vérifié en lisant le code, pas en confirmant la doc — piège méthodologique identique (extraction par
+  pattern incomplète) déjà rencontré côté Python pour `smb1` un peu plus tôt dans la session.
+
+**Commit `f2279bb`** (poussé, `a336f93..f2279bb`) : fix chevauchement KEV/Metasploit sur badge HIGH
+(`SeverityBadge.jsx` : toutes les sévérités rendent à la largeur de CRITICAL, la plus longue), sync
+ports risqués agent/compte de service, + 3 fichiers de tests (`test_os_eol.py`, `test_cvss_bte.py`,
+`test_web_hardening.py`, 40 tests). Suite complète : 248 tests, tous verts. `fbf3e60` (politiques de
+scan planifié par criticité, faite par une autre session dans l'intervalle) poussé dans la foulée.
+
+**Incident runner CI, découvert au push** : pipeline bloquée, message GitLab "aucun runner actif...
+tags: docker". Le runner (`wsl2-docker-runner`, cf. `.gitlab-ci.yml`) tourne en conteneur Docker
+(`gitlab-runner`, image `gitlab/gitlab-runner:latest`) sur cette même machine de dev, sous Docker
+Desktop (WSL2) — confirmé en trouvant le conteneur `Exited (127) 3 days ago` via `docker ps -a` (même
+hostname `PORT-1875` que l'utilisateur : l'environnement d'exécution des commandes *est* la machine de
+dev, pas un sandbox distinct). Sa restart policy est déjà `always` — pas la cause : Docker Desktop
+lui-même n'avait probablement pas redémarré avec la machine, donc aucun daemon disponible pour honorer
+cette policy au reboot. Fix immédiat : `docker start gitlab-runner`, a repris le job en file d'attente
+dans la foulée. Fix durable, pas une commande CLI mais un réglage de l'appli Windows : Docker Desktop
+> Settings > General > "Start Docker Desktop when you sign in to your computer" — communiqué à
+l'utilisateur, pas appliqué (pas d'accès à l'UI Docker Desktop depuis ce terminal). Pipelines 22 et 23
+relancées par l'utilisateur ensuite, jobs 110/121/122 tous `success` confirmé via `docker logs
+gitlab-runner`. Détail du conteneur/de la policy documenté dans `.gitlab-ci.yml` à côté du commentaire
+existant sur le runner.
+
+**Point ouvert** : les binaires agent reconstruits (`agent/dist/*.deb`/`*.msi`, v0.1.3, avec le fix de
+ports) restent locaux, pas encore redéployés sur les postes déjà enrôlés.

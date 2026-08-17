@@ -3,6 +3,15 @@
 # "docker"), exécuteur Docker enregistré avec le socket de l'hôte monté (--docker-volumes
 # /var/run/docker.sock:...) : les jobs parlent directement au daemon Docker de la machine de dev,
 # pas de docker:dind séparé — même daemon que celui utilisé manuellement toute la session.
+#
+# Le runner tourne lui-même en conteneur (`docker run --name gitlab-runner ...
+# gitlab/gitlab-runner:latest`, restart policy `always`) sur cette machine de dev, sous Docker
+# Desktop (WSL2). Incident 17/08/2026 : conteneur arrêté (gris dans Settings > CI/CD > Runners,
+# jobs bloqués "aucun runner en ligne") après un arrêt de la machine, alors que sa restart policy
+# est bien `always` — Docker Desktop lui-même n'avait pas redémarré avec la machine, donc aucun
+# daemon pour honorer la policy. Fix ponctuel : `docker start gitlab-runner`. Fix durable :
+# Docker Desktop > Settings > General > "Start Docker Desktop when you sign in to your computer"
+# (pas une commande WSL2 — appli Windows). Rien à changer côté `docker run`/restart policy.
 
 stages:
   - build

@@ -10,8 +10,18 @@
 # embarqué dans ce même script de démarrage GPO/config management) — sans ce jeton, un
 # poste non enrôlé reste signalé dans le log, jamais enrôlé silencieusement.
 #
-# Usage : update-agent.sh [URL_SERVEUR_ALLSAFE] [JETON_ENROLEMENT_BULK]
+# 17/08/2026 — aussi la commande recommandée pour un premier poste isolé (au lieu de
+# `dpkg -i` + `allsafe-agent enroll` manuels documentés dans agent/README.md § Installation) :
+# une seule commande, erreurs visibles à l'écran (cf. équivalent Windows, même session,
+# incident poste aos12).
+#
+# Usage : update-agent.sh URL_SERVEUR_ALLSAFE [JETON_ENROLEMENT_BULK]
 set -euo pipefail
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Ce script doit tourner en root (dpkg/systemctl) — relance-le avec sudo." >&2
+    exit 1
+fi
 
 SERVER="${1:-http://192.168.105.84:3000}"
 ENROLL_TOKEN="${2:-}"
@@ -19,7 +29,9 @@ BIN=/usr/bin/allsafe-agent
 CONFIG=/etc/allsafe-agent/agent.json
 LOG=/var/log/allsafe-agent-update.log
 
-log() { echo "$(date -Is)  $1" >> "$LOG"; }
+# Miroir console (17/08/2026) — même raison que le script Windows équivalent : en usage
+# manuel/interactif, un échec resté uniquement dans le fichier de log est invisible.
+log() { local msg="$(date -Is)  $1"; echo "$msg" >> "$LOG"; echo "$msg"; }
 
 latest_version=$(curl -sf "$SERVER/api/agents/latest/version" | grep -oP '"version"\s*:\s*"\K[^"]+') || {
     log "Échec de récupération de la version côté serveur ($SERVER)"
@@ -37,7 +49,11 @@ if [ "$installed_version" != "$latest_version" ]; then
         rm -f "$tmp"
         exit 1
     fi
-    dpkg -i "$tmp" >> "$LOG" 2>&1
+    if ! dpkg -i "$tmp" 2>&1 | tee -a "$LOG"; then
+        rm -f "$tmp"
+        log "Échec de l'installation dpkg — voir ci-dessus / $LOG (dépendances manquantes ? essayer 'apt-get install -f')"
+        exit 1
+    fi
     rm -f "$tmp"
     log "Installation terminée."
     # dpkg remplace le binaire sur disque, mais un service déjà actif garde l'ancien code
@@ -54,7 +70,7 @@ fi
 if [ ! -f "$CONFIG" ]; then
     if [ -n "$ENROLL_TOKEN" ]; then
         log "Agent non enrôlé — enrôlement avec le jeton fourni…"
-        if "$BIN" enroll --token "$ENROLL_TOKEN" --server "$SERVER" >> "$LOG" 2>&1; then
+        if "$BIN" enroll --token "$ENROLL_TOKEN" --server "$SERVER" 2>&1 | tee -a "$LOG"; then
             log "Enrôlement réussi."
             systemctl restart allsafe-agent 2>/dev/null || true
         else

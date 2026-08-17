@@ -48,6 +48,27 @@ sysinfo = "0.32"
 # Enregistrement/boucle Service Control Manager (13/08/2026, service Windows persistant,
 # cf. service.rs) — dispatch synchrone appelé avant toute création de runtime tokio.
 windows-service = "0.7"
+# Auto-installation (17/08/2026, cf. install.rs/gui.rs, docs/AGENTS.md § Installation
+# rapide) — fenêtre graphique minimale (serveur + jeton) affichée quand l'exécutable est
+# lancé sans argument (double-clic), plutôt que d'exiger un PowerShell/une ligne de
+# commande. `native-windows-derive` est le compagnon macro de `native-windows-gui` (le
+# `#[derive(NwgUi)]` sur `gui.rs::InstallWindow`), toujours utilisé ensemble.
+# ⚠️ NON VÉRIFIÉ EN COMPILATION (pas de toolchain Rust/mingw-w64 disponible dans
+# l'environnement où ce code a été écrit, 17/08/2026) — à builder et tester avant de
+# considérer ce mode acquis, cf. § Vérification dans docs/AGENTS.md.
+# Toutes les features par défaut gardées (pas de sélection fine des composants ici) : le
+# nom exact des feature flags pertinents ("textbox"/"button"/...) n'a pas pu être vérifié
+# sans toolchain — un mauvais nom ferait échouer la compilation entière plutôt que de
+# juste manquer un composant. À affiner une fois un premier build réel obtenu.
+native-windows-gui = "1.0"
+native-windows-derive = "1.0"
+
+[build-dependencies]
+# Manifeste `requireAdministrator` (17/08/2026, cf. build.rs) — seulement actif quand la
+# cible est Windows (vérifié dans build.rs via CARGO_CFG_TARGET_OS), no-op sinon. Nécessite
+# `windres` sur le PATH pour la compilation croisée depuis Linux — fourni par le paquet
+# mingw-w64 déjà requis pour compiler l'exécutable Windows (cf. agent/README.md § Build).
+winres = "0.1"
 
 [profile.release]
 opt-level = "z"

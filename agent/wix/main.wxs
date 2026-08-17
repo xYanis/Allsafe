@@ -52,6 +52,18 @@
                              Arguments="service-run" />
             <ServiceControl Id="AllsafeAgentServiceControl" Name="AllsafeAgent"
                              Start="install" Stop="both" Remove="uninstall" Wait="yes" />
+            <!-- PATH système (17/08/2026) — sans ça, `allsafe-agent enroll` après un
+                 `msiexec /qn` échoue en "terme non reconnu" tant qu'on ne retape pas le
+                 chemin complet vers INSTALLFOLDER (constaté en conditions réelles, poste
+                 aos12). Part="last" pour ne rien écraser d'existant. CHECKPOINT DE
+                 VÉRIFICATION (comme ServiceInstall ci-dessus, wixl a déjà silencieusement
+                 ignoré un attribut par le passé) : après build, `msiinfo export
+                 allsafe-agent.msi Environment` ne doit pas être vide, puis vérifier après
+                 install que `allsafe-agent` est bien résolu dans un nouveau terminal
+                 (ouvrir un terminal APRÈS l'install — une session déjà ouverte ne relit
+                 pas le PATH). -->
+            <Environment Id="PathEntry" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no"
+                         Part="last" Action="set" System="yes" />
           </Component>
         </Directory>
       </Directory>

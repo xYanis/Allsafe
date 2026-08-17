@@ -31,9 +31,11 @@ schéma `http://` ou `https://` obligatoire (`hhtp://` ou toute coquille dans le
 
 ## Installation directe (17/08/2026 — sans .msi ni script, un seul .exe)
 
-> ⚠️ **NON VÉRIFIÉ EN COMPILATION** (pas de toolchain Rust/mingw-w64 disponible au moment de
-> l'écriture) — cf. `src/install.rs`/`src/gui.rs` pour le détail. À builder et tester avant
-> de considérer ce mode acquis, cf. docs/AGENTS.md § Vérification.
+> ✅ **Vérifié par compilation + link croisés réels** (`src/install.rs`/`src/gui.rs`/
+> `build.rs`, `x86_64-pc-windows-gnu`) — un vrai bug de linking a été trouvé et corrigé au
+> passage (`.rsrc` du manifeste UAC élagué par `ld` sans le correctif `build.rs`, cf.
+> docs/AGENTS.md § Vérification). **Reste non vérifié** : le comportement runtime sur un
+> vrai poste Windows.
 
 Pensé pour les **actifs critiques** (jeton unique par actif, cf. § Installation rapide
 ci-dessous pour le cas parc/non-critique) : un seul fichier `allsafe-agent.exe` à copier sur
@@ -226,12 +228,19 @@ cargo build --release --target x86_64-pc-windows-gnu
 # → target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
 ```
 
-⚠️ **NON VÉRIFIÉ EN COMPILATION** (17/08/2026, cf. `install.rs`/`gui.rs`) : `build.rs`
-embarque désormais un manifeste `requireAdministrator` via [`winres`](https://crates.io/crates/winres)
-— nécessite `windres` sur le `PATH` (fourni par `mingw-w64` ci-dessus, pas de paquet
-supplémentaire). La fenêtre graphique (`native-windows-gui`) ajoute aussi une dépendance de
-build — premier build à surveiller pour d'éventuelles erreurs de compilation (feature flags
-non affinés, cf. `Cargo.toml`) ou d'édition de liens spécifiques à `windows-gnu`.
+✅ **Vérifié par compilation + link croisés réels** (17/08/2026, cf. `install.rs`/`gui.rs`) :
+`build.rs` embarque un manifeste `requireAdministrator` via
+[`winres`](https://crates.io/crates/winres), pointé explicitement sur
+`x86_64-w64-mingw32-windres`/`x86_64-w64-mingw32-ar` (pas les noms nus `windres`/`ar` — le
+défaut de `winres` hors hôte Windows — introuvables avec un `mingw-w64` installé normalement
+via `apt-get`, qui ne fournit que les binaires préfixés). ⚠️ **Piège corrigé au passage,
+GNU/`ld` spécifique** : sans la ligne `cargo:rustc-link-arg=<OUT_DIR>/resource.o` ajoutée
+dans `build.rs` après `res.compile()`, l'éditeur de liens GNU élague silencieusement l'objet
+ressource (aucun symbole de code à résoudre dedans → jamais extrait de l'archive statique
+`libresource.a`) — le manifeste ne finit **jamais** dans l'exécutable, sans la moindre erreur
+de build pour le signaler (confirmé/corrigé via `objdump -h` : `.rsrc` absent puis présent).
+La fenêtre graphique (`native-windows-gui`) compile et **link** aussi correctement (exécutable
+PE valide produit) — reste non vérifié : le rendu/comportement réel sur un poste Windows.
 
 Le `.msi` est généré avec [`wixl`](https://gitlab.gnome.org/GNOME/msitools) (paquet Debian/
 Ubuntu `wixl`, alternative libre au WiX Toolset officiel qui est Windows-only/.NET) à partir

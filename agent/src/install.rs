@@ -9,10 +9,11 @@
 //! fonctionnalités" — ce module ne le remplace pas, il comble le cas où aucun des deux
 //! (`.msi` ou script `agent/deploy/update-agent.*`) n'est disponible sur place.
 //!
-//! ⚠️ **NON VÉRIFIÉ EN COMPILATION** (pas de toolchain Rust/mingw-w64 disponible dans
-//! l'environnement où ce fichier a été écrit, 17/08/2026, cf. docs/AGENTS.md § Vérification)
-//! — écrit au meilleur de la documentation connue de `windows-service`/`winreg`, à
-//! recompiler et tester avant de considérer ce mode acquis.
+//! ✅ **Vérifié par compilation croisée réelle** (17/08/2026, toolchain mingw-w64/wixl
+//! assemblée manuellement, sans root, dans l'environnement de build) — compile et
+//! **link** correctement contre les vraies crates `windows-service`/`winreg` pour
+//! `x86_64-pc-windows-gnu`. **Reste non vérifié** : le comportement runtime sur un vrai
+//! poste Windows (élévation, écriture registre, SCM) — cf. docs/AGENTS.md § Vérification.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

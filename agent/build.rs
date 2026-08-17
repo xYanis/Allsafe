@@ -1,7 +1,7 @@
 // Manifeste Windows `requireAdministrator` (17/08/2026) — embarqué dans l'exécutable pour
 // que Windows déclenche l'UAC automatiquement au lancement (double-clic ou ligne de
 // commande), sans dépendre de l'utilisateur pour ouvrir un PowerShell "en administrateur"
-// (cause de l'échec silencieux constaté sur le poste aos12, cf. STATUS.md/docs/AGENTS.md).
+// (cause de l'échec silencieux constaté sur le poste aos12, cf. docs/AGENTS.md).
 // Cohérent avec le service Windows (`service-run`, toujours lancé par le SCM en
 // LocalSystem, jamais soumis à l'UAC) et avec Linux où `enroll`/les checks de durcissement
 // exigent déjà `root` (cf. agent/README.md).

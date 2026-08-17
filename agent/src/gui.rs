@@ -4,11 +4,11 @@
 //! multi-écrans — cf. `install.rs` pour la logique effective (service, PATH, enrôlement),
 //! identique à celle utilisée par `install --token ... --server ...` en ligne de commande.
 //!
-//! ⚠️ **NON VÉRIFIÉ EN COMPILATION** (pas de toolchain Rust/mingw-w64 disponible dans
-//! l'environnement où ce fichier a été écrit, 17/08/2026) — l'API exacte de
-//! `native-windows-gui`/`native-windows-derive` (noms d'attributs `nwg_control`/
-//! `nwg_events`) vient de la documentation connue de la crate, pas d'une compilation
-//! réelle. À vérifier au premier build.
+//! ✅ **Vérifié par compilation + link croisés réels** (17/08/2026, `x86_64-pc-windows-gnu`,
+//! toolchain mingw-w64 assemblée manuellement dans l'environnement de build) — la macro
+//! `#[derive(NwgUi)]`/les attributs `nwg_control`/`nwg_events` compilent et l'exécutable
+//! produit est un PE valide. **Reste non vérifié** : le rendu et le comportement réels de
+//! la fenêtre sur un vrai poste Windows — cf. docs/AGENTS.md § Vérification.
 
 use native_windows_derive as nwd;
 use native_windows_gui as nwg;

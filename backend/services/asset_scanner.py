@@ -104,6 +104,12 @@ def _parse_ports(raw) -> list:
 _RISKY_PORTS = {
     21: "FTP (non chiffré)", 23: "Telnet (non chiffré)", 69: "TFTP (non authentifié)",
     512: "rexec (non chiffré)", 513: "rlogin (non chiffré)", 514: "rsh (non chiffré)",
+    # Étendu 17/08/2026 (retour utilisateur, référence Cyberwatch "ports risqués") : services
+    # historiquement exposés sans chiffrement/authentification forte quand accessibles depuis
+    # le réseau — même esprit que la liste ci-dessus, pas une tentative de couvrir tous les
+    # ports possibles (ex. 3389/RDP a déjà son propre check dédié `rdp_nla`, pas dupliqué ici).
+    110: "POP3 (non chiffré)", 143: "IMAP (non chiffré)",
+    1433: "MSSQL exposé", 3306: "MySQL exposé", 5900: "VNC (souvent sans chiffrement)",
 }
 
 

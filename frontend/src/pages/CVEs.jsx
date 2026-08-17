@@ -90,6 +90,10 @@ const INPUT_STYLE = {
   color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none',
 }
 const SELECT_STYLE = { ...INPUT_STYLE, cursor: 'pointer' }
+// Style "filtre actif" (17/08/2026, demande explicite — étendre à tous les menus déroulants
+// de l'app le comportement déjà posé sur Durcissement.jsx/Assets.jsx/Inventaire.jsx) — même
+// formule, couleur du module de cette page (CyberVuln).
+const ACTIVE_SELECT_STYLE = { background: `${MODULES.cybervuln.color}1f`, color: MODULES.cybervuln.color, border: `1px solid ${MODULES.cybervuln.color}59`, cursor: 'pointer' }
 
 // Toutes les CVE (pas seulement celles qui touchent le parc) des N derniers jours.
 // 30j testé en réel : ~6 min de sync (l'API NVD elle-même est le facteur limitant,
@@ -191,7 +195,7 @@ export default function CVEs() {
           onChange={e => setFilter('search', e.target.value)}
           style={{ ...INPUT_STYLE, width: 280 }}
         />
-        <select value={filters.severity} onChange={e => setFilter('severity', e.target.value)} style={{ ...SELECT_STYLE, width: 160 }}>
+        <select value={filters.severity} onChange={e => setFilter('severity', e.target.value)} style={{ ...(filters.severity ? ACTIVE_SELECT_STYLE : SELECT_STYLE), width: 160 }}>
           <option value="">Toutes sévérités</option>
           {['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(s => <option key={s} value={s}>{s}</option>)}
         </select>

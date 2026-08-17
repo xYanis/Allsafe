@@ -26,8 +26,12 @@ import {
   FAKE_ASSETS, FAKE_VULNERABILITIES, anonymizeAsset, anonymizeVuln, isFakeId,
   computeDashboardStats, fakePatchCheckResult, fakeAnalysis,
 } from '../utils/fakeData.js'
+import { MODULES } from '../constants/modules.js'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+// Style "filtre actif" (17/08/2026) — même formule que CVEs.jsx/Vulnerabilities.jsx, couleur du
+// module de cette page (CyberVuln).
+const ACTIVE_SELECT_STYLE = { background: `${MODULES.cybervuln.color}1f`, color: MODULES.cybervuln.color, border: `1px solid ${MODULES.cybervuln.color}59`, outline: 'none', cursor: 'pointer' }
 const SEV_COLORS = { CRITICAL: '#f85149', HIGH: '#fb8f44', 'MEDIUM+LOW': '#58a6ff' }
 // Couleur par sévérité pour le filtre multi-sélection.
 const SEV_CHIP = { CRITICAL: '#f85149', HIGH: '#fb8f44', MEDIUM: '#d29922', LOW: '#58a6ff' }
@@ -1994,7 +1998,7 @@ export default function Dashboard() {
           value={dashFilter.criticite}
           onChange={e => setDashFilter(f => ({ ...f, criticite: e.target.value }))}
           className="text-xs px-2.5 py-1.5 rounded-lg"
-          style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)', outline: 'none', cursor: 'pointer' }}
+          style={dashFilter.criticite ? ACTIVE_SELECT_STYLE : { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-secondary)', outline: 'none', cursor: 'pointer' }}
         >
           <option value="">Toutes criticités</option>
           {Object.entries(CRITICITE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -2516,7 +2520,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             <select value={patchedStatusFilter} onChange={e => setPatchedStatusFilter(e.target.value)}
               className="text-xs rounded-lg px-2 py-1"
-              style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)', outline: 'none' }}>
+              style={patchedStatusFilter ? ACTIVE_SELECT_STYLE : { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)', outline: 'none' }}>
               <option value="">Tous statuts</option>
               <option value="patched">Corrigées uniquement</option>
               <option value="false_positive">Faux positifs uniquement</option>

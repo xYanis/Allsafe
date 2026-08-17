@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { assets as fetchAssets } from '../api/client.js'
+import { assets as fetchAssets, runWebHardeningCheck } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
 import { assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
 import OsLogo from '../components/OsLogo.jsx'
+import CategoryIcon from '../components/CategoryIcon.jsx'
 import ComplianceChecklist, { complianceSummary } from '../components/ComplianceChecklist.jsx'
 import { MODULES } from '../constants/modules.js'
 
@@ -119,12 +120,14 @@ export default function Durcissement() {
   const [loading, setLoading] = useState(() => durcissementPageCache == null)
   const [search, setSearch] = useState('')
   const [warnOnly, setWarnOnly] = useState(false)
-  // "Actifs configurés uniquement" (13/08/2026, demande utilisateur) : masque les actifs sans
-  // aucun check collecté — typiquement des actifs réseau importés (Meraki/PRTG) sans
-  // scan_username renseigné (jamais de durcissement Cisco possible dessus) ou un hôte ESXi
-  // (collection_method="vsphere_api", pas de durcissement dans cette passe, cf. docs/ARCHITECTURE.md
-  // § Intégration vSphere) — réduit le bruit plutôt que d'afficher une ligne qui ne dira jamais
-  // rien d'utile.
+  // "Actifs configurés uniquement" (13/08/2026, demande utilisateur ; critère corrigé 17/08/2026)
+  // : ne garde que les actifs avec un compte de service ou un agent — exclut les actifs réseau
+  // importés (Meraki/PRTG), les sites web (checks passifs, aucun credential) et les hôtes ESXi
+  // (`collection_method="vsphere_api"`, pas de durcissement dans cette passe, cf.
+  // docs/ARCHITECTURE.md § Intégration vSphere). 1er jet (`checks.length === 0`, proxy indirect)
+  // cassé par l'ajout d'`os_eol_check` (17/08/2026, calculé même sans scan réel dès qu'un OS est
+  // déclaré) — remplacé par un critère direct sur `collection_method`, qui ne dépend d'aucun
+  // autre check et ne se recassera pas si un nouveau check "toujours présent" est ajouté plus tard.
   const [configuredOnly, setConfiguredOnly] = useState(false)
   // Filtres OS/Catégorie (13/08/2026) : menus déroulants plutôt qu'un tri — peu de valeurs
   // distinctes possibles (poignée d'OS, poignée de catégories), choisir LAQUELLE afficher est
@@ -136,9 +139,15 @@ export default function Durcissement() {
   // premier clic sur un en-tête triable.
   const [sort, setSort] = useState({ by: null, dir: 'desc' })
   const [searchParams, setSearchParams] = useSearchParams()
+  // Bouton "Lancer le scan web" (17/08/2026) — seul déclencheur de POST /assets/web-hardening/run
+  // exposé côté UI (l'endpoint existait déjà sans bouton, comme network-protocol-check/
+  // switch-hardening juste à côté dans routers/assets.py, mais un actif "Site web" nouvellement
+  // créé n'a sinon aucun moyen de se faire scanner sans curl direct).
+  const [scanningWeb, setScanningWeb] = useState(false)
+  const [webScanMsg, setWebScanMsg] = useState('')
 
-  useEffect(() => {
-    fetchAssets()
+  function reload() {
+    return fetchAssets()
       .then(r => {
         const raw = r.data || []
         durcissementPageCache = raw   // alimente le cache module pour le prochain remontage
@@ -146,8 +155,26 @@ export default function Durcissement() {
         if (isAnonymous) list = [...list.map(anonymizeAsset), ...FAKE_ASSETS]
         setAssetList(list)
       })
-      .finally(() => setLoading(false))
-  }, [isAnonymous])
+  }
+
+  useEffect(() => { reload().finally(() => setLoading(false)) }, [isAnonymous])
+
+  async function handleWebScan() {
+    setScanningWeb(true)
+    setWebScanMsg('')
+    try {
+      const { data } = await runWebHardeningCheck()
+      await reload()
+      setWebScanMsg(data.checked > 0
+        ? `${data.checked} site(s) vérifié(s), ${data.warnings} avec avertissement(s)`
+        : "Aucun actif \"Site web\" à vérifier")
+    } catch {
+      setWebScanMsg('Erreur lors du scan web')
+    } finally {
+      setScanningWeb(false)
+      setTimeout(() => setWebScanMsg(''), 6000)
+    }
+  }
 
   // Deep-link depuis Assets.jsx ("Voir le durcissement/conformité de cet actif →",
   // ?asset=<id>) — même esprit que le bandeau de rattrapage CVE du Dashboard. Déplie la ligne
@@ -191,10 +218,13 @@ export default function Durcissement() {
     })
   }, [rows, sort])
 
-  const filtered = sorted.filter(({ asset, summary, checks }) => {
+  const filtered = sorted.filter(({ asset, summary }) => {
     if (search.trim() && !asset.name.toLowerCase().includes(search.trim().toLowerCase())) return false
     if (warnOnly && summary.warn === 0) return false
-    if (configuredOnly && checks.length === 0) return false
+    if (configuredOnly) {
+      if (asset.asset_type === 'network' || asset.asset_type === 'website') return false
+      if (asset.collection_method !== 'service_account' && asset.collection_method !== 'agent') return false
+    }
     if (osFilter && asset.os !== osFilter) return false
     if (categoryFilter && assetCategory(asset) !== categoryFilter) return false
     return true
@@ -240,6 +270,13 @@ export default function Durcissement() {
           style={configuredOnly ? activeFilterStyle : filterSelectStyle}>
           Actifs configurés uniquement
         </button>
+        <button onClick={handleWebScan} disabled={scanningWeb}
+          title="Checks passifs (en-têtes HTTP, protocole TLS) sur tous les actifs Site web"
+          className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-60"
+          style={filterSelectStyle}>
+          {scanningWeb ? 'Scan en cours…' : 'Lancer le scan web'}
+        </button>
+        {webScanMsg && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{webScanMsg}</span>}
       </div>
 
       <div style={CARD} className="overflow-hidden">
@@ -277,9 +314,9 @@ export default function Durcissement() {
                         <OsLogo os={asset.os} size={18} />
                       </td>
                       <td className="px-4 py-3">
-                        <span className="text-xs px-2 py-0.5 rounded-md font-medium whitespace-nowrap" style={categoryStyle(assetCategory(asset))}>
-                          {assetCategory(asset)}
-                        </span>
+                        <div className="flex items-center justify-center" title={assetCategory(asset)}>
+                          <CategoryIcon category={assetCategory(asset)} style={{ color: categoryStyle(assetCategory(asset)).color }} />
+                        </div>
                       </td>
                       <td className="px-4 py-3"><SummaryBadges summary={summary} /></td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>

@@ -25,6 +25,7 @@ function StatusBadge({ value }) {
 
 const SEVERITY_ORDER = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO']
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
 const PER_PAGE = 25
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
@@ -95,12 +96,12 @@ export default function Audits() {
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={statusFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Tous statuts</option>
           {AUDIT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(1) }}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={typeFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Tous types</option>
           {AUDIT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
         </select>

@@ -117,16 +117,33 @@ html, body, #root {
    sélection de date est dessiné par le navigateur, pas par l'app, et reste blanc par défaut
    même en thème sombre. `color-scheme` est la seule propriété qui influence ce rendu natif
    (impossible à cibler avec des sélecteurs CSS classiques) — le navigateur l'utilise pour
-   choisir son propre popup clair ou sombre, et réajuste l'icône calendrier en conséquence. */
+   choisir son propre popup clair ou sombre, et réajuste l'icône calendrier en conséquence.
+   `select` (17/08/2026, retour utilisateur — menu déroulant "OS"/"Catégorie" de
+   Durcissement.jsx blanc à l'ouverture) : même cause exacte, jamais étendue à `select` alors
+   que la popup d'options d'un <select> est TOUT AUTANT dessinée par le navigateur (pas par
+   l'app) que le popup de date — présent sur les 31 fichiers de l'app qui utilisent un
+   <select> natif, corrigé d'un coup ici plutôt que dans chacun. */
 :root[data-theme="dark"] input[type="date"],
 :root[data-theme="dark"] input[type="datetime-local"],
-:root[data-theme="dark"] input[type="time"] {
+:root[data-theme="dark"] input[type="time"],
+:root[data-theme="dark"] select {
   color-scheme: dark;
 }
 :root[data-theme="light"] input[type="date"],
 :root[data-theme="light"] input[type="datetime-local"],
-:root[data-theme="light"] input[type="time"] {
+:root[data-theme="light"] input[type="time"],
+:root[data-theme="light"] select {
   color-scheme: light;
+}
+/* `color-scheme` seul insuffisant sur Chrome (17/08/2026, confirmé par capture d'écran
+   utilisateur — popup toujours blanc malgré la règle ci-dessus) : Chrome ne dérive pas
+   toujours le fond des <option> de `color-scheme`, contrairement au calendrier de date
+   ci-dessus où c'est la seule propriété qui compte. Fond/texte des options posés
+   explicitement en plus — les variables suivent déjà le thème actif, pas besoin de dupliquer
+   par `[data-theme]` comme au-dessus. */
+select option {
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
 }
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator,

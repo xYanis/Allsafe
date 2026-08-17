@@ -15,6 +15,14 @@ import { MODULES } from '../constants/modules.js'
 // cette page (les deux boutons d'en-tête, "Scanner tout"/"Exporter en PDF", restent neutres),
 // seule la table gagne le rappel de couleur du module.
 const MODULE_HOVER = `${MODULES.inventaire.color}0a`
+// Style "filtre actif" (17/08/2026, retour utilisateur — incohérence avec Durcissement.jsx,
+// qui teinte déjà ses menus déroulants dès qu'un filtre est posé) — même formule exacte que
+// Durcissement.jsx::activeFilterStyle, même module (Inventaire), même couleur.
+const activeFilterStyle = { background: `${MODULES.inventaire.color}1f`, color: MODULES.inventaire.color, border: `1px solid ${MODULES.inventaire.color}59` }
+const filterSelectStyle = {
+  background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
+  color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
+}
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 
@@ -367,10 +375,7 @@ export default function Inventaire() {
           <select
             value={filterOs}
             onChange={e => setFilterOs(e.target.value)}
-            style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
-            }}
+            style={filterOs ? activeFilterStyle : filterSelectStyle}
           >
             <option value="">Tous les OS</option>
             {osOptions.map(os => {
@@ -381,10 +386,7 @@ export default function Inventaire() {
           <select
             value={filterCriticite}
             onChange={e => setFilterCriticite(e.target.value)}
-            style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
-            }}
+            style={filterCriticite ? activeFilterStyle : filterSelectStyle}
           >
             <option value="">Toutes criticités</option>
             {Object.entries(CRITICITE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -392,10 +394,7 @@ export default function Inventaire() {
           <select
             value={filterCategory}
             onChange={e => setFilterCategory(e.target.value)}
-            style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
-            }}
+            style={filterCategory ? activeFilterStyle : filterSelectStyle}
           >
             <option value="">Toutes catégories</option>
             {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
@@ -403,10 +402,7 @@ export default function Inventaire() {
           <select
             value={filterNetworkStatus}
             onChange={e => setFilterNetworkStatus(e.target.value)}
-            style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
-            }}
+            style={filterNetworkStatus ? activeFilterStyle : filterSelectStyle}
           >
             <option value="">Tout statut réseau</option>
             {Object.entries(NETWORK_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -414,10 +410,7 @@ export default function Inventaire() {
           <select
             value={configFilter}
             onChange={e => setConfigFilter(e.target.value)}
-            style={{
-              background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
-              color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
-            }}
+            style={configFilter !== 'all' ? activeFilterStyle : filterSelectStyle}
           >
             <option value="all">Configurés et non configurés</option>
             <option value="configured">Configurés uniquement</option>

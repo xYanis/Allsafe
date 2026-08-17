@@ -26,6 +26,7 @@ function StatusBadge({ value }) {
 }
 
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
 const PER_PAGE = 25
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
@@ -167,17 +168,17 @@ export default function Incidents() {
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={statusFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Tous statuts</option>
           {INCIDENT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         <select value={severityFilter} onChange={e => { setSeverityFilter(e.target.value); setPage(1) }}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={severityFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Toutes sévérités</option>
           {INCIDENT_SEVERITIES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
         <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); setPage(1) }}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={categoryFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Toutes catégories</option>
           {INCIDENT_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
         </select>

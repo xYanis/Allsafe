@@ -8,6 +8,7 @@ import PageHero from '../components/PageHero.jsx'
 
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
 // cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
@@ -84,7 +85,7 @@ export default function Crises() {
 
       <div className="flex flex-wrap items-center gap-2">
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={statusFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Tous statuts</option>
           <option value="active">Active</option>
           <option value="stood_down">Désactivée</option>

@@ -17,9 +17,162 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
-**Dernière session : 17/08/2026** — trois signaux d'exploitation ajoutés (demande explicite,
-référence donnée par l'utilisateur : ce que fait Cyberwatch — "CVSS-B, CVSS-BTE, EPSS, maturité
-d'exploit"). CVSS-B (`cvss_score`) et EPSS existaient déjà, seuls les trois autres sont neufs :
+**Dernière session : 17/08/2026** — Durcissement étoffé (demande explicite, citations d'une
+démo/présentation Cyberwatch : "un OS qui est obsolète, ça remontera comme un défaut de
+sécurité", "si on scanne un site web et qu'il y a la possibilité de faire une injection SQL ou
+une attaque XSS... ce sera un défaut de sécurité", "une cinquantaine [de checks] dans la
+bibliothèque"). Revue complète du backend avant de coder : 37 checks serveur (14 Linux/23
+Windows via l'agent, sur-ensemble strict du compte de service) + 8 Cisco + 5 ESXi = déjà ~50
+entrées dans `hardeningRemediation.js` — deux trous réels confirmés absents, pas plus :
+- **Point sensible tranché avec l'utilisateur avant de coder** (AskUserQuestion) : détecter la
+  *possibilité* d'injection SQL/XSS suppose d'envoyer des payloads de test — un scan actif,
+  hors du principe de non-intervention (CLAUDE.md §1 ; `docs/AUDITS.md` exclut déjà
+  explicitement sqlmap pour la même raison). **Choix acté : sous-ensemble passif seulement** —
+  aucun test d'injection réel construit, noté comme piste future pour le module Audits.
+- **Détection d'OS en fin de support** (`services/os_eol.py`, nouveau) — calculée à la volée
+  depuis `Asset.os`/`os_version` déjà connus (`os_eol_check` dans `_asset_dict`), jamais stocké :
+  reste exact même sans nouveau scan, un OS peut devenir obsolète simplement parce que le
+  calendrier avance. `_EOL_TABLE` curatée à la main (Windows Server 2012→2022, Windows 10,
+  Ubuntu/Debian/CentOS-RHEL LTS). **Bug réel trouvé et corrigé en vérifiant contre le vrai
+  parc** : `Asset.os` est générique côté Windows ("Windows Server", sans année — l'année ne vit
+  que dans `os_version`, cf. `_extract_windows_version`) — le 1er jet cherchait l'année dans
+  `os` et ne matchait jamais rien en conditions réelles (1/442 actifs). Corrigé en croisant les
+  deux champs : **40/442 actifs matchés, dont 21 Windows Server 2012 réellement en fin de
+  support** (dépassé depuis 2023-10-10) — trouvaille concrète sur le vrai parc, pas un test
+  synthétique.
+- **Nouveau type d'actif "Site web" + checks passifs** (`services/web_hardening.py`, nouveau) —
+  en-têtes de sécurité HTTP manquants (HSTS/CSP/X-Content-Type-Options/X-Frame-Options/
+  Referrer-Policy), cookies sans Secure/HttpOnly, protocole TLS déprécié. Une requête GET
+  normale + une négociation TLS standard, rien de plus. Suit exactement le précédent déjà en
+  place pour `asset_type="network"` (colonne dédiée `Asset.web_compliance`/`Asset.url`, pas de
+  scan SSH/WinRM — ces actifs n'ont ni l'un ni l'autre). `POST /api/assets/web-hardening/run`
+  (déclenchement manuel, même précédent que `network-protocol-check`/`switch-hardening`).
+  `Assets.jsx` : option "Site web" dans le formulaire, champ URL à la place de hostname/OS/SSH
+  quand ce type est sélectionné.
+  **Suite immédiate, demande explicite ("comment je teste ?")** : bouton "Lancer le scan web"
+  ajouté sur Durcissement.jsx (barre de filtres) — les deux endpoints déjà existants
+  (`network-protocol-check`/`switch-hardening`) n'en ont toujours pas (curl-only, inchangé),
+  mais tester le nouveau check web sans passer par curl le justifiait ici (actif fraîchement
+  créé, aucun autre moyen de le faire scanner depuis l'UI). `runWebHardeningCheck()` (nouveau,
+  `api/client.js`), recharge la liste après coup, message de résultat (X vérifiés/Y avertissements).
+  Nouvelle catégorie "Web" dans `ComplianceChecklist.jsx`/`hardeningRemediation.js` (7 entrées
+  de remédiation, dont une avec exemple nginx). Vérifié en conditions réelles contre
+  example.com (tous les en-têtes absents, TLS 1.3 ok) et github.com (en-têtes présents, mais un
+  vrai cookie `_octo` sans HttpOnly détecté correctement) — puis bout en bout via un actif
+  "Site web" créé/scanné/affiché dans Durcissement (capture d'écran réelle, catégorie "Web"
+  dépliée avec la remédiation nginx), asset de test supprimé après coup.
+- **Bonus mineur** : `_RISKY_PORTS` (`asset_scanner.py`) étendu (POP3/IMAP en clair, MSSQL/MySQL/
+  VNC exposés) — même check `exposed_ports` existant, juste la liste élargie.
+- `pytest` : 208 passés (inchangé), aucune régression. Schéma appliqué (`url`/`web_compliance`
+  sur `assets`).
+- **Bug réel introduit puis corrigé, signalé par l'utilisateur** ("le bouton 'actifs configurés
+  uniquement' ne marche pas") : le filtre reposait sur `checks.length === 0` — un proxy indirect
+  ("aucun check collecté") plutôt qu'un critère direct, cassé dès l'ajout d'`os_eol_check` (celui-
+  ci apparaît dès qu'un OS est *déclaré*, même sans le moindre scan réel — un serveur jamais
+  scanné se mettait donc à compter comme "configuré"). **Critère corrigé** vers ce que le bouton
+  doit vraiment vérifier ("un compte de service ou un agent") : exclut directement
+  `asset_type === 'network'`/`'website'`, puis exige `collection_method` = `service_account` ou
+  `agent` — ne dépend plus d'aucun check particulier, ne recassera pas si un futur check
+  "toujours présent" est ajouté. Vérifié en conditions réelles : 0 ligne "Équipement réseau"/
+  "Site web" visible une fois le filtre activé, uniquement des serveurs avec un vrai historique
+  de scan (`Dernier scan` renseigné).
+- **Colonne Catégorie de Durcissement.jsx alignée sur Assets.jsx** (demande utilisateur, "des
+  icônes seraient plus adaptées dans cette colonne non ?") — remplace le badge texte coloré par
+  `components/CategoryIcon.jsx` (icône + `title` au survol), déjà utilisé sur Assets.jsx mais
+  jamais repris sur Durcissement. Nouveau glyphe "Site web" ajouté à `CategoryIcon.jsx` (absent
+  jusqu'ici, catégorie créée le jour même). **Sur "plus précis sur quel équipement réseau"** :
+  vérifié contre le parc réel avant de coder quoi que ce soit — 331/400 actifs réseau sont
+  PRTG sans aucun champ modèle exploitable (`os` vide, cf. `prtg_client.py::DEVICE_COLUMNS`,
+  limite déjà documentée le 04/08/2026) ; les 69 Meraki restants ont déjà un modèle précis via
+  `merakiModelLabel()` (MR/MX déjà tous couverts). Pas de nouvelle donnée disponible sans
+  modifier `DEVICE_COLUMNS` — piste `icon` non vérifiée à ce stade, proposée pour exploration
+  future.
+- **Suite immédiate, piste explorée sur demande** ("creuse la piste PRTG icon") : requête directe
+  contre le vrai serveur PRTG (lecture seule, même endpoint déjà utilisé) avec des colonnes
+  candidates (`icon`, `deviceicon`, `hosttype`, `devicetype`) — `devicetype`/`hosttype`/
+  `deviceicon` introuvables sur cette version de PRTG ("Introuvable"), mais **`icon` existe
+  bel et bien et porte un vrai signal** : sur les 390 devices réels, 96 `vendors_Cisco.png`,
+  16 `Device_WLAN.png`, 7 `vendors_synology.png` (cohérent avec le `vendor_hint` déjà détecté
+  par capteur), plus quelques cas isolés (webcam, notebook, SQL, VMware) — pas le dead-end
+  supposé plus haut. **Câblé de bout en bout** : `icon` ajouté à `DEVICE_COLUMNS`
+  (`prtg_client.py`), stocké dans `Asset.hardware.prtg_icon` à la création **et** rafraîchi à
+  chaque cycle (`prtg_matcher.py`, même patron que `vendor_hint`) ; nouvelle table
+  `PRTG_ICON_CATEGORY_LABELS` (`assetCategory.js`) ne couvrant que les icônes réellement
+  rencontrées (`A_Server_1/3.png` génériques volontairement exclus — aucune info de plus que
+  le repli actuel) ; nouvelle catégorie "Équipement Cisco" (glyphe dédié `CategoryIcon.jsx`,
+  couleur bleu Cisco `#049fd9` — teinte de badge, pas leur logo). Vérifié en conditions réelles :
+  sync PRTG rejoué (381 actifs mis à jour), filtre catégorie "Équipement Cisco" sur Durcissement
+  → résultats cohérents (bornes Wi-Fi de sites distants, ex. AP_TPLINK_*). **Point honnête à
+  garder en tête** : l'icône reflète ce qui est configuré côté PRTG (auto-détecté ou posé à la
+  main par l'admin PRTG), pas une vérification indépendante d'Allsafe — un device nommé
+  "AP_TPLINK_*" catégorisé "Équipement Cisco" n'est pas une erreur du code, juste le reflet de
+  l'icône réellement assignée côté PRTG.
+- **Bug réel signalé par l'utilisateur** ("fond blanc quand je sélectionne un OS ou une
+  catégorie") : même cause exacte qu'un bug déjà corrigé le 12/08/2026 sur les calendriers
+  `<input type="date">` (popup dessiné par le navigateur, pas par l'app — `color-scheme` est la
+  seule propriété qui l'influence, jamais étendue à `<select>` à l'époque). **Vérifié app-wide
+  avant de corriger** : 31 fichiers utilisent un `<select>` natif — un seul ajout dans
+  `index.css` (`select` dans la règle `color-scheme` déjà existante) corrige les 31 d'un coup,
+  pas un correctif par page. Vérifié en conditions réelles sur deux pages distinctes
+  (Durcissement, Vulnérabilités) — popup sombre, texte lisible, plus de fond blanc.
+  **Toujours blanc signalé par l'utilisateur malgré rechargement forcé** (capture d'écran
+  `frontend/bug.png` à l'appui — le `<select>` fermé est bien sombre, seul le popup d'options
+  reste blanc) : `color-scheme` seul insuffisant sur Chrome pour dériver le fond des `<option>`
+  (confirmé par recherche — comportement Chromium documenté, contrairement au calendrier de
+  date où c'est la seule propriété qui compte). Pas reproductible avec le Chromium headless
+  Linux utilisé pour vérifier ce projet (déjà sombre avant même ce correctif) — corrigé à
+  l'aveugle sur la base de la recherche, sans capture de confirmation possible de mon côté.
+  **Corrigé pour de vrai** : `select option { background-color: var(--bg-secondary); color:
+  var(--text-primary) }` ajouté dans `index.css`, fond/texte des options posés explicitement
+  plutôt que déduits de `color-scheme`. Confirmé par l'utilisateur sur son vrai Chrome. Puis
+  vérifié app-wide sur 4 pages de plus (Incidents, Audits, CVE, Actifs) — même règle globale,
+  aucun autre correctif nécessaire.
+- **Incohérence relevée juste après** ("Durcissement est différent d'Actifs et Inventaire
+  Complet — la police de l'élément sélectionné change de couleur sur Durcissement mais pas sur
+  les autres") : réelle, pas une confusion — `Durcissement.jsx` teinte déjà son `<select>` fermé
+  (couleur du module Inventaire) dès qu'un filtre OS/Catégorie est actif
+  (`activeFilterStyle`/`filterSelectStyle`, 13/08/2026), jamais repris sur `Assets.jsx`/
+  `Inventaire.jsx` qui gardaient un style statique gris sur leurs 5 `<select>` de filtre
+  (OS/criticité/catégorie/statut réseau/configuré). Même formule exacte reprise sur les deux
+  pages (même module Inventaire, même couleur). Vérifié en conditions réelles : sélectionner
+  "Windows Server" teinte maintenant le menu en cyan sur Actifs et Inventaire Complet, identique
+  à Durcissement.
+- ~~**Chantier en cours, INTERROMPU (limite d'usage), à reprendre**~~ **terminé (session
+  suivante)** ("tu vas faire la même chose sur chaque menu déroulant") — étendre le style
+  "filtre actif" (fond/texte teintés à la couleur du module dès qu'un filtre a une valeur non
+  vide) à tous les `<select>` de FILTRE de l'app (pas les champs de formulaire dans les modals —
+  un select obligatoire dans un formulaire a toujours une valeur, le colorer en permanence
+  n'aurait pas de sens, cf. raisonnement ci-dessous). Même pattern exact partout (const
+  `ACTIVE_SELECT_STYLE`/`activeFilterSelectStyle` = `{ background: `${MODULE_COLOR}1f`, color:
+  MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59`, ...reste du style existant }`, puis
+  `style={filtre ? active : normal}` sur chaque `<select>` de filtre) :
+  - `CVEs.jsx` (severity), `Vulnerabilities.jsx` (candidateAssetId/status/severity/validated_by
+    — `status` compare à `!== 'open'`, pas à `''`, car 'open' est sa valeur par défaut) — fait
+    avant l'interruption.
+  - `Incidents.jsx` — statusFilter/severityFilter/categoryFilter (3 selects, `MODULES.incidents.color`).
+  - `Crises.jsx` — statusFilter (1 select, `MODULES.incidents.color`).
+  - `Audits.jsx` — statusFilter/typeFilter (2 selects, `MODULES.securite.color`).
+  - `Dashboard.jsx` — `dashFilter.criticite` et `patchedStatusFilter` (2 selects,
+    `MODULES.cybervuln.color`, import `MODULES` ajouté au fichier qui ne l'avait pas encore).
+    Volontairement exclus (inchangé) : `openLimit`/`awaitingLimit`/`patchedLimit` (pagination,
+    pas un filtre) et `SeverityDropdown` (composant custom, pas un `<select>` natif).
+  - `AdministrationSecurity.jsx` — typeFilter (1 select), `MODULE_COLOR = '#8b949e'` ajouté en
+    dur (pas d'import `MODULES` existant dans ce fichier, cohérent avec le `color="#8b949e"`
+    déjà passé à son `PageHero`).
+  **Hors périmètre, vérifié et à ne PAS toucher** (inchangé) : `Watch.jsx` (`form.reviewed_by`),
+  `Settings.jsx` (`preferredAnalyst`), `AuditDetail.jsx` (champs d'édition d'un audit précis, pas
+  des filtres de liste), `Agents.jsx` (pas de `<select>` natif) — et tous les
+  `components/*Modal.jsx`/`*Roadmap.jsx` (formulaires de création/édition, jamais des filtres).
+  **Vérifié** : HMR Vite propre sur les 5 fichiers modifiés (aucune erreur de compilation dans
+  les logs du conteneur `frontend`). ⚠️ Pas de vérification visuelle par capture d'écran cette
+  fois (pas de session admin ouverte pour se connecter à l'app depuis cet environnement) —
+  contrairement à la vérification Actifs/Inventaire Complet juste au-dessus, à confirmer
+  visuellement à l'occasion.
+
+**Session précédente : 17/08/2026 (même date, plus tôt)** — trois signaux d'exploitation ajoutés
+(demande explicite, référence donnée par l'utilisateur : ce que fait Cyberwatch — "CVSS-B,
+CVSS-BTE, EPSS, maturité d'exploit"). CVSS-B (`cvss_score`) et EPSS existaient déjà, seuls les
+trois autres sont neufs :
 - **KEV** (`services/kev_fetcher.py`) — catalogue CISA "Known Exploited Vulnerabilities", fait
   constaté (pas une prédiction comme l'EPSS). Source publique gratuite sans clé, export JSON
   régénéré au fil de l'eau. `cves.kev`/`kev_date_added`/`kev_ransomware`, sync quotidienne

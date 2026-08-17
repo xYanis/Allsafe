@@ -98,6 +98,29 @@ const GLYPHS = {
       <rect x="13.5" y="7" width="3" height="10" rx="0.5" />
     </>
   ),
+  // Équipement Cisco (17/08/2026, hardware.prtg_icon="vendors_Cisco.png") — chassis + 3 LEDs
+  // de statut, décalé du glyphe "Équipement réseau" générique (antennes) pour rester
+  // visuellement distinct au premier coup d'œil malgré la parenté (les deux restent des
+  // équipements réseau non identifiés au modèle près).
+  'Équipement Cisco': (
+    <>
+      <rect x="3" y="8" width="18" height="8" rx="1.5" />
+      <circle cx="7" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+      <circle cx="17" cy="12" r="1" fill="currentColor" stroke="none" />
+      <line x1="6" y1="19" x2="18" y2="19" />
+    </>
+  ),
+  // Site web (17/08/2026, asset_type="website") — globe + barre d'adresse, distinct du globe
+  // générique DEFAULT_GLYPH ci-dessous (celui-ci reste le repli pour une catégorie non couverte).
+  'Site web': (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="1.5" />
+      <line x1="3" y1="8.5" x2="21" y2="8.5" />
+      <circle cx="6" cy="6.25" r="0.6" fill="currentColor" stroke="none" />
+      <circle cx="8.5" cy="6.25" r="0.6" fill="currentColor" stroke="none" />
+    </>
+  ),
 }
 const DEFAULT_GLYPH = (
   <>

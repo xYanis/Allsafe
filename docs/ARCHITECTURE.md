@@ -216,6 +216,20 @@ pour des devices au nom proche mais physiquement distincts (ex. "Routeur Bellevi
 "AP_Bellevigny", même site, IP différentes). Résultat : 339 `Asset` créés (343 moins les 4 objets
 PRTG internes), parc Allsafe passé de 142 à 481 actifs.
 
+**`hardware.prtg_icon` (17/08/2026)** — colonne `icon` ajoutée à `DEVICE_COLUMNS`
+(`services/prtg_client.py`) : nom de fichier de l'icône assignée au device côté PRTG
+(`vendors_Cisco.png`, `Device_WLAN.png`, `vendors_synology.png`...). Vérifié en conditions
+réelles avant d'écrire le moindre code (`devicetype`/`hosttype`/`deviceicon` testés en même
+temps, introuvables sur cette version de PRTG — seul `icon` existe). Stockée dans
+`Asset.hardware`, même précédent que `vendor_hint` (création **et** rafraîchissement à chaque
+cycle, `prtg_matcher.py::sync_network_status`). Consommée côté frontend par
+`utils/assetCategory.js::PRTG_ICON_CATEGORY_LABELS` pour une catégorie plus précise que le
+générique "Équipement réseau" (Colonne Catégorie de Durcissement.jsx/Assets.jsx/Inventaire.jsx)
+— reflète tel quel l'icône choisie côté PRTG (auto-assignée ou posée manuellement par l'admin
+PRTG), Allsafe ne vérifie ni ne déduit rien de plus : un device nommé "AP_TPLINK_..." peut par
+exemple porter l'icône Cisco si c'est ce qui a été configuré côté PRTG, sans que ce soit une
+erreur d'Allsafe.
+
 **`import_new_assets`** côté Meraki (`sync_network_status(..., import_new_assets=True)`, `POST
 /api/meraki/run?import_new_assets=true`) : contrairement à `withsecure_matcher.py` (n'enrichit que
 des serveurs déjà importés via AD/SSH, jamais de création), crée un `Asset`

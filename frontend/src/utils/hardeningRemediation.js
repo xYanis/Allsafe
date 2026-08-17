@@ -421,6 +421,63 @@ export const REMEDIATION = {
       commands: ["esxcli system settings advanced set -o /Security/AccountLockFailures -i 5"],
     },
   },
+
+  // Durcissement web (17/08/2026, services/web_hardening.py) — checks 100% passifs
+  // (en-têtes HTTP, protocole TLS négocié), pas de commande shell à exécuter sur un serveur :
+  // ces réglages se posent côté configuration du serveur web (nginx/Apache/IIS...) ou de
+  // l'application elle-même, très variable selon la stack — solution générique + exemple
+  // nginx (le plus courant), pas une commande à copier-coller aveuglément comme les autres
+  // familles.
+  web: {
+    tls_protocol: {
+      category: "Web",
+      solution: "Désactiver les protocoles TLS dépréciés (SSLv3, TLS 1.0, TLS 1.1) côté serveur web — n'accepter que TLS 1.2 minimum, TLS 1.3 si la compatibilité client le permet.",
+      commands: ["ssl_protocols TLSv1.2 TLSv1.3;  # nginx, dans le bloc server{}"],
+      note: "Exemple nginx — la directive équivalente diffère selon le serveur web (Apache : SSLProtocol, IIS : registre Schannel).",
+    },
+    hsts: {
+      category: "Web",
+      solution: "Ajouter l'en-tête Strict-Transport-Security — force le navigateur à toujours utiliser HTTPS pour ce domaine, même si un lien pointe vers du HTTP.",
+      commands: ['add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;  # nginx'],
+    },
+    csp: {
+      category: "Web",
+      solution: "Ajouter une Content-Security-Policy — restreint les origines autorisées à charger des scripts/styles/images, réduit l'impact d'une injection de contenu si elle survient.",
+      commands: ["add_header Content-Security-Policy \"default-src 'self'\"; # nginx, à affiner selon les ressources externes réellement utilisées"],
+      warning: "Une CSP trop stricte peut casser des ressources légitimes (CDN, widgets tiers) — à tester en mode Content-Security-Policy-Report-Only avant application stricte.",
+    },
+    x_content_type_options: {
+      category: "Web",
+      solution: "Ajouter l'en-tête X-Content-Type-Options: nosniff — empêche le navigateur de deviner un type de contenu différent du Content-Type déclaré.",
+      commands: ["add_header X-Content-Type-Options nosniff always;  # nginx"],
+    },
+    x_frame_options: {
+      category: "Web",
+      solution: "Ajouter l'en-tête X-Frame-Options (ou frame-ancestors dans la CSP) — empêche le site d'être chargé dans une <iframe> sur un domaine tiers (protection anti-clickjacking).",
+      commands: ["add_header X-Frame-Options DENY always;  # nginx, ou SAMEORIGIN si des iframes internes en ont besoin"],
+    },
+    referrer_policy: {
+      category: "Web",
+      solution: "Ajouter l'en-tête Referrer-Policy — limite les informations d'URL transmises au site de destination lors d'un clic sortant.",
+      commands: ['add_header Referrer-Policy "strict-origin-when-cross-origin" always;  # nginx'],
+    },
+    cookie_flags: {
+      category: "Web",
+      solution: "Ajouter les attributs Secure et HttpOnly sur les cookies — Secure empêche leur envoi en clair sur HTTP, HttpOnly les rend inaccessibles au JavaScript (protection contre le vol de session via XSS).",
+      commands: [],
+      note: "Se configure côté application (framework web), pas au niveau du serveur web lui-même — la commande exacte dépend de la stack (ex. Set-Cookie: ...; Secure; HttpOnly côté code applicatif).",
+    },
+  },
+}
+
+// Fin de support d'OS (17/08/2026, services/os_eol.py) — même check id ("os_eol") quel que soit
+// l'OS (Windows/Linux/ESXi), la recommandation générique ne varie pas par famille — repli avant
+// la sélection de famille dans remediationFor() ci-dessous plutôt que dupliqué dans chacune.
+const OS_EOL_REMEDIATION = {
+  category: "Système",
+  solution: "Migrer vers une version de l'OS encore supportée — un OS en fin de support ne reçoit plus aucun correctif de sécurité, quelle que soit la gravité d'une future faille découverte.",
+  commands: [],
+  note: "Pas de commande à copier-coller ici : la migration dépend de l'OS et de l'infrastructure (mise à niveau sur place, nouvelle VM, réinstallation).",
 }
 
 // `os` peut être une valeur détaillée ("Windows Server 2019", "Debian GNU/Linux 12"...) — on ne
@@ -431,11 +488,14 @@ export const REMEDIATION = {
 // (décision volontaire, cf. docs/ARCHITECTURE.md § Intégration vSphere) — se distingue donc
 // par `os` ("VMware ESXi", posé par services/vsphere_matcher.py), pas par assetType.
 export function remediationFor(os, checkId, assetType) {
-  const family = assetType === 'network'
-    ? 'network'
-    : /vmware esxi/i.test(os || '')
-      ? 'esxi'
-      : (/windows/i.test(os || '') ? 'windows' : 'linux')
+  if (checkId === 'os_eol') return OS_EOL_REMEDIATION
+  const family = assetType === 'website'
+    ? 'web'
+    : assetType === 'network'
+      ? 'network'
+      : /vmware esxi/i.test(os || '')
+        ? 'esxi'
+        : (/windows/i.test(os || '') ? 'windows' : 'linux')
   return REMEDIATION[family]?.[checkId] || null
 }
 

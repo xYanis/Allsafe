@@ -35,7 +35,15 @@ USER_AGENT = "Allsafe-CyberVuln/1.0"
 # réelles (04/08/2026) qu'il est renvoyé **localisé selon la langue de l'interface
 # PRTG** ("OK" au lieu de "Up", "En pause (...)" au lieu de "Paused" sur ce serveur
 # configuré en français) — gardé uniquement à titre informatif dans `metrics`.
-DEVICE_COLUMNS = "objid,device,host,status,status_raw,group,probe"
+# "icon" (17/08/2026, retour utilisateur — catégorie "Équipement réseau" trop générique
+# sur Durcissement.jsx) : nom de fichier de l'icône assignée au device côté PRTG
+# (ex. "vendors_Cisco.png", "Device_WLAN.png") — vérifié en conditions réelles avant
+# d'écrire le moindre code : 96/390 devices du parc réel portent "vendors_Cisco.png",
+# 16 "Device_WLAN.png", etc. (contrairement à "devicetype"/"hosttype"/"deviceicon",
+# testés aussi et introuvables sur cette version de PRTG). Repose sur les icônes
+# fournies nativement par PRTG (auto-assignées ou choisies manuellement côté PRTG),
+# jamais une donnée que CBR déduit lui-même.
+DEVICE_COLUMNS = "objid,device,host,status,status_raw,group,probe,icon"
 
 
 # Indices de vendor par type de capteur PRTG (colonne "type_raw", stable — pas

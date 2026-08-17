@@ -26,7 +26,9 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const MODULE_COLOR = '#8b949e' // MODULES.parametres.color — module Paramètres, cf. PageHero ci-dessous
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
+const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
 
 // Icônes de la nav d'Administration — même famille (Heroicons outline, viewBox 24,
 // strokeWidth cohérent) que ICONS dans Layout.jsx, dupliquées localement plutôt
@@ -179,7 +181,7 @@ function ConnectionsTab({ isAnonymous }) {
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="E-mail ou IP…"
           className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle} />
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
-          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle}>
+          className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={typeFilter ? activeFilterSelectStyle : filterSelectStyle}>
           <option value="">Tous types</option>
           {Object.entries(EVENT_BADGE).map(([key, b]) => <option key={key} value={key}>{b.label}</option>)}
         </select>

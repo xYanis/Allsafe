@@ -140,7 +140,10 @@ def _asset_from_prtg_device(device: dict, vendor_hint: Optional[str] = None) -> 
     cpu/ram/disks, qui n'ont pas de sens ici. `vendor_hint` (cf.
     prtg_client.get_sensor_vendor_hints) alimente la Veille technologique, absent
     pour la grande majorité des devices (aucune donnée vendor exploitable côté PRTG
-    en dehors de quelques types de capteurs connus)."""
+    en dehors de quelques types de capteurs connus). `prtg_icon` (17/08/2026) :
+    nom de fichier de l'icône PRTG du device (cf. prtg_client.py::DEVICE_COLUMNS) —
+    catégorie affichée plus précise que le générique "Équipement réseau" côté
+    frontend (utils/assetCategory.js), sans jamais renommer/reclasser l'actif lui-même."""
     host = (device.get("host") or "").strip()
     return Asset(
         name=device.get("device") or host or f"PRTG-{device['objid']}",
@@ -156,6 +159,7 @@ def _asset_from_prtg_device(device: dict, vendor_hint: Optional[str] = None) -> 
             "prtg_group": device.get("group"),
             "prtg_probe": device.get("probe"),
             "vendor_hint": vendor_hint,
+            "prtg_icon": device.get("icon"),
         },
     )
 
@@ -243,6 +247,11 @@ async def sync_network_status(db: Optional[AsyncSession] = None, import_new_asse
                 vendor = vendor_hints.get(objid)
                 if vendor and (asset.hardware or {}).get("vendor_hint") != vendor:
                     asset.hardware = {**(asset.hardware or {}), "vendor_hint": vendor}
+                # prtg_icon (17/08/2026) : peut changer côté PRTG (device réassigné à une
+                # autre icône) — même raisonnement de rafraîchissement que vendor_hint ci-dessus.
+                icon = device.get("icon")
+                if icon and (asset.hardware or {}).get("prtg_icon") != icon:
+                    asset.hardware = {**(asset.hardware or {}), "prtg_icon": icon}
 
             row = (await db.execute(
                 select(NetworkStatus).where(

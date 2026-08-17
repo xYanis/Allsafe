@@ -7,7 +7,7 @@ import { remediationFor, categoryFor } from '../utils/hardeningRemediation.js'
 // remédiation (jamais une catégorie qui casse l'affichage).
 const CATEGORY_ORDER = [
   'Mots de passe', 'SSH', 'Réseau', 'SMB', 'Authentification', 'Comptes',
-  'Chiffrement', 'Journalisation', 'Système', 'Autres',
+  'Chiffrement', 'Journalisation', 'Web', 'Système', 'Autres',
 ]
 
 // Liste des checks de durcissement/conformité d'un actif — extrait de la modale "Résultat du

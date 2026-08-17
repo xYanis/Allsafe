@@ -426,6 +426,10 @@ export default function Vulnerabilities() {
     background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-secondary)',
     padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
   }
+  // Style "filtre actif" (17/08/2026, demande explicite — étendre à tous les menus déroulants
+  // de l'app le comportement déjà posé sur Durcissement.jsx/Assets.jsx/Inventaire.jsx) — même
+  // formule, couleur du module de cette page (CyberVuln).
+  const activeSelectStyle = { background: `${MODULES.cybervuln.color}1f`, color: MODULES.cybervuln.color, border: `1px solid ${MODULES.cybervuln.color}59`, borderRadius: 8, padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer' }
 
   const hasFilters = filters.status || filters.severity || filters.validated_by || filters.max_age_years || filters.search || filters.kev || filters.msf_module
 
@@ -530,7 +534,7 @@ export default function Vulnerabilities() {
             value={candidateAssetId}
             onChange={e => setCandidateAssetId(e.target.value)}
             title="Les listes de candidats ci-contre sont bornées aux CVE publiées il y a moins de 2 ans — choisir un actif lève cette limite pour lui seul"
-            style={selectStyle}
+            style={candidateAssetId ? activeSelectStyle : selectStyle}
           >
             <option value="">CVE des 2 dernières années (tous actifs)</option>
             {assetList.map(a => (
@@ -603,15 +607,15 @@ export default function Vulnerabilities() {
           className="font-mono"
           style={{ ...selectStyle, cursor: 'text', width: 190 }}
         />
-        <select value={filters.status} onChange={e => setFilter('status', e.target.value)} style={selectStyle}>
+        <select value={filters.status} onChange={e => setFilter('status', e.target.value)} style={filters.status !== 'open' ? activeSelectStyle : selectStyle}>
           <option value="">Tous statuts</option>
           {STATUSES.slice(1).map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
         </select>
-        <select value={filters.severity} onChange={e => setFilter('severity', e.target.value)} style={selectStyle}>
+        <select value={filters.severity} onChange={e => setFilter('severity', e.target.value)} style={filters.severity ? activeSelectStyle : selectStyle}>
           <option value="">Toutes sévérités</option>
           {SEVERITIES.slice(1).map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={filters.validated_by} onChange={e => setFilter('validated_by', e.target.value)} style={selectStyle}>
+        <select value={filters.validated_by} onChange={e => setFilter('validated_by', e.target.value)} style={filters.validated_by ? activeSelectStyle : selectStyle}>
           <option value="">Tous valideurs</option>
           {ANALYSTS.map(name => <option key={name} value={name}>{name}</option>)}
         </select>

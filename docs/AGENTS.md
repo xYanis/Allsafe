@@ -194,13 +194,40 @@ encodée WinRM.
 
 **Regroupement par catégorie (13/08/2026)** : `frontend/src/utils/hardeningRemediation.js::
 categoryFor()` associe chaque `id` à une catégorie d'affichage (Mots de passe/SSH/Réseau/SMB/
-Authentification/Comptes/Chiffrement/Journalisation/Système), lue par
+Authentification/Comptes/Chiffrement/Journalisation/Web/Système), lue par
 `components/ComplianceChecklist.jsx` pour regrouper les checks en sections repliables (ouvertes par
 défaut seulement si elles contiennent un avertissement) — la liste plate d'origine ne passait plus
 à l'échelle une fois le catalogue étendu (10→14 Linux, 19→23 Windows). Catégorie **calculée côté
 frontend uniquement** — pas de champ `category` dans le payload `Check` (Rust)/`_check()` (Python) :
 c'est une métadonnée d'affichage, pas une donnée de collecte, plus simple à faire évoluer sans
 recompiler/redéployer l'agent.
+
+**Fin de support d'OS (17/08/2026, `services/os_eol.py`)** — équivalent du défaut "OS obsolète"
+de Cyberwatch (référence utilisateur). Calculé **dynamiquement** depuis `Asset.os`/`os_version`
+déjà connus (`routers/assets.py::_asset_dict` → champ `os_eol_check`), jamais stocké ni lié à un
+scan précis : recalculé à chaque lecture, un OS peut devenir obsolète simplement parce que le
+calendrier avance. `_EOL_TABLE` est une liste curatée à la main (Windows Server 2012→2022,
+Windows 10, Ubuntu 18.04→24.04 LTS, Debian 9→12, CentOS/RHEL 7-8) — `None` si l'OS ne correspond
+à aucune entrée, jamais une affirmation hasardeuse. **Piège vérifié en conditions réelles** :
+`Asset.os` est souvent générique côté Windows ("Windows Server", sans l'année — cf.
+`asset_scanner.py::_extract_windows_version`), l'année ne vit que dans `os_version` ; matcher sur
+`os` seul (1er jet) ne trouvait aucun résultat sur le vrai parc — corrigé en croisant les deux
+champs. Vérifié : 40/442 actifs matchés dont 21 Windows Server 2012 réellement en fin de support
+(dépassé depuis le 2023-10-10).
+
+**Durcissement web passif (17/08/2026, `services/web_hardening.py`, nouveau type d'actif
+`asset_type="website"`)** — en-têtes de sécurité HTTP manquants (HSTS/CSP/X-Content-Type-Options/
+X-Frame-Options/Referrer-Policy), cookies sans `Secure`/`HttpOnly`, protocole TLS négocié déprécié
+(SSLv3/TLS1.0/1.1). **Volontairement limité au passif** : une requête GET HTTP normale + une
+négociation TLS standard, aucun payload d'exploitation — détecter la *possibilité* réelle d'une
+injection SQL/XSS nécessiterait d'envoyer des charges de test, un scan actif hors du principe de
+non-intervention (CLAUDE.md §1, `docs/AUDITS.md` exclut explicitement sqlmap pour la même
+raison) ; laissé de côté pour une réflexion future côté module Audits, pas construit ici. Colonne
+dédiée `Asset.web_compliance` (même principe que `network_compliance` pour `asset_type="network"`
+— ces actifs n'ont ni OS ni scan SSH/WinRM). `POST /api/assets/web-hardening/run` : déclenchement
+manuel, pas planifié (même précédent que `network-protocol-check`/`switch-hardening`, aucun bouton
+frontend dédié non plus). Vérifié en conditions réelles contre example.com/github.com — en-têtes
+et cookies détectés correctement (dont un vrai cookie GitHub sans HttpOnly).
 
 ## Agent Rust (`agent/`)
 

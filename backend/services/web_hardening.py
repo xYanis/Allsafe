@@ -132,19 +132,24 @@ async def check_website(url: str) -> dict:
     return {"checks": checks, "checked_at": now}
 
 
-async def run_all_website_checks(db: Optional[AsyncSession] = None) -> dict:
-    """Point d'entrée principal : tous les actifs `asset_type="website"` actifs, testés en
-    parallèle (borné par MAX_CONCURRENT_ASSETS), un seul commit à la fin — même patron que
-    services/network_protocol_check.py::check_all_network_assets."""
+async def run_all_website_checks(db: Optional[AsyncSession] = None, asset_ids: Optional[list[str]] = None) -> dict:
+    """Point d'entrée principal : tous les actifs `asset_type="website"` actifs (ou seulement
+    `asset_ids` si fourni — 17/08/2026, cf. services/scan_policy.py, un groupe de criticité ne
+    doit tester que ses propres sites web), testés en parallèle (borné par
+    MAX_CONCURRENT_ASSETS), un seul commit à la fin — même patron que
+    services/network_protocol_check.py::check_all_network_assets. Le bouton manuel existant
+    (`POST /assets/web-hardening/run`) n'appelle jamais avec `asset_ids` : comportement
+    inchangé (tous les sites web)."""
     own_session = db is None
     if own_session:
         db = SessionLocal()
 
     stats = {"checked": 0, "warnings": 0, "skipped_no_url": 0}
     try:
-        assets = (await db.execute(
-            select(Asset).where(Asset.asset_type == "website", Asset.status == "active")
-        )).scalars().all()
+        query = select(Asset).where(Asset.asset_type == "website", Asset.status == "active")
+        if asset_ids is not None:
+            query = query.where(Asset.id.in_(asset_ids))
+        assets = (await db.execute(query)).scalars().all()
 
         semaphore = asyncio.Semaphore(MAX_CONCURRENT_ASSETS)
 

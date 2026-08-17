@@ -17,9 +17,95 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
-**Dernière session : 17/08/2026** — Durcissement étoffé (demande explicite, citations d'une
-démo/présentation Cyberwatch : "un OS qui est obsolète, ça remontera comme un défaut de
-sécurité", "si on scanne un site web et qu'il y a la possibilité de faire une injection SQL ou
+**Dernière session : 17/08/2026** — Politiques de scan planifié par criticité (demande explicite :
+"scan tous les jours pour les critiques, une fois par semaine pour les autres, matching CVE tous
+les jours à 22h, avec la possibilité de le faire manuellement comme actuellement"). Beaucoup de
+questions posées en amont (`AskUserQuestion`) avant de coder — le périmètre exact n'était pas
+évident (quels types d'actifs, patch check inclus ou non, planning figé ou vraie config en base) :
+- **Nouvelle criticité "critique"**, au-dessus de haute/moyenne/faible (celles-ci n'avaient encore
+  jamais de 4e palier — `frontend/src/constants/criticite.js`/`CriticiteBadge.jsx`, corrigé au
+  passage : `Assets.jsx` avait une liste `<option>` codée en dur, jamais branchée sur
+  `CRITICITE_LABELS` comme les autres pages). Multiplicateur de risque **2.0**
+  (`scoring.py::CRITICITE_MULTIPLIERS`) ; pour CVSS-BTE, `critique`/`haute` partagent `H` (le
+  standard CVSS n'a que L/M/H pour CR/IR/AR).
+- **`models.py::ScanPolicy`** (nouvelle table, 4 lignes fixes une par criticité — pas un CRUD libre
+  comme `Analyst`) — `enabled`/`frequency` (daily/weekly)/`hour`/`weekday`. Seedée par défaut
+  (`db/schema_patches.sql`, migration appliquée en direct sur la base de dev) : critique quotidien
+  minuit, le reste hebdomadaire dimanche minuit — librement réajustable ensuite depuis Paramètres
+  \> Intégrations (demande explicite d'une vraie config en base plutôt qu'un planning figé dans le
+  code, contrairement à toutes les autres tâches Celery du projet).
+- **`services/scan_policy.py::run_scan_for_criticite`** — reproduit exactement l'enchaînement de
+  l'endpoint manuel `POST /assets/{id}/scan` (`scan_asset` → `apply_scan_result`, qui déclenche
+  déjà matching CPE + patch check pour l'actif) sur les actifs `service_account` du groupe, puis
+  `run_all_website_checks(asset_ids=...)` (nouveau paramètre optionnel, rétrocompatible) sur ses
+  sites web. Séquentiel, même précédent que `patch_checker.py` (pas de session partagée entre
+  coroutines concurrentes, prudence vis-à-vis des ~80 serveurs on-premise).
+  ⚠️ **Piège identifié avant d'écrire le code, pas après** : `apply_scan_result` déclenche le patch
+  check via `asyncio.create_task()` sur la boucle d'événements de l'**appelant** — si cette fonction
+  tournait directement dans un worker Celery (`asyncio.run()` propre à la tâche), cette tâche de
+  fond serait annulée dès la fin de la tâche Celery, bien avant que le patch check n'ait fini, et
+  serait de toute façon invisible au polling `GET /api/patch-check/status` (état en mémoire du
+  process `backend`, pas `worker` — exactement le problème déjà résolu pour `patch_checker.py` via
+  l'indirection HTTP+jeton interne). **Donc `run_scan_for_criticite` ne s'exécute jamais dans un
+  worker** : le nouveau poller horaire (`check_scan_policies`, ci-dessous) appelle
+  `POST /scan-policies/{criticite}/run-now` (process backend) exactement comme
+  `patch_check_periodic` appelait `POST /patch-check/run`.
+- **`auth_deps.py::require_admin_or_internal`** (nouveau, même mécanisme que
+  `require_page_or_internal`) — nécessaire pour que `run-now` accepte à la fois une session admin
+  (bouton manuel) et le jeton interne (poller). **Bug découvert en testant en conditions réelles
+  avant même d'écrire le poller** : `sync.router` et le nouveau `scan_policies.router` étaient
+  montés dans `main.py` avec une `dependency` de **niveau router** (`require_page(...)`/`_authed`)
+  — celle-ci s'exécute avant toute dependency posée sur une route précise et rejette donc un appel
+  au jeton interne avant même que `require_page_or_internal`/`require_admin_or_internal` de la
+  route n'ait la moindre chance de s'exécuter. Corrigé en retirant la dependency de niveau router
+  sur ces deux routers et en la reposant route par route (11 routes dans `sync.py`) — même
+  précédent que `patch_check.py`, qui n'a jamais eu de dependency de niveau router pour cette
+  raison exacte. Vérifié par `curl` réel avec le jeton interne et un mauvais jeton (200 vs 401)
+  avant de considérer le correctif acquis.
+- **Poller horaire** (`tasks/scheduled_tasks.py::check_scan_policies`, beat `crontab(minute=0)`) —
+  Celery Beat ne relit jamais une politique en base à la volée (aucune tâche du projet n'est
+  pilotée par la base), donc pas de cron dynamique possible : à chaque heure pile, vérifie les 4
+  politiques (heure + jour si hebdomadaire, comparés à l'heure locale Europe/Paris via
+  `zoneinfo` — fonctionne nativement dans l'image `python:3.12-slim`, vérifié en direct dans le
+  conteneur, pas besoin du paquet `tzdata`) et déclenche celles dues, chacune dans son propre
+  `try/except`. Un `SyncState` par criticité (`scan_policy_<criticite>`) évite un double
+  déclenchement dans la même heure.
+- **Matching CVE quotidien 22h** (`run_cpe_match_daily`, même schéma HTTP+jeton interne, appelle
+  l'endpoint manuel existant `POST /api/sync/match` plutôt que le service directement — même
+  raison que ci-dessus) — s'ajoute au démarrage backend et au bouton manuel, ne les remplace pas.
+- **Patch check aligné sur la politique, décision explicite et reconfirmée après calcul de
+  l'impact réel** : l'ancien `patch-check-periodic` (toutes les 6h, tous actifs confondus,
+  supprimé du planning et la fonction elle-même retirée) faisait double emploi avec
+  `RECHECK_INTERVAL` (24h) — pour les actifs `critique`, aucun changement réel (déjà revérifié
+  quasi quotidiennement). Pour haute/moyenne/faible (l'essentiel du parc), la revérification passe
+  d'environ 24h à 7 jours, puisque le patch check se déclenche désormais uniquement via la cascade
+  après un scan (au rythme de la politique du groupe). Chiffré et reconfirmé par l'utilisateur
+  avant d'implémenter, pas juste assumé depuis la réponse initiale à la question posée en amont.
+- **Signal de fraîcheur agent** (`Durcissement.jsx`) — les actifs `collection_method="agent"` ne
+  sont pas pilotables sur planning (ils poussent leurs données eux-mêmes) : badge d'avertissement
+  si le dernier checkin dépasse le seuil attendu pour leur groupe, dérivé directement de
+  `ScanPolicy.frequency` (1j si critique, 7j sinon) plutôt qu'un réglage séparé à maintenir.
+- **Page de réglage** (Paramètres > Intégrations, choix de l'utilisateur — pas Durcissement comme
+  proposé par défaut) : `ScanPolicyFormModal.jsx` (calqué sur `AnalystFormModal.jsx`), liste des 4
+  politiques avec boutons "Modifier"/"Lancer maintenant" réservés admin, lecture ouverte à tout
+  connecté.
+- **Vérifié en conditions réelles, pas seulement en local** : migration appliquée sur la base de
+  dev (4 lignes seedées) ; `run-now` déclenché via jeton interne réel sur `critique` (0 actif
+  concerné, donc sans risque — personne n'a encore la valeur "critique" sur un actif réel) et sur
+  `faible` en forçant temporairement son heure à l'heure courante (0 actif `service_account`
+  taggé "faible" non plus, remis à sa valeur par défaut ensuite) ; poller et matching quotidien
+  invoqués manuellement (`check_scan_policies.apply()`/`run_cpe_match_daily.apply()`) depuis le
+  conteneur `worker` ; `beat`/`worker` redémarrés pour charger le nouveau planning (pas de
+  hot-reload contrairement à `backend`/`frontend`), planning confirmé via
+  `celery_app.conf.beat_schedule` en direct dans le conteneur. `pytest` complet : **208 passés**
+  (inchangé, aucun test ajouté pour cette fonctionnalité), y compris
+  `test_every_api_route_requires_auth_or_admin` — confirme que le retrait des dependencies de
+  niveau router sur `sync.py`/`scan_policies.py` n'a laissé aucune route sans protection.
+
+**Session précédente : 17/08/2026 (même date, plus tôt)** — Durcissement étoffé (demande
+explicite, citations d'une démo/présentation Cyberwatch : "un OS qui est obsolète, ça remontera
+comme un défaut de sécurité", "si on scanne un site web et qu'il y a la possibilité de faire une
+injection SQL ou
 une attaque XSS... ce sera un défaut de sécurité", "une cinquantaine [de checks] dans la
 bibliothèque"). Revue complète du backend avant de coder : 37 checks serveur (14 Linux/23
 Windows via l'agent, sur-ensemble strict du compte de service) + 8 Cisco + 5 ESXi = déjà ~50

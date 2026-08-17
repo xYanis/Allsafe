@@ -1595,15 +1595,59 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_report_kind_week_asset
 | `sync_nvd_critical` | Quotidien à 3h | Filet de sécurité CRITICAL+HIGH — balayage 45j **indépendant** du curseur (`since_override`, cf. incident ci-dessous) |
 | `sync_rss_feeds` | Toutes les heures à H+5 | CERT-FR, Exploit-DB, GitHub |
 | `sync_watch_feeds` | Toutes les heures à H+10 | CyberVeille — sources natives + personnalisées (cf. `docs/VEILLE.md`) |
-| `patch_check_periodic` | Toutes les 6h à H+20 | Déclenche `POST /api/patch-check/run` côté `backend` (cf. ci-dessus) |
-| `generate_weekly_reports_task` | **Lundi à 7h** | Rapports hebdomadaires figés de la semaine ISO écoulée (cf. § ci-dessous) |
+| `sync_epss` | Quotidien à 3h30 | Scores EPSS (export FIRST.org complet, pas d'API incrémentale) |
+| `sync_kev` | Quotidien à 3h45 | Catalogue CISA KEV (`cves.kev`/`kev_date_added`/`kev_ransomware`) |
 | `backup_database` | Quotidien à 4h | Sauvegarde PostgreSQL `pg_dump` (cf. § Sauvegarde ci-dessus), après les syncs nocturnes |
-| `run_cpe_matching` | Après chaque sync NVD | Croisement CVE × actifs |
+| `sync_withsecure` | Quotidien à 5h30 | Correctifs manquants CVE/CVSS Windows (WithSecure Elements) |
+| `exploit-maturity-sync-weekly` | Dimanche à 5h45 | Métadonnées Metasploit (`cves.msf_module`/`msf_best_rank`) |
+| `generate_weekly_reports_task` | Lundi à 7h | Rapports hebdomadaires figés de la semaine ISO écoulée (cf. § ci-dessous) |
+| `scan-policy-check-hourly` | Toutes les heures pile | Vérifie les 4 `ScanPolicy` (critique/haute/moyenne/faible) et déclenche celles dont l'heure/le jour correspond (cf. § Politiques de scan planifié ci-dessous) |
+| `cpe-match-daily` | Quotidien à 22h | Matching CVE global (`POST /api/sync/match`), s'ajoute au démarrage backend et au bouton manuel |
+
+⚠️ **`run_cpe_matching` (croisement CVE × actifs) n'est PAS planifié** malgré ce qu'affirmait cette
+table jusqu'au 17/08/2026 ("après chaque sync NVD") — c'est faux dans le code, aucune tâche
+`scheduled_tasks.py` ne l'appelle après une sync NVD. Ses seuls déclencheurs : démarrage du backend
+(`main.py::_startup_matching`), bouton manuel (`POST /api/sync/match`), après un scan/import d'actif
+(`run_cpe_matching_for_asset_task`, événementiel), et désormais `cpe-match-daily` ci-dessus.
 
 Meraki / PRTG / GLPI / vSphere / durcissement switches : déclenchement **manuel uniquement**
 (`POST .../run`), jamais dans ce planning — précédent délibéré, une intégration n'y entre qu'après
 avoir fait ses preuves manuellement (seul WithSecure a suivi ce chemin jusqu'ici, cf.
 `sync_withsecure` planifiée quotidiennement après une phase manuelle).
+
+### Politiques de scan planifié par criticité (17/08/2026, `models.py::ScanPolicy`)
+
+4 lignes fixes (une par valeur de `asset.tags.criticite` : critique/haute/moyenne/faible), éditables
+depuis Paramètres > Intégrations (`GET`/`PATCH /api/scan-policies`, réservé admin en écriture).
+Chacune porte `enabled`/`frequency` (`daily`/`weekly`)/`hour`/`weekday` (0=lundi..6=dimanche, utilisé
+seulement si hebdomadaire). Seedées par défaut (`db/schema_patches.sql`) sur la demande initiale :
+critique en quotidien minuit, le reste en hebdomadaire dimanche minuit — librement réajustables
+ensuite.
+
+Déclenchement (`services/scan_policy.py::run_scan_for_criticite`) : scanne séquentiellement (même
+précédent que `patch_checker.py` — pas de session partagée entre coroutines concurrentes, prudence
+vis-à-vis des ~80 serveurs on-premise) tous les actifs `collection_method="service_account"` du
+groupe, puis lance le durcissement web (`run_all_website_checks(asset_ids=...)`) des sites web du
+même groupe. Reproduit exactement l'enchaînement de l'endpoint manuel `POST /assets/{id}/scan`
+(`scan_asset` → `apply_scan_result`, qui déclenche lui-même matching CPE + patch check pour
+l'actif) — **jamais appelé depuis un worker Celery** : `apply_scan_result` lance le patch check via
+`asyncio.create_task()` sur la boucle de l'appelant, qui serait annulée à la fin d'une tâche Celery
+`asyncio.run()`. Le poller horaire `check_scan_policies` (`scan-policy-check-hourly` ci-dessus)
+déclenche donc `POST /scan-policies/{criticite}/run-now` (process `backend`, `X-Internal-Token`,
+`auth_deps.py::require_admin_or_internal`) plutôt que le service directement — même schéma que
+`cpe-match-daily`/l'ancien `patch_check_periodic`.
+
+**Périmètre** : uniquement les serveurs `service_account` et les sites web. Les équipements réseau
+(Meraki/PRTG) restent 100% manuels (règle ci-dessus). Les actifs agent (checkin, non pilotables sur
+planning) ont un simple signal de fraîcheur côté frontend (`Durcissement.jsx`) — badge d'avertissement
+si le dernier checkin dépasse le délai attendu pour leur groupe, dérivé de `ScanPolicy.frequency`.
+
+**Patch check** : `patch-check-periodic` (ancien cycle global toutes les 6h, tous actifs confondus)
+a été retiré — la revérification de patch se déclenche maintenant via la cascade existante après
+chaque scan d'actif (`apply_scan_result` → `run_full_patch_check_cycle`), au rythme de la politique
+de son groupe de criticité. Décision explicite de l'utilisateur malgré la baisse de fréquence pour
+haute/moyenne/faible (`RECHECK_INTERVAL` 24h → effectivement 7 jours, cf. `STATUS.md`) ; pour
+critique, aucun changement réel (déjà revérifié quotidiennement).
 
 ### Rapports hebdomadaires figés (`services/weekly_report.py`, table `reports`)
 

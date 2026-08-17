@@ -5,10 +5,11 @@ import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
-import { changeEmail, changePassword, integrationsStatus, mySessions, revokeMySession } from '../api/client.js'
+import { changeEmail, changePassword, integrationsStatus, mySessions, revokeMySession, scanPolicies, updateScanPolicy, runScanPolicyNow } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import PasswordInput from '../components/PasswordInput.jsx'
 import PasswordStrengthHint, { passwordMeetsPolicy } from '../components/PasswordStrengthHint.jsx'
+import ScanPolicyFormModal, { SCAN_POLICY_CRITICITE_LABELS, SCAN_POLICY_WEEKDAY_LABELS } from '../components/ScanPolicyFormModal.jsx'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const TEXT_INPUT = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
@@ -106,6 +107,19 @@ export default function Settings() {
   const [integrations, setIntegrations] = useState(null)
   const [integrationsError, setIntegrationsError] = useState('')
 
+  // Politiques de scan planifié par criticité (17/08/2026) — même section que les intégrations,
+  // rechargées à chaque succès (edit/run-now) plutôt qu'un état optimiste, la liste ne fait que
+  // 4 lignes.
+  const [scanPoliciesList, setScanPoliciesList] = useState(null)
+  const [scanPoliciesError, setScanPoliciesError] = useState('')
+  const [editingPolicy, setEditingPolicy] = useState(null)
+  const [runningNow, setRunningNow] = useState(null)
+
+  function loadScanPolicies() {
+    scanPolicies().then(r => setScanPoliciesList(r.data.items))
+      .catch(() => setScanPoliciesError('Impossible de charger les politiques de scan.'))
+  }
+
   useEffect(() => {
     if (section === 'sessions' && sessions === null) {
       mySessions().then(r => setSessions(r.data.items))
@@ -115,7 +129,29 @@ export default function Settings() {
       integrationsStatus().then(r => setIntegrations(r.data.items))
         .catch(() => setIntegrationsError('Impossible de charger le statut des intégrations.'))
     }
-  }, [section, sessions, integrations])
+    if (section === 'integrations' && scanPoliciesList === null) {
+      loadScanPolicies()
+    }
+  }, [section, sessions, integrations, scanPoliciesList])
+
+  async function handleSavePolicy(criticite, data) {
+    await updateScanPolicy(criticite, data)
+    setEditingPolicy(null)
+    loadScanPolicies()
+  }
+
+  async function handleRunPolicyNow(criticite) {
+    if (runningNow) return
+    setRunningNow(criticite)
+    try {
+      await runScanPolicyNow(criticite)
+      loadScanPolicies()
+    } catch (err) {
+      setScanPoliciesError(err?.response?.data?.detail || 'Impossible de lancer ce scan.')
+    } finally {
+      setRunningNow(null)
+    }
+  }
 
   async function handleRevokeSession(id) {
     if (revokingId) return
@@ -388,10 +424,58 @@ export default function Settings() {
                   ))}
                 </div>
               )}
+
+              <p className="text-xs mt-6 mb-3" style={{ color: 'var(--text-muted)' }}>
+                Politiques de scan planifié — scan d'inventaire/durcissement (SSH/WinRM + sites web)
+                par groupe de criticité, cf. <code>services/scan_policy.py</code>.
+              </p>
+              {scanPoliciesError && <p className="text-xs mb-2" style={{ color: '#f85149' }}>{scanPoliciesError}</p>}
+              {scanPoliciesList === null ? (
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Chargement…</p>
+              ) : (
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {scanPoliciesList.map(p => (
+                    <div key={p.criticite} className="py-3 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
+                          {SCAN_POLICY_CRITICITE_LABELS[p.criticite] || p.criticite}
+                          {!p.enabled && <span className="ml-2 text-xs font-normal" style={{ color: 'var(--text-muted)' }}>(désactivée)</span>}
+                        </p>
+                        <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                          {p.frequency === 'daily' ? 'Quotidien' : `Hebdomadaire — ${SCAN_POLICY_WEEKDAY_LABELS[p.weekday] || '?'}`}
+                          {' '}à {String(p.hour).padStart(2, '0')}h00
+                          {p.last_run_at && ` — dernière exécution : ${fmtDate(p.last_run_at)}`}
+                          {p.running && ' — en cours…'}
+                        </p>
+                      </div>
+                      {user?.role === 'admin' && (
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <button onClick={() => handleRunPolicyNow(p.criticite)} disabled={p.running || runningNow === p.criticite}
+                            className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50"
+                            style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                          >{runningNow === p.criticite || p.running ? 'En cours…' : 'Lancer maintenant'}</button>
+                          <button onClick={() => setEditingPolicy(p)}
+                            className="text-xs px-2.5 py-1.5 rounded-lg font-medium"
+                            style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                          >Modifier</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {editingPolicy && (
+        <ScanPolicyFormModal
+          initial={editingPolicy}
+          onConfirm={(data) => handleSavePolicy(editingPolicy.criticite, data)}
+          onClose={() => setEditingPolicy(null)}
+        />
+      )}
     </div>
   )
 }

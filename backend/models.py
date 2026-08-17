@@ -1133,3 +1133,24 @@ class AgentEnrollmentToken(Base):
     expires_at        = Column(DateTime(timezone=True), nullable=False)
     max_uses          = Column(Integer, nullable=False, default=1)
     use_count         = Column(Integer, nullable=False, default=0)
+
+
+class ScanPolicy(Base):
+    """Politique de scan planifié par criticité (17/08/2026) — 4 lignes fixes, une par valeur
+    de `asset.tags.criticite` (critique/haute/moyenne/faible), chacune éditable indépendamment
+    depuis Paramètres > Intégrations. Pilote `services/scan_policy.py::run_scan_for_criticite`
+    (scan SSH/WinRM + durcissement web des actifs de ce groupe), déclenché par le poller horaire
+    `tasks.scheduled_tasks.check_scan_policies`. Pas de colonne d'état d'exécution ici : le
+    dernier run est tracé dans `SyncState` (clé `scan_policy_<criticite>`), même mécanisme que
+    les autres intégrations (kev/exploit_maturity/meraki/prtg...) plutôt qu'un 2e mécanisme de
+    suivi dédié."""
+    __tablename__ = "scan_policies"
+
+    id         = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    criticite  = Column(String, nullable=False, unique=True)
+    enabled    = Column(Boolean, nullable=False, default=True)
+    frequency  = Column(String, nullable=False)   # 'daily' | 'weekly'
+    hour       = Column(Integer, nullable=False, default=0)   # 0-23, heure locale Europe/Paris
+    # 0=lundi..6=dimanche (date.weekday()), utilisé seulement si frequency == 'weekly'
+    weekday    = Column(Integer, nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=_sfunc.now(), onupdate=_sfunc.now())

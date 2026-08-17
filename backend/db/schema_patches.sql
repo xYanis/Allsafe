@@ -735,3 +735,26 @@ ALTER TABLE vulnerabilities ADD COLUMN IF NOT EXISTS cvss_bte_vector VARCHAR;
 -- pour asset_type="network" (cf. services/web_hardening.py).
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS url VARCHAR;
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS web_compliance JSON;
+
+-- Politiques de scan planifié par criticité (17/08/2026, cf. models.py::ScanPolicy) — 4 lignes
+-- fixes (une par valeur de asset.tags.criticite), éditables depuis Paramètres > Intégrations,
+-- pilotant services/scan_policy.py via le poller horaire tasks.scheduled_tasks.check_scan_policies.
+-- Seed par défaut : critique en quotidien minuit, le reste en hebdomadaire dimanche minuit
+-- (weekday : 0=lundi..6=dimanche, cf. date.weekday()) — chaque ligne reste éditable ensuite
+-- indépendamment, ce seed ne fait que reproduire la demande initiale de l'utilisateur.
+CREATE TABLE IF NOT EXISTS scan_policies (
+    id         UUID PRIMARY KEY,
+    criticite  VARCHAR NOT NULL UNIQUE,
+    enabled    BOOLEAN NOT NULL DEFAULT true,
+    frequency  VARCHAR NOT NULL,
+    hour       INTEGER NOT NULL DEFAULT 0,
+    weekday    INTEGER,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+GRANT SELECT, INSERT, UPDATE, DELETE ON scan_policies TO cbr_app;
+INSERT INTO scan_policies (id, criticite, frequency, hour, weekday) VALUES
+    (gen_random_uuid(), 'critique', 'daily',  0, NULL),
+    (gen_random_uuid(), 'haute',    'weekly', 0, 6),
+    (gen_random_uuid(), 'moyenne',  'weekly', 0, 6),
+    (gen_random_uuid(), 'faible',   'weekly', 0, 6)
+ON CONFLICT (criticite) DO NOTHING;

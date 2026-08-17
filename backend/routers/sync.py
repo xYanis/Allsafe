@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from auth_deps import require_page, require_page_or_internal
 from database import get_session
 from models import SyncState, Asset, CVE
 from config import settings
@@ -20,14 +21,22 @@ from services.exploit_maturity_fetcher import run_exploit_maturity_sync
 
 router = APIRouter()
 
+# Toutes les routes protégées par require_page("/cves", "/dashboard") individuellement (pas
+# une dependency de niveau router comme avant, cf. main.py) — /match doit accepter aussi le
+# jeton interne (X-Internal-Token) pour le déclenchement quotidien 22h du poller
+# tasks/scheduled_tasks.py::run_cpe_match_daily (17/08/2026) ; une dependency de niveau router
+# s'exécuterait avant celle de la route et rejetterait cet appel avant même qu'elle ne
+# s'exécute, même précédent que routers/patch_check.py.
+_synced = [Depends(require_page("/cves", "/dashboard"))]
 
-@router.post("/nvd")
+
+@router.post("/nvd", dependencies=_synced)
 async def trigger_nvd_sync(days: int = 7):
     task_id = trigger_manual_sync(days=days)
     return {"task_id": task_id, "status": "started", "days": days}
 
 
-@router.post("/nvd/{cve_id}")
+@router.post("/nvd/{cve_id}", dependencies=_synced)
 async def trigger_nvd_sync_by_id(cve_id: str, session: AsyncSession = Depends(get_session)):
     """Récupère/rafraîchit une CVE précise par ID — filet de rattrapage pour
     une CVE passée à travers le trou de la sync incrémentale (cf.
@@ -53,7 +62,7 @@ async def trigger_nvd_sync_by_id(cve_id: str, session: AsyncSession = Depends(ge
     return result
 
 
-@router.post("/nvd-backfill")
+@router.post("/nvd-backfill", dependencies=_synced)
 async def trigger_nvd_backfill(session: AsyncSession = Depends(get_session)):
     """Rattrapage complet — importe toutes les CVE NVD applicables aux CPE
     réellement présents sur le parc (pas un import NVD complet, ~300k CVE
@@ -78,31 +87,37 @@ async def trigger_nvd_backfill(session: AsyncSession = Depends(get_session)):
     return {"cpes": cpes, "results": results}
 
 
-@router.get("/status/{task_id}")
+@router.get("/status/{task_id}", dependencies=_synced)
 async def task_status(task_id: str):
     return get_task_status(task_id)
 
 
-@router.post("/assets")
+@router.post("/assets", dependencies=_synced)
 async def trigger_asset_import():
     stats = await run_asset_import()
     return stats
 
 
-@router.post("/match")
+@router.post("/match", dependencies=[Depends(require_page_or_internal("/cves", "/dashboard"))])
 async def trigger_cpe_match():
     """Lance le matching global en tâche de fond (14/08/2026 — avant cette date, la
     requête HTTP restait ouverte jusqu'à la fin du calcul complet, jusqu'à 13,4M
     itérations, sans le moindre retour côté bouton pendant l'attente — retour
     utilisateur : "c'est très long"). `GET /match-status` expose la progression et le
-    résultat final une fois terminé (cf. son docstring)."""
+    résultat final une fois terminé (cf. son docstring).
+
+    Accepte aussi le jeton interne (17/08/2026, `require_page_or_internal`) : c'est
+    l'endpoint que le poller quotidien 22h (`tasks/scheduled_tasks.py::run_cpe_match_daily`)
+    appelle depuis le process worker — is_matching_running()/run_cpe_matching() doivent
+    toujours s'exécuter dans le process backend (état en mémoire partagé avec le polling
+    GET /match-status), jamais directement depuis le worker."""
     if is_matching_running():
         return {"status": "already_running"}
     asyncio.create_task(run_cpe_matching())
     return {"status": "started"}
 
 
-@router.post("/backfill-component-types")
+@router.post("/backfill-component-types", dependencies=_synced)
 async def trigger_backfill_component_types():
     """One-shot (07/08/2026) : classe `component_type` (système/application) sur
     les `Vulnerability` déjà en base créées avant l'introduction de ce champ —
@@ -111,7 +126,7 @@ async def trigger_backfill_component_types():
     return await backfill_component_types()
 
 
-@router.get("/match-status")
+@router.get("/match-status", dependencies=_synced)
 async def cpe_match_status(session: AsyncSession = Depends(get_session)):
     """Date du dernier matching CPE (manuel via ce bouton, ou automatique au
     démarrage de l'app — cf. main.py `_startup_matching`) — lu au chargement
@@ -134,13 +149,13 @@ async def cpe_match_status(session: AsyncSession = Depends(get_session)):
     }
 
 
-@router.post("/rescore")
+@router.post("/rescore", dependencies=_synced)
 async def trigger_rescore():
     stats = await recalculate_all_scores()
     return stats
 
 
-@router.post("/epss")
+@router.post("/epss", dependencies=_synced)
 async def trigger_epss_sync():
     """Télécharge l'export EPSS complet (FIRST.org, ~360k CVE régénéré une fois par
     jour) et met à jour cves.epss_score pour les CVE déjà en base, puis relance
@@ -150,7 +165,7 @@ async def trigger_epss_sync():
     return await run_epss_sync()
 
 
-@router.post("/kev")
+@router.post("/kev", dependencies=_synced)
 async def trigger_kev_sync():
     """Télécharge le catalogue CISA KEV complet et met à jour cves.kev/kev_date_added/
     kev_ransomware pour les CVE déjà en base, puis relance le rescore (cvss_bte en dépend
@@ -158,7 +173,7 @@ async def trigger_kev_sync():
     return await run_kev_sync()
 
 
-@router.post("/exploit-maturity")
+@router.post("/exploit-maturity", dependencies=_synced)
 async def trigger_exploit_maturity_sync():
     """Télécharge les métadonnées de modules Metasploit et met à jour cves.msf_module/
     msf_best_rank/msf_module_count pour les CVE déjà en base, puis relance le rescore

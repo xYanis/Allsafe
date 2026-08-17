@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { assets as fetchAssets, runWebHardeningCheck } from '../api/client.js'
+import { assets as fetchAssets, runWebHardeningCheck, scanPolicies } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
 import { assetCategory, categoryStyle } from '../utils/assetCategory.js'
@@ -145,6 +145,31 @@ export default function Durcissement() {
   // créé n'a sinon aucun moyen de se faire scanner sans curl direct).
   const [scanningWeb, setScanningWeb] = useState(false)
   const [webScanMsg, setWebScanMsg] = useState('')
+  // Signal de fraîcheur des actifs agent (17/08/2026) — un actif collecté par l'agent Rust
+  // pousse ses données lui-même (checkin), Allsafe ne peut pas le forcer à se reconnecter sur
+  // planning comme un actif service_account (cf. services/scan_policy.py). Seuil dérivé
+  // directement de la fréquence de la politique de scan du même groupe de criticité : une seule
+  // source de vérité pour "quelle fraîcheur est attendue", pas un réglage séparé à maintenir.
+  const [policyFrequencyByCriticite, setPolicyFrequencyByCriticite] = useState({})
+
+  useEffect(() => {
+    scanPolicies().then(r => {
+      const map = {}
+      for (const p of r.data.items) map[p.criticite] = p.frequency
+      setPolicyFrequencyByCriticite(map)
+    }).catch(() => {})
+  }, [])
+
+  function agentStaleness(asset) {
+    if (asset.collection_method !== 'agent' || !asset.last_scan) return null
+    const criticite = asset.tags?.criticite || 'moyenne'
+    const frequency = policyFrequencyByCriticite[criticite]
+    if (!frequency) return null
+    const maxAgeDays = frequency === 'daily' ? 1 : 7
+    const ageDays = (Date.now() - new Date(asset.last_scan).getTime()) / 86400000
+    if (ageDays <= maxAgeDays) return null
+    return `Dernier checkin il y a ${Math.floor(ageDays)} jour(s) — attendu : ${frequency === 'daily' ? 'quotidien' : 'hebdomadaire'}`
+  }
 
   function reload() {
     return fetchAssets()
@@ -320,7 +345,16 @@ export default function Durcissement() {
                       </td>
                       <td className="px-4 py-3"><SummaryBadges summary={summary} /></td>
                       <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-muted)' }}>
-                        {asset.last_scan ? new Date(asset.last_scan).toLocaleDateString('fr-FR') : '—'}
+                        <div className="flex items-center gap-1.5">
+                          <span>{asset.last_scan ? new Date(asset.last_scan).toLocaleDateString('fr-FR') : '—'}</span>
+                          {agentStaleness(asset) && (
+                            <span title={agentStaleness(asset)} style={{ color: '#d29922' }}>
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                              </svg>
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     {isOpen && (

@@ -43,6 +43,7 @@ _RESCORE_LOAD_OPTIONS = (
 )
 
 CRITICITE_MULTIPLIERS: dict[str, float] = {
+    "critique": 2.0,
     "haute": 1.5,
     "moyenne": 1.0,
     "faible": 0.7,

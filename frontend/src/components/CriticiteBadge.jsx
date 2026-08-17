@@ -1,10 +1,14 @@
+// CRITIQUE (17/08/2026) : pastille pleine plutôt qu'un fond translucide comme les 3 autres —
+// signale "un cran au-dessus" sans introduire une nouvelle teinte qui entrerait en collision
+// avec le rouge déjà utilisé par HAUTE et par SeverityBadge CRITICAL.
 const STYLES = {
+  CRITIQUE:{ background: '#f85149', color: '#2b0a08', border: '1px solid #f85149' },
   HAUTE:   { background: 'rgba(248,81,73,0.12)',  color: '#f85149', border: '1px solid rgba(248,81,73,0.3)'  },
   MOYENNE: { background: 'rgba(88,166,255,0.12)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)' },
   FAIBLE:  { background: 'rgba(139,148,158,0.12)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' },
 }
 
-const LABELS = { HAUTE: 'Haute', MOYENNE: 'Moyenne', FAIBLE: 'Faible' }
+const LABELS = { CRITIQUE: 'Critique', HAUTE: 'Haute', MOYENNE: 'Moyenne', FAIBLE: 'Faible' }
 
 export default function CriticiteBadge({ value }) {
   const key = (value || 'moyenne').toUpperCase()

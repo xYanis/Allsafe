@@ -212,9 +212,7 @@ function AssetFormModal({ asset, onClose, onSaved }) {
             <div>
               <label style={labelStyle}>Criticité métier</label>
               <select style={inputStyle} value={form.criticite} onChange={e => set('criticite', e.target.value)}>
-                <option value="haute">Haute</option>
-                <option value="moyenne">Moyenne</option>
-                <option value="faible">Faible</option>
+                {Object.entries(CRITICITE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
               </select>
             </div>
           </div>

@@ -29,12 +29,23 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
   // points couvre toute la largeur au lieu de s'effacer avant la moitié de la carte.
   const gridMaskPos = children ? '10% 50%' : '32% 50%'
   const gridMaskSize = children ? '65% 90%' : '85% 100%'
+  // Lueur d'ambiance derrière le logo (17/08/2026) — un cercle flou à la couleur du module,
+  // sous la trame de points (peinte après elle dans le DOM, même pile z-index) pour un effet
+  // "spot lumineux traversant un grillage" plutôt qu'un aplat plat. Statique comme le reste du
+  // hero (cf. note de tête de fichier) : une simple forme, jamais de pulsation/déplacement.
+  const glowOpacity = isDark ? 0.4 : 0.22
   return (
     <div className="relative overflow-hidden px-4 py-3 flex flex-wrap items-center justify-between gap-3" style={{
       ...CARD_SHAPE,
-      background: `linear-gradient(135deg, color-mix(in srgb, ${color} 12%, var(--bg-card)), var(--bg-card) 65%)`,
+      background: `linear-gradient(135deg, color-mix(in srgb, ${color} 14%, var(--bg-card)), var(--bg-card) 65%)`,
       borderColor: `color-mix(in srgb, ${color} 28%, var(--border))`,
+      boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
     }}>
+      <div className="absolute pointer-events-none" style={{
+        left: -40, top: '50%', transform: 'translateY(-50%)', width: 220, height: 220,
+        background: `radial-gradient(circle, ${color} 0%, transparent 70%)`,
+        filter: 'blur(40px)', opacity: glowOpacity, zIndex: 0,
+      }} />
       <div className="hero-grid" style={{
         maskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
         WebkitMaskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
@@ -42,7 +53,11 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
       <div className="relative z-[1] flex items-center gap-2.5 min-w-0">
         <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{
           background: `linear-gradient(155deg, ${color}, color-mix(in srgb, ${color} 55%, black))`,
-          boxShadow: `0 3px 12px -3px color-mix(in srgb, ${color} 55%, transparent)`,
+          boxShadow: [
+            `0 3px 12px -3px color-mix(in srgb, ${color} 55%, transparent)`,
+            'inset 0 1px 0 rgba(255,255,255,0.3)',
+            'inset 0 -8px 10px -6px rgba(0,0,0,0.3)',
+          ].join(', '),
         }}>
           <svg className="w-[18px] h-[18px]" fill="none" stroke="#fff" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d={icon} />
@@ -55,6 +70,7 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
             backgroundClip: 'text',
             color: 'transparent',
             fontFamily: 'var(--font-mono)',
+            textShadow: isDark ? `0 0 26px color-mix(in srgb, ${color} 40%, transparent)` : 'none',
           }}>
             {title}
           </h1>

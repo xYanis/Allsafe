@@ -252,6 +252,12 @@ export const revokeMySession = (id) => api.delete(`/auth/sessions/${id}`)
 // Statut agrégé des intégrations externes (cf. backend/routers/integrations.py).
 export const integrationsStatus = () => api.get('/integrations/status')
 
+// Politiques de scan planifié par criticité (17/08/2026, cf. backend/routers/scan_policies.py) —
+// lecture ouverte à tout connecté, écriture (update/runNow) réservée admin côté serveur.
+export const scanPolicies       = () => api.get('/scan-policies')
+export const updateScanPolicy   = (criticite, data) => api.patch(`/scan-policies/${criticite}`, data)
+export const runScanPolicyNow   = (criticite) => api.post(`/scan-policies/${criticite}/run-now`)
+
 // Comptes utilisateurs (cf. backend/routers/users.py) — réservé au rôle admin côté serveur.
 export const users               = () => api.get('/users')
 export const createUser          = (data) => api.post('/users', data)

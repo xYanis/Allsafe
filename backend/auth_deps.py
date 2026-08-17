@@ -115,6 +115,27 @@ def require_page_or_internal(*page_keys: str):
     return _dep
 
 
+async def require_admin_or_internal(request: Request, session: AsyncSession = Depends(get_session)) -> Optional[User]:
+    """Comme `require_admin`, mais accepte aussi le jeton interne partagé (17/08/2026, même
+    mécanisme que `require_page_or_internal` ci-dessus — cf. sa docstring pour le détail du
+    jeton) — pour le poller de politiques de scan planifié
+    (tasks/scheduled_tasks.py::check_scan_policies), qui déclenche depuis le process worker un
+    endpoint normalement réservé admin (`POST /scan-policies/{criticite}/run-now`). Corps
+    dupliqué plutôt que composé, même raison que `require_page_or_internal`."""
+    token = request.headers.get(INTERNAL_TOKEN_HEADER)
+    if settings.INTERNAL_API_TOKEN and hmac.compare_digest(token or "", settings.INTERNAL_API_TOKEN):
+        return None
+
+    raw_token = request.cookies.get(SESSION_COOKIE_NAME)
+    user = await get_user_by_token(session, raw_token) if raw_token else None
+    if not user:
+        raise HTTPException(401, "Authentification requise.")
+    await session.commit()
+    if user.role != "admin":
+        raise HTTPException(403, "Réservé aux administrateurs.")
+    return user
+
+
 async def require_agent(request: Request, session: AsyncSession = Depends(get_session)) -> Agent:
     """Authentification d'un agent posé sur un poste (12/08/2026, module Sécurité > Agents) —
     identité non-humaine, même forme que `require_auth` mais résout un en-tête (`X-Agent-Token`)

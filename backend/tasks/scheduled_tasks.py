@@ -72,16 +72,6 @@ celery_app.conf.beat_schedule = {
         "options": {"queue": "default"},
     },
 
-    # Patch check autonome (Windows WinRM + Linux SSH, lecture seule) toutes les
-    # 6h — revérifie ce qui n'a jamais été contrôlé ou dont le contrôle a plus de
-    # 24h (RECHECK_INTERVAL), pour capter un correctif appliqué après un premier
-    # check. Décalé à H+20 pour éviter la concurrence avec les autres tâches.
-    "patch-check-periodic": {
-        "task": "tasks.scheduled_tasks.patch_check_periodic",
-        "schedule": crontab(minute=20, hour="*/6"),
-        "options": {"queue": "default"},
-    },
-
     # Rapports hebdomadaires figés (module Rapports) — le lundi à 7h, sur la
     # semaine ISO qui vient de se terminer. Lundi et pas dimanche soir : la
     # semaine doit être close pour que le rapport soit complet (cf.
@@ -139,6 +129,26 @@ celery_app.conf.beat_schedule = {
     "exploit-maturity-sync-weekly": {
         "task": "tasks.scheduled_tasks.sync_exploit_maturity",
         "schedule": crontab(minute=45, hour=5, day_of_week=0),
+        "options": {"queue": "default"},
+    },
+
+    # Politiques de scan planifié par criticité (17/08/2026, cf. models.py::ScanPolicy) —
+    # poller horaire plutôt qu'un cron dynamique : Celery Beat ne relit jamais la base entre
+    # deux redémarrages, aucune tâche de ce fichier n'est pilotée par une config éditable en
+    # base. À chaque heure pile, vérifie les 4 politiques et déclenche celles dont
+    # l'heure/le jour correspond (cf. check_scan_policies ci-dessous).
+    "scan-policy-check-hourly": {
+        "task": "tasks.scheduled_tasks.check_scan_policies",
+        "schedule": crontab(minute=0),
+        "options": {"queue": "default"},
+    },
+
+    # Matching CVE global quotidien à 22h (17/08/2026, demande explicite) — s'ajoute au
+    # déclenchement au démarrage du backend (main.py::_startup_matching) et au bouton manuel
+    # existants, ne les remplace pas.
+    "cpe-match-daily": {
+        "task": "tasks.scheduled_tasks.run_cpe_match_daily",
+        "schedule": crontab(minute=0, hour=22),
         "options": {"queue": "default"},
     },
 }
@@ -298,41 +308,109 @@ def sync_nvd_manual(self, days: int = 7):
 
 
 @celery_app.task(
-    name="tasks.scheduled_tasks.patch_check_periodic",
+    name="tasks.scheduled_tasks.check_scan_policies",
+    bind=True,
+    max_retries=1,
+    soft_time_limit=120,
+    time_limit=150,
+)
+def check_scan_policies(self):
+    """
+    Poller horaire des politiques de scan planifié (17/08/2026, cf. models.py::ScanPolicy) —
+    déclenche `POST /scan-policies/{criticite}/run-now` (process backend, X-Internal-Token,
+    même raison que ci-dessous pour run_cpe_match_daily/l'ancien patch_check_periodic) pour
+    chaque politique activée dont l'heure — et le jour si hebdomadaire — correspond à
+    maintenant (Europe/Paris, cf. celery_app.conf.timezone). Un `SyncState` par criticité
+    (`scan_policy_<criticite>`, écrit par services/scan_policy.py) évite un double
+    déclenchement dans la même heure si le poller est relancé (redémarrage worker, etc.).
+    Remplace l'ancien `patch-check-periodic` (toutes les 6h, tous actifs confondus) : le
+    patch check se déclenche maintenant via la cascade existante après chaque scan d'actif
+    (apply_scan_result -> run_full_patch_check_cycle), au rythme de la politique de son
+    groupe de criticité — décision explicite de l'utilisateur malgré la baisse de fréquence
+    de revérification pour haute/moyenne/faible (24h -> 7j), cf. STATUS.md.
+    Chaque politique a son propre try/except : l'échec de l'une ne bloque pas les autres.
+    """
+    import httpx
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from database import SessionLocal
+    from models import ScanPolicy, SyncState
+
+    async def _due_criticites() -> list[str]:
+        now = datetime.now(ZoneInfo("Europe/Paris"))
+        session = SessionLocal()
+        try:
+            from sqlalchemy import select
+            policies = (await session.execute(select(ScanPolicy).where(ScanPolicy.enabled == True))).scalars().all()
+            due = []
+            for p in policies:
+                if p.hour != now.hour:
+                    continue
+                if p.frequency == "weekly" and p.weekday != now.weekday():
+                    continue
+                state = await session.get(SyncState, f"scan_policy_{p.criticite}")
+                if state and state.last_synced_at and state.last_synced_at.astimezone(ZoneInfo("Europe/Paris")).replace(minute=0, second=0, microsecond=0) == now.replace(minute=0, second=0, microsecond=0):
+                    continue  # déjà déclenché cette heure-ci
+                due.append(p.criticite)
+            return due
+        finally:
+            await session.close()
+
+    import asyncio
+    try:
+        due = asyncio.run(_due_criticites())
+    except Exception as exc:
+        logger.error(f"Erreur lecture des politiques de scan: {exc}")
+        raise self.retry(exc=exc)
+
+    if not due:
+        return {"status": "nothing_due"}
+
+    results = {}
+    for criticite in due:
+        try:
+            resp = httpx.post(
+                f"http://backend:8000/api/scan-policies/{criticite}/run-now", timeout=30,
+                headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN or ""},
+            )
+            resp.raise_for_status()
+            results[criticite] = resp.json()
+            logger.info(f"Politique de scan '{criticite}' déclenchée : {results[criticite]}")
+        except Exception as exc:
+            logger.error(f"Erreur déclenchement politique de scan '{criticite}': {exc}")
+            results[criticite] = {"status": "error", "detail": str(exc)}
+    return results
+
+
+@celery_app.task(
+    name="tasks.scheduled_tasks.run_cpe_match_daily",
     bind=True,
     max_retries=1,
     soft_time_limit=60,
     time_limit=90,
 )
-def patch_check_periodic(self):
+def run_cpe_match_daily(self):
     """
-    Déclenche le cycle patch check (lecture seule, WinRM/SSH) via l'API backend
-    plutôt que d'appeler le service directement : l'état d'avancement
-    (_cycle_running, _current_check, suivi par le dashboard) vit en mémoire dans
-    le process FastAPI `backend` — l'invoquer depuis le process `worker` créerait
-    un état parallèle invisible au polling du dashboard et sans le verrou anti-
-    concurrence avec un cycle déjà en cours (démarrage ou bouton manuel). Le
-    cycle lui-même tourne en tâche de fond côté backend (réponse immédiate),
-    donc cette tâche Celery se termine vite — pas besoin d'un long time_limit.
+    Matching CVE global quotidien à 22h — même schéma que l'ancien `patch_check_periodic` :
+    déclenche `POST /api/sync/match` via HTTP+X-Internal-Token plutôt que d'appeler
+    `run_cpe_matching()` directement, parce que `is_matching_running()`/la progression
+    (services/cpe_matcher.py) vivent en mémoire dans le process backend — un appel direct
+    depuis le worker créerait un état invisible au polling GET /api/sync/match-status et
+    sans le verrou anti-concurrence avec un run déjà en cours (démarrage ou bouton manuel).
     """
     import httpx
-    logger.info("Déclenchement patch check périodique")
+    logger.info("Déclenchement matching CVE quotidien (22h)")
     try:
-        # `X-Internal-Token` (07/08/2026) : cet appel était sans authentification
-        # depuis l'introduction du login (30/07/2026) — POST /api/patch-check/run
-        # exige une session utilisateur, ce déclenchement échouait donc en 401 à
-        # chaque cycle périodique depuis cette date, jamais remarqué (retry Celery
-        # silencieux). Cf. auth_deps.py::require_page_or_internal.
         resp = httpx.post(
-            "http://backend:8000/api/patch-check/run", timeout=30,
+            "http://backend:8000/api/sync/match", timeout=30,
             headers={"X-Internal-Token": settings.INTERNAL_API_TOKEN or ""},
         )
         resp.raise_for_status()
         result = resp.json()
-        logger.info(f"Patch check périodique déclenché : {result}")
+        logger.info(f"Matching CVE quotidien déclenché : {result}")
         return result
     except Exception as exc:
-        logger.error(f"Erreur déclenchement patch check périodique: {exc}")
+        logger.error(f"Erreur déclenchement matching CVE quotidien: {exc}")
         raise self.retry(exc=exc)
 
 

@@ -28,7 +28,7 @@ from auth_deps import require_admin, require_auth, require_page
 from config import settings
 from database import SessionLocal, init_db
 from models import User, SyncState
-from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents, integrations
+from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents, integrations, scan_policies
 from services.auth import hash_password
 from services.cpe_matcher import run_cpe_matching
 from services.patch_checker import run_full_patch_check_cycle, PATCH_CYCLE_STATE_KEY
@@ -225,7 +225,7 @@ app.include_router(assets.router,          prefix="/api/assets",          tags=[
 app.include_router(vulnerabilities.router, prefix="/api/vulnerabilities",  tags=["Vulnérabilités"],         dependencies=_authed)
 app.include_router(analysis.router,        prefix="/api/analysis",        tags=["Analyse IA"],             dependencies=[Depends(require_page("/dashboard", "/vulnerabilities"))])
 app.include_router(reports.router,         prefix="/api/reports",         tags=["Rapports"],               dependencies=[Depends(require_page("/reports", "/rapport-veille", "/rapport-surveillance", "/inventaire"))])
-app.include_router(sync.router,            prefix="/api/sync",            tags=["Synchronisation"],        dependencies=[Depends(require_page("/cves", "/dashboard"))])
+app.include_router(sync.router,            prefix="/api/sync",            tags=["Synchronisation"])
 app.include_router(stats.router,           prefix="/api/stats",           tags=["Statistiques"],           dependencies=[Depends(require_page("/dashboard"))])
 app.include_router(remediation.router,     prefix="/api/remediation",     tags=["Correctifs"],             dependencies=[Depends(require_page("/dashboard", "/vulnerabilities"))])
 app.include_router(patch_check.router,     prefix="/api/patch-check",     tags=["Vérification patches"])
@@ -246,6 +246,7 @@ app.include_router(vsphere.router,         prefix="/api/vsphere",         tags=[
 app.include_router(incidents.router,       prefix="/api/incidents",       tags=["Incidents"],              dependencies=[Depends(require_page("/incidents", "/crises", "/rapport-incidents"))])
 app.include_router(crises.router,          prefix="/api/crises",          tags=["Gestion de crise"],       dependencies=[Depends(require_page("/incidents", "/crises"))])
 app.include_router(analysts.router,        prefix="/api/analysts",        tags=["Analystes"],              dependencies=_authed)
+app.include_router(scan_policies.router,   prefix="/api/scan-policies",   tags=["Politiques de scan"])
 app.include_router(organization_roles.router, prefix="/api/organization-roles", tags=["Rôles"],           dependencies=_authed)
 app.include_router(services.router,        prefix="/api/services",        tags=["Services"],               dependencies=_authed)
 app.include_router(documents.router,       prefix="/api",                 tags=["Documentation"],           dependencies=[Depends(require_page("/documentation"))])

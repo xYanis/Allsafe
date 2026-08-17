@@ -434,6 +434,7 @@ ou une modale rouverte juste après, pas une politique de fraîcheur de fond.
 risk_score = min(cvss_score * epss_score * multiplicateur, 10.0)
 
 multiplicateurs = {
+    "critique": 2.0,   # ajouté 17/08/2026, cf. § ci-dessous
     "haute":   1.5,
     "moyenne": 1.0,
     "faible":  0.7,
@@ -443,10 +444,19 @@ multiplicateurs = {
 
 ### Exemples
 ```
+CVE 9.8 × EPSS 0.85 × critique 2.0 = 16.7 → plafonné à 10.0
 CVE 9.8 × EPSS 0.85 × haute 1.5   = 12.5 → plafonné à 10.0
 CVE 7.5 × EPSS 0.12 × moyenne 1.0 = 0.9
 CVE 5.0 × EPSS 0.05 × faible 0.7  = 0.175
 ```
+
+### 4e valeur de criticité — "critique" (17/08/2026)
+
+Ajoutée au-dessus de haute/moyenne/faible pour les politiques de scan planifié (`models.py::ScanPolicy`,
+cf. `docs/ARCHITECTURE.md` § Politiques de scan planifié) — seule cette valeur passe en scan
+quotidien, le reste hebdomadaire. Multiplicateur 2.0 (progression cohérente avec les écarts
+existants 0.7/1.0/1.5). Pour CVSS-BTE (§ ci-dessous), `critique` et `haute` partagent tous deux
+`H` (High) — le standard CVSS v3.1 n'a que Low/Medium/High pour CR/IR/AR, pas de 4e palier.
 
 ### Criticité métier — enfin branchée à l'UI (session 27/07/2026)
 
@@ -516,7 +526,7 @@ qu'Allsafe connaît d'un actif. Dérivation automatique (`compute_cvss_bte`) :
 | E (Exploit Code Maturity) | `CVE.kev`/`msf_module` | `kev` → `H` ; sinon `msf_module` → `F` (un module intégré à un framework majeur correspond à la définition CVSS de "Functional exploit code available", indépendamment de son `rank` de fiabilité) ; sinon `X` |
 | RL (Remediation Level) | `Vulnerability.status` | `awaiting_fix`/`awaiting_fix_partial` (aucun correctif publié, cf. CLAUDE.md §1) → `U` ; sinon `X` |
 | RC (Report Confidence) | — | toujours `C` (CVE publiées par NVD, source confirmée) — même multiplicateur que `X` (1.0), gardé explicite pour la traçabilité du vecteur |
-| CR/IR/AR | `asset.tags["criticite"]` | `haute→H`, `moyenne→M`, `faible→L`, défaut `X` — même dimension métier que `risk_score` (§ Criticité métier ci-dessus), réutilisée sur les 3 axes plutôt que d'inventer 3 réglages séparés |
+| CR/IR/AR | `asset.tags["criticite"]` | `critique→H`, `haute→H`, `moyenne→M`, `faible→L`, défaut `X` — même dimension métier que `risk_score` (§ Criticité métier ci-dessus), réutilisée sur les 3 axes plutôt que d'inventer 3 réglages séparés |
 
 `None` si `CVE.cvss_vector` est absent ou n'est pas un vecteur v3.0/3.1 (`CVSS:3.`) — CVE notée
 en v2 seulement, la lib `cvss` ne couvre pas ce cas ici (même repli que `risk_score` sur

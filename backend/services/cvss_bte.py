@@ -37,7 +37,7 @@ from cvss.exceptions import CVSS3Error
 
 logger = logging.getLogger(__name__)
 
-_CRITICITE_TO_REQUIREMENT = {"haute": "H", "moyenne": "M", "faible": "L"}
+_CRITICITE_TO_REQUIREMENT = {"critique": "H", "haute": "H", "moyenne": "M", "faible": "L"}
 _AWAITING_FIX_STATUSES = ("awaiting_fix", "awaiting_fix_partial")
 
 

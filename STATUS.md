@@ -17,7 +17,37 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
-**Dernière session : 17/08/2026** — Politiques de scan planifié par criticité (demande explicite :
+**Dernière session : 17/08/2026** — Tests unitaires pour la logique ajoutée plus tôt dans la
+journée (`os_eol.py`/`cvss_bte.py`/`web_hardening.py`, jusque-là sans le moindre test malgré le
+patron déjà établi dans `backend/tests/` — signalé en répondant à "des jobs/pipeline à rajouter ?"
+: le pipeline CI, générique, n'a besoin d'aucun nouveau job, juste de tests que `test-backend`
+ramasserait automatiquement). 3 nouveaux fichiers, 40 tests (fonctions pures, aucune I/O réelle
+sauf `_check_tls`/`check_website` volontairement exclus — vrai socket TCP, déjà vérifiés en
+conditions réelles plus tôt dans la session) : `test_os_eol.py` (piège Windows Server déjà vécu —
+l'année vit dans `os_version` pas `os`), `test_cvss_bte.py` (dérivation E/RL/RC/CR/IR/AR,
+priorité KEV > Metasploit, régression réelle du `Decimal` non converti en `float`),
+`test_web_hardening.py` (en-têtes/cookies, dont le cas réel `_octo` de GitHub sans HttpOnly).
+248 tests passés (208 + 40), aucune régression.
+
+**Suite immédiate, même session** ("on va faire ce qu'on a pas pu faire l'agent par rapport au
+compte de service") : `_RISKY_PORTS` étendu côté `asset_scanner.py` plus tôt dans la journée
+(POP3/IMAP/MSSQL/MySQL/VNC) jamais reporté vers l'agent Rust — cassait le principe "l'agent est
+un strict sur-ensemble du compte de service" (docs/AGENTS.md) dans le sens inverse de d'habitude
+(ici c'est le compte de service qui avait pris de l'avance). `agent/src/collect/linux.rs::
+RISKY_PORTS` et `windows.rs` (liste inline équivalente) synchronisés avec la liste Python.
+**Vérifié en conditions réelles, pas juste compilé** : `cargo check` propre, puis pipeline de
+release complet (`./release.sh`, Linux+.deb, cross-compile Windows mingw-w64, .msi via wixl) —
+les deux binaires 0.1.3 reconstruits dans `agent/dist/` (gitignoré, jamais commité — artefacts de
+build) ; présence de "MSSQL exposé" confirmée dans le binaire compilé (`grep -a`, pas une
+supposition sur le succès du build). Version Cargo.toml/wix inchangée (0.1.3) — pas de bump,
+correctif de contenu seulement, pas de nouvelle fonctionnalité. `CURRENT_AGENT_VERSION`
+(`backend/routers/agents.py`) volontairement pas touché non plus (bump manuel, cf. `release.sh`
+en tête). **Point ouvert** : binaires reconstruits localement, pas encore redistribués aux postes
+déjà enrôlés — à publier/déployer selon le processus habituel (`docs/AGENTS.md` § Mise à jour)
+quand pertinent, pas fait automatiquement par ce correctif.
+
+**Session précédente : 17/08/2026 (même date, plus tôt)** — Politiques de scan planifié par
+criticité (demande explicite :
 "scan tous les jours pour les critiques, une fois par semaine pour les autres, matching CVE tous
 les jours à 22h, avec la possibilité de le faire manuellement comme actuellement"). Beaucoup de
 questions posées en amont (`AskUserQuestion`) avant de coder — le périmètre exact n'était pas

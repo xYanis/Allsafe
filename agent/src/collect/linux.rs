@@ -34,9 +34,16 @@ fn format_arch(raw: &str) -> String {
     ARCH_LABELS.iter().find(|(k, _)| *k == lower).map(|(_, v)| v.to_string()).unwrap_or_else(|| raw.trim().to_string())
 }
 
+// Synchronisé avec services/asset_scanner.py::_RISKY_PORTS (Python, compte de service) —
+// étendu le 17/08/2026 (POP3/IMAP/MSSQL/MySQL/VNC) côté service account mais jamais reporté
+// ici, cassant le principe "l'agent est un strict sur-ensemble du compte de service"
+// (docs/AGENTS.md). Toute future modification de l'une des deux listes doit être reportée sur
+// l'autre — pas de source commune (langages différents, Rust vs Python).
 const RISKY_PORTS: &[(u32, &str)] = &[
     (21, "FTP (non chiffré)"), (23, "Telnet (non chiffré)"), (69, "TFTP (non authentifié)"),
     (512, "rexec (non chiffré)"), (513, "rlogin (non chiffré)"), (514, "rsh (non chiffré)"),
+    (110, "POP3 (non chiffré)"), (143, "IMAP (non chiffré)"),
+    (1433, "MSSQL exposé"), (3306, "MySQL exposé"), (5900, "VNC (souvent sans chiffrement)"),
 ];
 
 const WEAK_SSH_KEX: &[&str] = &["diffie-hellman-group1-sha1", "diffie-hellman-group14-sha1", "diffie-hellman-group-exchange-sha1"];

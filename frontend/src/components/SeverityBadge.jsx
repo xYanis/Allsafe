@@ -9,11 +9,19 @@ const STYLES = {
 
 const DEFAULT = { background: 'rgba(139,148,158,0.12)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' }
 
+// minWidth (17/08/2026) : toutes les sévérités rendent à la même largeur que CRITICAL (la plus
+// longue, ~65px mesuré), plutôt que chacune à sa largeur naturelle — sinon le badge Metasploit
+// d'ExploitBadge.jsx (ancré au bord droit du conteneur, dimensionné par la largeur de ce badge)
+// débordait au-delà de "HIGH"/"MEDIUM"/"LOW", plus étroits. textAlign centre le texte plus court
+// dans cette largeur fixe au lieu de le laisser collé à gauche.
 export default function SeverityBadge({ value }) {
   const key = (value || '').toUpperCase()
   const style = STYLES[key] || DEFAULT
   return (
-    <span style={{ ...style, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', display: 'inline-block' }}>
+    <span style={{
+      ...style, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em',
+      display: 'inline-block', minWidth: 65, boxSizing: 'border-box', textAlign: 'center',
+    }}>
       {key || '—'}
     </span>
   )

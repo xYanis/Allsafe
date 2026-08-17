@@ -311,9 +311,13 @@ fn hardening_checks(open_ports: &[u32]) -> Vec<Check> {
         "Clé de registre absente", "Activé", "Désactivé",
     ));
 
+    // Synchronisé avec services/asset_scanner.py::_RISKY_PORTS (Python, compte de service) et
+    // collect/linux.rs::RISKY_PORTS — cf. commentaire là-bas pour le contexte (17/08/2026).
     let risky: &[(u32, &str)] = &[
         (21, "FTP (non chiffré)"), (23, "Telnet (non chiffré)"), (69, "TFTP (non authentifié)"),
         (512, "rexec (non chiffré)"), (513, "rlogin (non chiffré)"), (514, "rsh (non chiffré)"),
+        (110, "POP3 (non chiffré)"), (143, "IMAP (non chiffré)"),
+        (1433, "MSSQL exposé"), (3306, "MySQL exposé"), (5900, "VNC (souvent sans chiffrement)"),
     ];
     let found: Vec<String> = risky.iter().filter(|(p, _)| open_ports.contains(p)).map(|(p, n)| format!("{n} (port {p})")).collect();
     checks.push(if found.is_empty() {

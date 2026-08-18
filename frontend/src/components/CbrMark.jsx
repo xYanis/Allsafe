@@ -40,22 +40,29 @@ export function CbrMark({ className = 'w-6 h-6', style }) {
 // voulu.
 export function CbrLogoTile({ size = 40, rounded = 12, className = '', style, glow = true }) {
   return (
-    <div
-      className={`relative flex items-center justify-center flex-shrink-0 overflow-hidden ${className}`}
-      style={{
-        width: size, height: size, borderRadius: rounded,
-        background: 'var(--brand-grad)',
-        boxShadow: glow ? `0 ${Math.round(size * 0.32)}px ${Math.round(size * 0.75)}px -${Math.round(size * 0.24)}px var(--brand-glow)` : undefined,
-        ...style,
-      }}
-    >
-      {/* Reflet diagonal — la principale demande derrière ce lot était de
-          s'éloigner de l'aplat "carré plein" jugé trop plat/générique. */}
-      <span aria-hidden="true" style={{
-        position: 'absolute', inset: 0, pointerEvents: 'none',
-        background: 'linear-gradient(160deg, rgba(255,255,255,0.14), transparent 55%)',
-      }} />
-      <CbrMark className="relative" style={{ width: size * 0.74, height: size * 0.74, color: 'var(--brand-icon)' }} />
+    // `.cbr-logo-spin` (index.css § tokens) tourne sur lui-même toutes les 3s —
+    // sur ce wrapper dédié, pas sur la tuile elle-même : la tuile porte déjà
+    // l'animation d'entrée propre à chaque page (`brand-pop`, `home-logo`...,
+    // passée via `className`), qui cible aussi `transform`. Deux `animation` sur
+    // le même élément s'écraseraient l'une l'autre plutôt que de se composer.
+    <div className="cbr-logo-spin">
+      <div
+        className={`relative flex items-center justify-center flex-shrink-0 overflow-hidden ${className}`}
+        style={{
+          width: size, height: size, borderRadius: rounded,
+          background: 'var(--brand-grad)',
+          boxShadow: glow ? `0 ${Math.round(size * 0.32)}px ${Math.round(size * 0.75)}px -${Math.round(size * 0.24)}px var(--brand-glow)` : undefined,
+          ...style,
+        }}
+      >
+        {/* Reflet diagonal — la principale demande derrière ce lot était de
+            s'éloigner de l'aplat "carré plein" jugé trop plat/générique. */}
+        <span aria-hidden="true" style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          background: 'linear-gradient(160deg, rgba(255,255,255,0.14), transparent 55%)',
+        }} />
+        <CbrMark className="relative" style={{ width: size * 0.74, height: size * 0.74, color: 'var(--brand-icon)' }} />
+      </div>
     </div>
   )
 }

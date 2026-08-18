@@ -66,6 +66,31 @@ html, body, #root {
   height: 100%;
 }
 
+/* Rotation périodique du logo — liée au composant `CbrLogoTile` lui-même
+   (cf. CbrMark.jsx, wrapper `.cbr-logo-spin` posé autour de la tuile dans le
+   composant) plutôt qu'ajoutée page par page : apparaît partout où le logo est
+   utilisé (sidebar, page d'accueil, connexion, déconnexion), demande explicite
+   après un premier essai posé seulement sur Login.jsx. Un seul tour toutes les
+   3s puis une pause, pas une rotation continue façon spinner de chargement.
+   rotateY (axe vertical, comme l'axe des pôles terrestres) + perspective() pour
+   l'illusion de volume plutôt qu'un rotate() à plat. Sur un wrapper séparé de la
+   tuile elle-même : la tuile porte déjà sa propre animation d'entrée par page
+   (`brand-pop`/`home-logo`...), qui cible aussi `transform` — deux `animation`
+   sur le même élément s'écraseraient l'une l'autre au lieu de se composer. */
+@keyframes cbr-logo-spin-cycle {
+  0%   { transform: perspective(500px) rotateY(0deg); }
+  24%  { transform: perspective(500px) rotateY(-360deg); }
+  100% { transform: perspective(500px) rotateY(-360deg); }
+}
+.cbr-logo-spin {
+  display: inline-block;
+  flex-shrink: 0;
+  animation: cbr-logo-spin-cycle 3s cubic-bezier(.5,0,.15,1) 700ms infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cbr-logo-spin { animation: none; transform: none; }
+}
+
 /* Scrollbar de la sidebar : le navigateur affiche par défaut une barre
    blanche/grise avec son propre fond, qui détonne avec le thème (surtout en
    dark mode) — on la réduit et on la fait suivre les couleurs de l'app,
@@ -606,6 +631,10 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   to   { clip-path: circle(75% at 50% 30%); }
 }
 .hero-grid-boot { animation: hero-grid-boot 900ms var(--ease-out) both; }
+
+/* Rotation du logo : cf. .cbr-logo-spin, index.css § tokens (posée sur le
+   composant CbrLogoTile lui-même, plus haut dans ce fichier — plus une classe
+   dédiée à Login). */
 
 @media (prefers-reduced-motion: reduce) {
   .login-enter, .login-button-enter { animation: none; opacity: 1; transform: none; filter: none; }

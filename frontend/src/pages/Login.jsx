@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
+import { requestPasswordReset } from '../api/client.js'
 import PasswordInput from '../components/PasswordInput.jsx'
 import { CbrLogoTile } from '../components/CbrMark.jsx'
 
@@ -25,6 +26,19 @@ export default function Login() {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const canSubmit = email.trim() && password
+
+  // « Mot de passe oublié » (18/08/2026) : pas d'infra SMTP dans ce projet (cf.
+  // backend/routers/users.py) — la demande reste visible par un admin (Administration >
+  // Utilisateurs) jusqu'à ce qu'il fixe lui-même un mot de passe provisoire, communiqué
+  // hors application. `forgot-sent` volontairement distinct de `login` : le message de
+  // confirmation reste affiché tant qu'on ne revient pas explicitement en arrière, pas de
+  // retour automatique qui le ferait manquer.
+  const [view, setView] = useState('login') // 'login' | 'forgot' | 'forgot-sent'
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotMessage, setForgotMessage] = useState('')
+  const [forgotSubmitting, setForgotSubmitting] = useState(false)
+  const [forgotError, setForgotError] = useState('')
+
   const buttonRef = useRef(null)
   const fieldsRef = useRef(null)
   const [dodge, setDodge] = useState({ x: 0, y: 0, rot: 0 })
@@ -89,6 +103,23 @@ export default function Login() {
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [canSubmit])
 
+  async function handleForgotSubmit(e) {
+    e.preventDefault()
+    if (forgotSubmitting || !forgotEmail.trim()) return
+    setForgotSubmitting(true)
+    setForgotError('')
+    try {
+      await requestPasswordReset(forgotEmail.trim(), forgotMessage.trim() || undefined)
+      setView('forgot-sent')
+    } catch {
+      // Le serveur répond toujours 200 (même anti-énumération que /login) — ce filet ne
+      // couvre qu'un serveur injoignable, jamais un email inconnu/inactif.
+      setForgotError("Impossible d'envoyer la demande — réessayez plus tard.")
+    } finally {
+      setForgotSubmitting(false)
+    }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault()
     if (submitting || !canSubmit) return
@@ -133,6 +164,7 @@ export default function Login() {
           titre, PUIS une vraie pause avant que les champs n'arrivent un par un, bouton
           en dernier avec un petit rebond — la CTA de l'écran mérite plus de présence
           qu'un simple fondu. */}
+      {view === 'login' && (
       <form onSubmit={handleSubmit} className="relative z-10 w-full max-w-sm flex flex-col">
         {/* fieldsRef délimite la zone interdite au bouton fuyant (cf. flee() plus haut) :
             mesurée en direct plutôt que codée en dur, pour suivre automatiquement
@@ -149,6 +181,12 @@ export default function Login() {
           <div className="login-enter" style={{ animationDelay: '1100ms' }}>
             <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Mot de passe</label>
             <PasswordInput value={password} onChange={e => setPassword(e.target.value)} />
+            <div className="flex justify-end mt-1.5">
+              <button type="button" onClick={() => { setForgotEmail(email); setView('forgot') }}
+                className="text-xs hover:underline" style={{ color: 'var(--text-muted)' }}>
+                Mot de passe oublié ?
+              </button>
+            </div>
           </div>
           {/* `key={error}` : force le remontage à chaque nouvelle tentative ratée pour
               rejouer le tremblement même si le message d'erreur reste identique. */}
@@ -178,6 +216,47 @@ export default function Login() {
           >{submitting ? 'Connexion…' : 'Se connecter'}</button>
         </div>
       </form>
+      )}
+
+      {view === 'forgot' && (
+        <form onSubmit={handleForgotSubmit} className="relative z-10 w-full max-w-sm flex flex-col gap-4">
+          <div className="login-enter">
+            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Email</label>
+            <input autoFocus required type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
+              className="w-full text-sm rounded-lg px-3 py-2 outline-none"
+              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+          <div className="login-enter">
+            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Message pour l'administrateur (optionnel)</label>
+            <textarea rows={2} value={forgotMessage} onChange={e => setForgotMessage(e.target.value)}
+              placeholder="Contexte utile (facultatif)"
+              className="w-full text-sm rounded-lg px-3 py-2 outline-none resize-none"
+              style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
+          </div>
+          {forgotError && <p className="login-error text-xs" style={{ color: '#f85149' }}>{forgotError}</p>}
+          <button type="submit" disabled={forgotSubmitting || !forgotEmail.trim()}
+            className="w-full text-sm px-3 py-2.5 rounded-lg font-medium disabled:opacity-50"
+            style={{ background: 'color-mix(in srgb, var(--brand) 15%, transparent)', color: 'var(--brand)', border: '1px solid color-mix(in srgb, var(--brand) 35%, transparent)' }}
+          >{forgotSubmitting ? 'Envoi…' : 'Envoyer la demande'}</button>
+          <button type="button" onClick={() => setView('login')}
+            className="text-xs text-center hover:underline" style={{ color: 'var(--text-muted)' }}>
+            ← Retour à la connexion
+          </button>
+        </form>
+      )}
+
+      {view === 'forgot-sent' && (
+        <div className="login-enter relative z-10 w-full max-w-sm text-center space-y-4">
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            Si un compte existe avec cet email, une demande a été transmise à un administrateur —
+            il vous communiquera un mot de passe provisoire à utiliser à votre prochaine connexion.
+          </p>
+          <button type="button" onClick={() => setView('login')}
+            className="text-xs hover:underline" style={{ color: 'var(--brand)' }}>
+            ← Retour à la connexion
+          </button>
+        </div>
+      )}
     </div>
   )
 }

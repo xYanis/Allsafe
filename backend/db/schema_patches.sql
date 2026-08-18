@@ -774,3 +774,21 @@ CREATE TABLE IF NOT EXISTS asset_deletion_logs (
 );
 CREATE INDEX IF NOT EXISTS idx_asset_deletion_logs_deleted_at ON asset_deletion_logs(deleted_at);
 GRANT SELECT, INSERT, UPDATE, DELETE ON asset_deletion_logs TO cbr_app;
+
+-- « Mot de passe oublié » (18/08/2026, cf. models.py::PasswordResetRequest) — pas d'infra
+-- SMTP dans ce projet (cf. routers/users.py) : la demande créée depuis Login.jsx (public)
+-- reste visible par un admin (Administration > Utilisateurs) jusqu'à traitement manuel
+-- (mot de passe provisoire + must_change_password, communiqué hors application). CASCADE
+-- sur user_id : la demande n'a plus lieu d'être si le compte est supprimé avant traitement.
+CREATE TABLE IF NOT EXISTS password_reset_requests (
+    id           UUID PRIMARY KEY,
+    user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message      TEXT,
+    status       VARCHAR NOT NULL DEFAULT 'pending',
+    requested_at TIMESTAMPTZ DEFAULT now(),
+    resolved_at  TIMESTAMPTZ,
+    resolved_by  VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status ON password_reset_requests(status);
+GRANT SELECT, INSERT, UPDATE, DELETE ON password_reset_requests TO cbr_app;

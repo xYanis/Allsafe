@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth_deps import SESSION_COOKIE_NAME, require_auth
 from config import settings
 from database import get_session
-from models import User, UserSession
+from models import PasswordResetRequest, User, UserSession
 from services.auth import (
     MAX_CONCURRENT_SESSIONS,
     _hash_token,
@@ -48,6 +48,11 @@ def _client_ip(request: Request) -> str:
 class LoginPayload(BaseModel):
     email: str
     password: str
+
+
+class ForgotPasswordPayload(BaseModel):
+    email: str
+    message: str | None = None
 
 
 class ChangePasswordPayload(BaseModel):
@@ -109,6 +114,42 @@ async def login(payload: LoginPayload, request: Request, response: Response,
         "role": user.role, "must_change_password": user.must_change_password,
         "allowed_pages": user.allowed_pages,
     }
+
+
+# « Mot de passe oublié » (18/08/2026, demande explicite) — public comme /login (utilisateur
+# pas encore authentifié). Pas d'infra SMTP dans ce projet (cf. routers/users.py) : aucun lien
+# de réinitialisation envoyé, la demande reste visible par un admin (Administration >
+# Utilisateurs) jusqu'à ce qu'il fixe lui-même un mot de passe provisoire (cf.
+# routers/users.py::resolve_password_reset_request), communiqué à l'utilisateur hors appli.
+#
+# Message générique renvoyé quel que soit le cas (email inconnu, compte désactivé, ou
+# demande bien créée) — même principe anti-énumération que /login ci-dessus : le contenu de
+# la réponse ne doit jamais confirmer qu'une adresse existe dans la base.
+@router.post("/forgot-password")
+async def forgot_password(payload: ForgotPasswordPayload, session: AsyncSession = Depends(get_session)):
+    generic = {"sent": True, "message": "Si un compte existe avec cet email, une demande a été transmise à un administrateur."}
+    email = payload.email.strip().lower()
+    if not email:
+        return generic
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    if not user or not user.is_active:
+        return generic
+
+    # Une seule demande en attente par compte — un utilisateur qui reclique ne doit pas
+    # empiler des doublons dans la liste de l'admin, juste rafraîchir la plus récente.
+    existing = (await session.execute(
+        select(PasswordResetRequest).where(
+            PasswordResetRequest.user_id == user.id, PasswordResetRequest.status == "pending",
+        )
+    )).scalar_one_or_none()
+    message = (payload.message or "").strip()[:2000] or None
+    if existing:
+        existing.message = message
+        existing.requested_at = datetime.now(timezone.utc)
+    else:
+        session.add(PasswordResetRequest(user_id=user.id, message=message))
+    await session.commit()
+    return generic
 
 
 @router.post("/logout")

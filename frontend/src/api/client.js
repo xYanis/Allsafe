@@ -252,6 +252,9 @@ export const changePassword = (current_password, new_password) => api.post('/aut
 export const changeEmail    = (current_password, new_email) => api.patch('/auth/change-email', { current_password, new_email })
 export const mySessions     = () => api.get('/auth/sessions')
 export const revokeMySession = (id) => api.delete(`/auth/sessions/${id}`)
+// « Mot de passe oublié » (18/08/2026) — public, appelable avant authentification. Réponse
+// toujours générique côté serveur (pas d'énumération de comptes), cf. Login.jsx.
+export const requestPasswordReset = (email, message) => api.post('/auth/forgot-password', { email, message })
 
 // Statut agrégé des intégrations externes (cf. backend/routers/integrations.py).
 export const integrationsStatus = () => api.get('/integrations/status')
@@ -268,6 +271,12 @@ export const createUser          = (data) => api.post('/users', data)
 export const updateUser          = (id, data) => api.patch(`/users/${id}`, data)
 export const deleteUser          = (id) => api.delete(`/users/${id}`)
 export const revokeUserSessions  = (id) => api.post(`/users/${id}/revoke-sessions`)
+// Demandes « mot de passe oublié » (18/08/2026) — créées publiquement depuis Login.jsx
+// (requestPasswordReset ci-dessus), traitées ici par un admin (Administration > Utilisateurs).
+export const passwordResetRequests       = () => api.get('/users/password-reset-requests')
+export const passwordResetRequestsCount  = () => api.get('/users/password-reset-requests/count')
+export const resolvePasswordResetRequest = (id, new_password) => api.post(`/users/password-reset-requests/${id}/resolve`, { new_password })
+export const dismissPasswordResetRequest = (id) => api.post(`/users/password-reset-requests/${id}/dismiss`)
 
 // Module Audits (cf. backend/routers/audits.py) — hub de suivi des audits techniques.
 // Aucun scan/outil offensif ne transite ici : uniquement du cadrage, des findings rédigés

@@ -827,6 +827,30 @@ class UserSession(Base):
     created_at         = Column(DateTime(timezone=True), server_default=_sfunc.now())
 
 
+class PasswordResetRequest(Base):
+    """« Mot de passe oublié » (18/08/2026) — pas d'infra SMTP dans ce projet on-prem
+    (cf. routers/users.py), donc pas de lien de réinitialisation envoyé par email : une
+    demande créée ici depuis Login.jsx (public, avant authentification) reste visible
+    par un admin (Administration > Utilisateurs) jusqu'à ce qu'il la traite lui-même en
+    fixant un mot de passe provisoire (`must_change_password` posé dans la foulée, cf.
+    routers/users.py::resolve_password_reset_request) — le mot de passe est ensuite
+    communiqué à l'utilisateur hors de l'application (oral, chat interne...).
+
+    `ON DELETE CASCADE` sur `user_id` : si le compte est supprimé avant qu'un admin ne
+    traite la demande, celle-ci n'a plus lieu d'être — pas de snapshot texte nécessaire
+    ici (contrairement à `PatchCheckAssetCompletion`/`AssetDeletionLog`), la ligne
+    disparaît avec le compte plutôt que de survivre à une suppression."""
+    __tablename__ = "password_reset_requests"
+
+    id           = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    user_id      = Column(_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    message      = Column(Text)  # contexte optionnel fourni par l'utilisateur au moment de la demande
+    status       = Column(String, nullable=False, default="pending")  # pending | resolved | dismissed
+    requested_at = Column(DateTime(timezone=True), server_default=_sfunc.now())
+    resolved_at  = Column(DateTime(timezone=True))
+    resolved_by  = Column(String)  # nom de l'admin ayant traité la demande
+
+
 class AuthAuditLog(Base):
     """Journal d'audit des connexions (30/07/2026) — traçabilité + base du verrou
     anti-bruteforce (comptage par email/IP, cf. services/auth.py::count_recent_failures).

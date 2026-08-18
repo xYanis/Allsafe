@@ -6,6 +6,8 @@ import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import {
   getConnections, getUserConnections, securityEvents, ackSecurityEvent, ackAllSecurityEvents,
   users as fetchUsers, createUser, updateUser, deleteUser, revokeUserSessions,
+  passwordResetRequests as fetchPasswordResetRequests, passwordResetRequestsCount,
+  resolvePasswordResetRequest, dismissPasswordResetRequest,
   createAnalyst, updateAnalyst, deleteAnalyst,
   organizationRoles as fetchOrganizationRoles, createOrganizationRole, updateOrganizationRole, deleteOrganizationRole,
   services as fetchServices, createService, updateService, deleteService,
@@ -15,6 +17,7 @@ import { anonymizeConnection, anonymizeUserConnection } from '../utils/fakeData.
 import PageLoader from '../components/PageLoader.jsx'
 import DeclareIncidentButton from '../components/DeclareIncidentButton.jsx'
 import UserFormModal from '../components/UserFormModal.jsx'
+import ResolvePasswordResetModal from '../components/ResolvePasswordResetModal.jsx'
 import AnalystFormModal from '../components/AnalystFormModal.jsx'
 import OrganizationRoleFormModal from '../components/OrganizationRoleFormModal.jsx'
 import ServiceFormModal from '../components/ServiceFormModal.jsx'
@@ -544,12 +547,30 @@ function UsersTab() {
   const [formModal, setFormModal] = useState(null) // null | 'new' | user object
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [error, setError] = useState('')
+  // Demandes « mot de passe oublié » (18/08/2026, cf. Login.jsx) — chargées séparément de
+  // `list` : ce sont des demandes en attente, pas des comptes.
+  const [resetRequests, setResetRequests] = useState(null)
+  const [resolveTarget, setResolveTarget] = useState(null) // demande en cours de traitement
 
   function load() {
     fetchUsers().then(r => { setList(r.data.items || []); setError('') })
       .catch(() => { setList([]); setError('Impossible de charger les comptes — le serveur a peut-être renvoyé une erreur.') })
   }
-  useEffect(() => { load() }, [])
+  function loadResetRequests() {
+    fetchPasswordResetRequests().then(r => setResetRequests(r.data.items || [])).catch(() => setResetRequests([]))
+  }
+  useEffect(() => { load(); loadResetRequests() }, [])
+
+  async function handleResolveReset(newPassword) {
+    await resolvePasswordResetRequest(resolveTarget.id, newPassword)
+    setResolveTarget(null)
+    loadResetRequests()
+  }
+
+  async function handleDismissReset(id) {
+    await dismissPasswordResetRequest(id)
+    loadResetRequests()
+  }
 
   async function handleSave(payload) {
     const editingSelf = formModal && formModal !== 'new' && formModal.id === me?.id
@@ -583,6 +604,35 @@ function UsersTab() {
 
   return (
     <>
+      {/* Demandes « mot de passe oublié » (18/08/2026, cf. Login.jsx) — au-dessus de la
+          liste des comptes : ce sont des demandes en attente d'action, pas des comptes,
+          elles méritent d'être vues avant de faire défiler la liste. */}
+      {resetRequests?.length > 0 && (
+        <div className="mb-4 rounded-xl p-3 space-y-2" style={{ background: 'rgba(210,153,34,0.08)', border: '1px solid rgba(210,153,34,0.25)' }}>
+          <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#d29922' }}>
+            {resetRequests.length} demande{resetRequests.length > 1 ? 's' : ''} de mot de passe oublié
+          </p>
+          {resetRequests.map(r => (
+            <div key={r.id} className="flex items-start justify-between gap-3 text-sm rounded-lg px-3 py-2" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+              <div className="min-w-0">
+                <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{r.full_name} <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>({r.email})</span></p>
+                {r.message && <p className="text-xs mt-0.5 truncate" style={{ color: 'var(--text-secondary)' }}>« {r.message} »</p>}
+              </div>
+              <div className="flex gap-1.5 flex-shrink-0">
+                <button onClick={() => handleDismissReset(r.id)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                >Rejeter</button>
+                <button onClick={() => setResolveTarget(r)}
+                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                  style={{ background: 'rgba(210,153,34,0.15)', color: '#d29922', border: '1px solid rgba(210,153,34,0.4)' }}
+                >Traiter</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex justify-end mb-3">
         <button onClick={() => setFormModal('new')}
           className="text-xs px-3 py-1.5 rounded-lg font-medium"
@@ -655,6 +705,9 @@ function UsersTab() {
           onConfirm={confirmDelete}
           onClose={() => setDeleteTarget(null)}
         />
+      )}
+      {resolveTarget && (
+        <ResolvePasswordResetModal request={resolveTarget} onConfirm={handleResolveReset} onClose={() => setResolveTarget(null)} />
       )}
     </>
   )
@@ -1080,6 +1133,12 @@ export default function AdministrationSecurity() {
   // principale (Layout.jsx) mais état local, pas persisté : cette nav est secondaire,
   // pas la navigation globale de l'app.
   const [navCollapsed, setNavCollapsed] = useState(false)
+  // Badge sur l'onglet Utilisateurs (18/08/2026) — demandes « mot de passe oublié » en
+  // attente (cf. Login.jsx/UsersTab ci-dessus), visible sans avoir à ouvrir l'onglet.
+  const [pendingResets, setPendingResets] = useState(0)
+  useEffect(() => {
+    passwordResetRequestsCount().then(r => setPendingResets(r.data.pending || 0)).catch(() => {})
+  }, [])
 
   const TABS = [
     { key: 'database',    label: 'Base de données',  desc: 'Déception & journal' },
@@ -1136,9 +1195,16 @@ export default function AdministrationSecurity() {
                   <TabIcon name={t.key} />
                 </span>
                 {!navCollapsed && (
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium truncate" style={{ color: active ? 'var(--accent-blue)' : 'var(--text-primary)' }}>{t.label}</span>
-                    <span className="hidden lg:block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.desc}</span>
+                  <span className="min-w-0 flex-1 flex items-center justify-between gap-2">
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium truncate" style={{ color: active ? 'var(--accent-blue)' : 'var(--text-primary)' }}>{t.label}</span>
+                      <span className="hidden lg:block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.desc}</span>
+                    </span>
+                    {t.key === 'users' && pendingResets > 0 && (
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0" style={{ background: 'rgba(210,153,34,0.2)', color: '#d29922' }}>
+                        {pendingResets}
+                      </span>
+                    )}
                   </span>
                 )}
               </button>

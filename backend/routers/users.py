@@ -15,8 +15,9 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth_deps import require_admin
 from database import get_session
-from models import Analyst, User, UserSession
+from models import Analyst, PasswordResetRequest, User, UserSession
 from services.access_control import PAGE_KEYS
 from services.auth import hash_password, validate_password_strength
 
@@ -45,6 +46,10 @@ class UserUpdate(BaseModel):
     force_password_reset: Optional[bool] = None
     allowed_pages: Optional[list[str]] = None
     grant_full_access: bool = False  # distingue "champ absent" de "retour à l'accès total"
+
+
+class ResolvePasswordReset(BaseModel):
+    new_password: str
 
 
 def _dict(u: User) -> dict:
@@ -167,3 +172,84 @@ async def revoke_sessions(user_id: str, session: AsyncSession = Depends(get_sess
     await session.execute(delete(UserSession).where(UserSession.user_id == user_id))
     await session.commit()
     return {"revoked": True}
+
+
+# ─── « Mot de passe oublié » (18/08/2026) ────────────────────────────────────────────
+# Demandes créées publiquement depuis Login.jsx (cf. routers/auth.py::forgot_password) —
+# visibles ici, traitées manuellement par un admin (pas d'infra SMTP, cf. docstring
+# de ce module). Router déjà admin-only au niveau de main.py, rien à ajouter ici.
+
+def _reset_request_dict(r: PasswordResetRequest, u: Optional[User]) -> dict:
+    return {
+        "id": str(r.id),
+        "user_id": str(r.user_id),
+        "email": u.email if u else None,
+        "full_name": u.full_name if u else None,
+        "message": r.message,
+        "status": r.status,
+        "requested_at": r.requested_at.isoformat() if r.requested_at else None,
+    }
+
+
+@router.get("/password-reset-requests")
+async def list_password_reset_requests(session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(
+        select(PasswordResetRequest, User)
+        .join(User, PasswordResetRequest.user_id == User.id)
+        .where(PasswordResetRequest.status == "pending")
+        .order_by(PasswordResetRequest.requested_at.desc())
+    )).all()
+    return {"items": [_reset_request_dict(r, u) for r, u in rows]}
+
+
+# Compteur léger pour le badge de l'onglet Utilisateurs (Administration) — même mécanique
+# que securityEventsCount()/nis2_pending_count ailleurs dans l'app.
+@router.get("/password-reset-requests/count")
+async def password_reset_requests_count(session: AsyncSession = Depends(get_session)):
+    total = (await session.execute(
+        select(func.count()).select_from(PasswordResetRequest).where(PasswordResetRequest.status == "pending")
+    )).scalar_one()
+    return {"pending": total}
+
+
+@router.post("/password-reset-requests/{request_id}/resolve")
+async def resolve_password_reset_request(
+    request_id: str, data: ResolvePasswordReset,
+    admin: User = Depends(require_admin), session: AsyncSession = Depends(get_session),
+):
+    """L'admin fixe lui-même le mot de passe provisoire (comme il le fait déjà à la
+    création d'un compte, cf. UserFormModal.jsx) — communiqué à l'utilisateur hors
+    application (oral, chat interne...). `must_change_password` forcé dans la foulée :
+    l'utilisateur choisit son propre mot de passe définitif à sa prochaine connexion,
+    via l'écran de changement forcé déjà existant (ProtectedRoute.jsx)."""
+    req = await session.get(PasswordResetRequest, request_id)
+    if not req or req.status != "pending":
+        raise HTTPException(404, "Demande introuvable ou déjà traitée.")
+    user = await session.get(User, req.user_id)
+    if not user:
+        raise HTTPException(404, "Compte introuvable.")
+    validate_password_strength(data.new_password)
+    user.password_hash = hash_password(data.new_password)
+    user.must_change_password = True
+    user.updated_at = datetime.now(timezone.utc)
+    req.status = "resolved"
+    req.resolved_at = datetime.now(timezone.utc)
+    req.resolved_by = admin.full_name
+    await session.commit()
+    return {"resolved": True}
+
+
+@router.post("/password-reset-requests/{request_id}/dismiss")
+async def dismiss_password_reset_request(
+    request_id: str, admin: User = Depends(require_admin), session: AsyncSession = Depends(get_session),
+):
+    """Rejette une demande sans toucher au mot de passe (doublon, erreur, demande non
+    fondée...) — reste consultable en base (status=dismissed) plutôt que supprimée."""
+    req = await session.get(PasswordResetRequest, request_id)
+    if not req or req.status != "pending":
+        raise HTTPException(404, "Demande introuvable ou déjà traitée.")
+    req.status = "dismissed"
+    req.resolved_at = datetime.now(timezone.utc)
+    req.resolved_by = admin.full_name
+    await session.commit()
+    return {"dismissed": True}

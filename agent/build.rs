@@ -11,12 +11,18 @@
 // injecté via `WindowsAttributes::app_manifest`) en un seul appel, plus fiable qu'une
 // double gestion manuelle. `dpiAware` gardé dans le manifeste (rendu net des éléments de
 // chrome de fenêtre — le contenu WebView2 lui-même gère déjà son propre scaling HiDPI,
-// mais la fenêtre/bordure Win32 autour en dépend toujours). Pas de dépendance
-// `Microsoft.Windows.Common-Controls` ici (utile seulement pour des contrôles Win32
-// classiques thémés — sans objet avec un rendu WebView2).
+// mais la fenêtre/bordure Win32 autour en dépend toujours).
 //
-// ⚠️ Non re-vérifié visuellement (pas de poste Windows disponible pour capturer un rendu
-// depuis ici) — le build/link est vérifié en conditions réelles (conteneur), pas le rendu.
+// ⚠️ **Dépendance `Microsoft.Windows.Common-Controls` réintroduite** (retirée par erreur au
+// passage à Tauri, en supposant qu'elle ne servait qu'au thème des contrôles Win32 classiques
+// — sans objet avec un rendu WebView2). Faux : testé en conditions réelles sur un poste,
+// erreur au lancement `Le point d'entrée de procédure TaskDialogIndirect est introuvable
+// dans... allsafe-agent.exe` — `TaskDialogIndirect` n'existe que dans comctl32.dll v6+
+// (Vista et après), utilisée en interne par `tao`/`muda` (fenêtrage/menus sous Tauri),
+// indépendamment de ce que WebView2 rend à l'écran. Sans cette dépendance, Windows charge la
+// comctl32.dll v5.x par défaut pour tout exe sans manifeste la réclamant explicitement — pas
+// juste un rendu "non thémé" comme avec native-windows-gui, mais carrément un plantage au
+// démarrage.
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let windows = tauri_build::WindowsAttributes::new().app_manifest(
@@ -29,6 +35,17 @@ fn main() {
       </requestedPrivileges>
     </security>
   </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
   <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
     <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
       <dpiAware>true</dpiAware>

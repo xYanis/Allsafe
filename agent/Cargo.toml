@@ -50,39 +50,46 @@ sysinfo = "0.32"
 windows-service = "0.7"
 # Auto-installation (17/08/2026, cf. install.rs/gui.rs, docs/AGENTS.md § Installation
 # rapide) — fenêtre graphique (serveur + jeton, menu Installation/Réparation/Mise à
-# jour/Désinstallation) affichée quand l'exécutable est lancé sans argument (double-clic),
-# plutôt que d'exiger un PowerShell/une ligne de commande.
+# jour/Désinstallation) affichée quand l'exécutable est lancé sans argument (double-clic).
 #
 # 18/08/2026 — remplace `native-windows-gui` (retiré) : rendu Win32 classique plafonnant à
 # un thème "Windows 7 correct" au mieux (Common Controls v6 n'apporte jamais le rendu
-# Fluent/moderne des applis natives récentes, quel que soit le manifeste — limite du Win32
-# classique lui-même, pas un réglage manqué, cf. docs/AGENTS.md § Vérification), jugé
-# insuffisant en conditions réelles. `tauri` rend l'interface en HTML/CSS via le WebView2
-# déjà présent nativement sur Windows 10 (1803+)/11 — aucun runtime supplémentaire à
-# installer sur le parc. ✅ Vérifié par compilation + link croisés réels (toolchain mingw-w64,
-# conteneur, 18/08/2026) : l'arbre de dépendances complet (`tauri`/`wry`/`webview2-com`,
-# lié aux bindings COM Windows) compile et **link** pour `x86_64-pc-windows-gnu` malgré une
-# réputation de support GNU historiquement fragile dans l'écosystème — pas de repli MSVC
-# nécessaire pour ce projet. **Reste non vérifié** : comportement runtime réel du WebView2
-# (chargement de la page, appels `invoke` JS → Rust) sur un vrai poste Windows.
+# Fluent/moderne, quel que soit le manifeste — limite du Win32 classique lui-même, testé en
+# conditions réelles). `tauri` rend l'interface en HTML/CSS via le WebView2 déjà présent
+# nativement sur Windows 10 (1803+)/11.
+#
+# ✅ Vérifié par compilation + link croisés réels (toolchain mingw-w64, conteneur, 18/08/2026) :
+# l'arbre de dépendances complet (`tauri`/`wry`/`webview2-com`) compile et **link** pour
+# `x86_64-pc-windows-gnu` malgré une réputation de support GNU historiquement fragile dans
+# l'écosystème.
+#
+# ⚠️ **Conséquence assumée, casse le "un seul .exe"** : sur cette cible GNU précisément (pas
+# MSVC), le binaire importe statiquement `CreateCoreWebView2EnvironmentWithOptions` depuis
+# `WebView2Loader.dll` — résolu par Windows AVANT `main()`, donc impossible à extraire "à la
+# volée" au lancement. Ce petit fichier (~200 Ko, généré automatiquement par `tauri-build` à
+# côté de l'exe compilé) doit être présent dans le même dossier, aussi bien pour l'usage
+# `.exe` seul (cf. agent/README.md § Installation directe) que dans le `.msi` (cf.
+# wix/main.wxs, deuxième `<File>` du même composant). Décision actée : accepter ce fichier
+# compagnon statique (aucune logique/script, juste un fichier de plus) plutôt que basculer
+# tout le pipeline de build vers MSVC (jamais testé, casserait la cross-compilation depuis
+# Linux/CI actuelle) ou rester sur le rendu Win32 plafonné.
 tauri = { version = "2", features = [] }
 # `FreeConsole` (18/08/2026, cf. gui.rs) — l'exécutable reste subsystem "console" (la CLI
 # `enroll`/`checkin`/`install --token...` a besoin que sa sortie `println!` s'affiche dans
 # le terminal appelant), donc Windows alloue quand même une console au lancement, y compris
-# pour le mode graphique (double-clic) — fenêtre noire vide visible derrière la fenêtre
-# Tauri tant qu'on ne s'en détache pas explicitement (constaté en conditions réelles,
-# initialement avec native-windows-gui — même souci, indépendant du framework graphique
-# utilisé puisqu'il vient du subsystem de l'exe lui-même). `winapi` déjà présent
+# pour le mode graphique — fenêtre noire vide visible derrière la fenêtre Tauri tant qu'on
+# ne s'en détache pas explicitement (constaté en conditions réelles). `winapi` déjà présent
 # transitivement (`tauri`/`windows-service`) — déclaré ici en direct pour l'appeler depuis
 # gui.rs sans dépendre d'un détail d'implémentation d'un tiers.
 winapi = { version = "0.3", features = ["wincon"] }
 
 [build-dependencies]
-# `tauri-build` (18/08/2026, remplace `winres` direct) — gère lui-même l'icône + le
-# manifeste Windows (dont `requireAdministrator`, injecté via
-# `WindowsAttributes::app_manifest`, cf. build.rs) en un seul appel unifié : pas de risque de
-# conflit entre deux embarqueurs de ressource séparés (`winres` manuel + celui de `tauri`)
-# qui se marcheraient dessus sur le même identifiant de ressource.
+# `tauri-build` (18/08/2026, remplace `winres` direct) — gère l'icône + le manifeste Windows
+# (dont `requireAdministrator`, injecté via `WindowsAttributes::app_manifest`, cf. build.rs)
+# en un seul appel unifié : pas de risque de conflit entre deux embarqueurs de ressource
+# séparés qui se marcheraient dessus sur le même identifiant de ressource. Copie aussi
+# automatiquement `WebView2Loader.dll` à côté de l'exe compilé pour la cible GNU (cf.
+# commentaire `tauri` ci-dessus).
 tauri-build = { version = "2", features = [] }
 
 [profile.release]

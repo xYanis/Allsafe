@@ -6,37 +6,20 @@
 // LocalSystem, jamais soumis à l'UAC) et avec Linux où `enroll`/les checks de durcissement
 // exigent déjà `root` (cf. agent/README.md).
 //
-// `build.rs` compile toujours pour l'hôte qui build (même en cross-compilation vers
-// Windows depuis Linux, cf. agent/README.md § Build) — le `if` ci-dessous le rend no-op
-// sur toute autre cible que Windows plutôt que de le restreindre via `[target.'cfg(windows)'
-// .build-dependencies]`, qui ne s'appliquerait pas correctement à un script de build.
+// 18/08/2026 — `tauri_build` remplace l'appel `winres` manuel précédent : il gère lui-même
+// l'icône (`icons/icon.ico`, obligatoire) et le manifeste (dont notre `requireAdministrator`
+// injecté via `WindowsAttributes::app_manifest`) en un seul appel, plus fiable qu'une
+// double gestion manuelle. `dpiAware` gardé dans le manifeste (rendu net des éléments de
+// chrome de fenêtre — le contenu WebView2 lui-même gère déjà son propre scaling HiDPI,
+// mais la fenêtre/bordure Win32 autour en dépend toujours). Pas de dépendance
+// `Microsoft.Windows.Common-Controls` ici (utile seulement pour des contrôles Win32
+// classiques thémés — sans objet avec un rendu WebView2).
 //
-// 17/08/2026 — vérifié par compilation réelle (toolchain assemblée manuellement, cf.
-// STATUS.md) : `winres` cherche `windres`/`ar` **nus** par défaut (corrects seulement sur
-// un hôte Windows natif) — en cross-compilation depuis Linux (seul chemin documenté,
-// agent/README.md § Build), il faut explicitement pointer vers les binaires préfixés
-// `x86_64-w64-mingw32-*` fournis par mingw-w64, sans quoi `res.compile()` échoue avec
-// "No such file or directory" (repéré et corrigé avant tout build réel, pas laissé à
-// découvrir par l'utilisateur).
-//
-// 18/08/2026 — ajout de la dépendance `Microsoft.Windows.Common-Controls` (rendu constaté
-// en conditions réelles sur un poste, capture à l'appui : boutons/contrôles non thémés,
-// rendu "Windows 98" malgré `nwg::init()` qui tente pourtant d'activer les styles visuels
-// tout seul à l'exécution via un contexte d'activation `CreateActCtxW` — cf. code source de
-// `native-windows-gui`, `win32/mod.rs::enable_visual_styles`). Cette astuce runtime cohabite
-// mal avec un manifeste déjà embarqué par l'exe lui-même (celui-ci devient le manifeste de
-// processus par défaut, prioritaire) : le fait de déclarer nous-mêmes la dépendance dans CE
-// manifeste, plutôt que de compter sur le contournement de `nwg`, est l'approche standard et
-// évite l'ambiguïté. `dpiAware` ajouté au passage (même bloc, coût nul) — évite un rendu flou
-// par mise à l'échelle bitmap sur les écrans HiDPI, autre symptôme classique de "vieille appli
-// Win32". ⚠️ Non re-vérifié visuellement (pas de poste Windows disponible pour capturer un
-// nouveau rendu depuis ici) — hypothèse solide (mécanisme Win32 documenté), pas confirmée.
+// ⚠️ Non re-vérifié visuellement (pas de poste Windows disponible pour capturer un rendu
+// depuis ici) — le build/link est vérifié en conditions réelles (conteneur), pas le rendu.
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let mut res = winres::WindowsResource::new();
-        res.set_windres_path("x86_64-w64-mingw32-windres");
-        res.set_ar_path("x86_64-w64-mingw32-ar");
-        res.set_manifest(
+        let windows = tauri_build::WindowsAttributes::new().app_manifest(
             r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
@@ -46,17 +29,6 @@ fn main() {
       </requestedPrivileges>
     </security>
   </trustInfo>
-  <dependency>
-    <dependentAssembly>
-      <assemblyIdentity
-        type="win32"
-        name="Microsoft.Windows.Common-Controls"
-        version="6.0.0.0"
-        processorArchitecture="*"
-        publicKeyToken="6595b64144ccf1df"
-        language="*" />
-    </dependentAssembly>
-  </dependency>
   <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
     <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
       <dpiAware>true</dpiAware>
@@ -65,24 +37,13 @@ fn main() {
 </assembly>
 "#,
         );
-        match res.compile() {
-            Err(e) => println!("cargo:warning=échec de l'embarquement du manifeste UAC (windres manquant ?) : {e}"),
-            Ok(()) => {
-                // 17/08/2026 — vérifié par compilation réelle : `winres` emballe la ressource
-                // compilée dans une archive statique (`cargo:rustc-link-lib=static=resource`),
-                // mais l'objet ne contient aucun symbole de code référencé ailleurs — l'éditeur
-                // de liens GNU (`ld`, cible `x86_64-pc-windows-gnu`) n'extrait un membre
-                // d'archive que s'il résout un symbole non défini, donc il **élague silencieusement
-                // ce membre et le manifeste n'atterrit jamais dans l'exécutable final** (`.rsrc`
-                // absent, confirmé via `objdump -h`) — contrairement à `link.exe` (MSVC) qui
-                // traite les `.res` à part. `rustc-link-arg` pointant directement sur l'objet
-                // (hors archive) force son inclusion inconditionnelle. Sans cette ligne, la
-                // fenêtre UAC ne se déclencherait jamais et l'échec resterait invisible (aucune
-                // erreur de build) jusqu'à un test manuel sur un vrai poste.
-                if let Ok(out_dir) = std::env::var("OUT_DIR") {
-                    println!("cargo:rustc-link-arg={out_dir}/resource.o");
-                }
-            }
+        let attrs = tauri_build::Attributes::new().windows_attributes(windows);
+        if let Err(e) = tauri_build::try_build(attrs) {
+            println!("cargo:warning=échec de tauri_build (icons/icon.ico manquant ? windres/mingw-w64 manquant ?) : {e}");
         }
+    } else {
+        // Hors Windows, `tauri_build::build()` ne fait rien d'utile pour ce projet (pas de
+        // cible Linux/macOS pour l'app graphique, `gui.rs`/`install.rs` sont `#[cfg(windows)]`)
+        // — no-op explicite plutôt que d'appeler `tauri_build` sans raison.
     }
 }

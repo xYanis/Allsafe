@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>Allsafe Agent</title>
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="banner">
+    <span class="banner-title">Allsafe Agent</span>
+  </header>
+
+  <main id="views">
+    <!-- Menu -->
+    <section class="view" id="view-menu" data-active="true">
+      <p class="view-subtitle">Que veux-tu faire ?</p>
+      <div class="menu-list">
+        <button class="btn btn-menu" data-nav="install">Installation</button>
+        <button class="btn btn-menu" data-nav="repair">Réparation</button>
+        <button class="btn btn-menu" data-nav="update">Mise à jour</button>
+        <button class="btn btn-menu" data-nav="uninstall">Désinstallation</button>
+      </div>
+      <button class="btn btn-secondary btn-close" id="btn-quit">Fermer</button>
+    </section>
+
+    <!-- Installation -->
+    <section class="view" id="view-install">
+      <p class="view-subtitle">Installation</p>
+      <label class="field-label" for="install-server">URL du serveur Allsafe (ex : http://192.168.1.10:3000)</label>
+      <input class="field-input" id="install-server" type="text" value="http://" />
+      <label class="field-label" for="install-token">Jeton d'enrôlement</label>
+      <input class="field-input" id="install-token" type="text" />
+      <div class="status" id="install-status"></div>
+      <div class="view-actions">
+        <button class="btn btn-primary" id="btn-install-go">Installer</button>
+        <button class="btn btn-secondary" data-nav="menu">Retour</button>
+      </div>
+    </section>
+
+    <!-- Réparation -->
+    <section class="view" id="view-repair">
+      <p class="view-subtitle">Réparation</p>
+      <p class="view-text">
+        Réenregistre le service Windows et corrige le PATH système, sans toucher à
+        l'enrôlement existant (le jeton n'est pas redemandé). À utiliser si le service ne
+        démarre plus ou si <code>allsafe-agent</code> n'est plus reconnu en ligne de commande.
+      </p>
+      <div class="status" id="repair-status"></div>
+      <div class="view-actions">
+        <button class="btn btn-primary" id="btn-repair-go">Réparer</button>
+        <button class="btn btn-secondary" data-nav="menu">Retour</button>
+      </div>
+    </section>
+
+    <!-- Mise à jour -->
+    <section class="view" id="view-update">
+      <p class="view-subtitle">Mise à jour</p>
+      <label class="field-label" for="update-server">URL du serveur Allsafe</label>
+      <input class="field-input" id="update-server" type="text" value="http://" />
+      <div class="status" id="update-status"></div>
+      <div class="view-actions">
+        <button class="btn btn-secondary" id="btn-update-check">Vérifier</button>
+        <button class="btn btn-primary" id="btn-update-go" disabled>Mettre à jour</button>
+        <button class="btn btn-secondary" data-nav="menu">Retour</button>
+      </div>
+    </section>
+
+    <!-- Désinstallation -->
+    <section class="view" id="view-uninstall">
+      <p class="view-subtitle">Désinstallation</p>
+      <p class="view-text">
+        Arrête et désenregistre le service Windows, retire l'entrée PATH. Les fichiers
+        (<code>Program Files\Allsafe Agent</code>, <code>%ProgramData%\allsafe-agent</code>)
+        ne sont pas supprimés automatiquement — un exécutable ne peut pas se supprimer
+        lui-même en cours d'exécution.
+      </p>
+      <div class="status" id="uninstall-status"></div>
+      <div class="view-actions">
+        <button class="btn btn-danger" id="btn-uninstall-go">Désinstaller</button>
+        <button class="btn btn-secondary" data-nav="menu">Retour</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

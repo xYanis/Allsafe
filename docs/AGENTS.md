@@ -51,6 +51,31 @@
 > correctif, la fenêtre UAC ne se serait **jamais** déclenchée, sans la moindre erreur de
 > build pour le signaler. **Reste non vérifié** : comportement runtime sur un vrai poste
 > Windows (élévation, écriture registre, SCM, rendu de la fenêtre) — cf. § Vérification.
+>
+> **18/08/2026 — fenêtre graphique refaite en Tauri**, remplace `native-windows-gui`
+> (retiré) : rendu Win32 classique plafonnant à un thème "Windows 7 correct" au mieux même
+> avec Common Controls v6 activé (Fluent/moderne impossible en Win32 classique, testé en
+> conditions réelles — capture à l'appui). `tauri` (`agent/src/gui.rs`, UI en HTML/CSS/JS
+> dans `agent/ui/`, sans npm/bundler) rend via le WebView2 déjà natif sur Windows 10
+> (1803+)/11. Menu Installation/Réparation/Mise à jour/Désinstallation, chaque écran un
+> `#[tauri::command]` fin appelant `install.rs` (logique inchangée). **Vérifié par
+> compilation + link croisés réels** (conteneur `rust:1-trixie`) — script CI complet
+> (`.gitlab-ci.yml::build-agent`) rejoué de bout en bout avec succès (build, `.msi`, `.deb`,
+> vérifications `msiinfo`), malgré une réputation de support GNU historiquement fragile pour
+> `tauri`/`wry`/`webview2-com`.
+>
+> ⚠️ **Casse le "un seul .exe" — décision actée** : sur la cible GNU (notre seul pipeline,
+> cross-compilé depuis Linux/CI), `WebView2Loader.dll` (~200 Ko, redistribuable Microsoft,
+> généré automatiquement par `tauri-build` à côté de l'exe) est un import **statique** —
+> résolu par Windows avant `main()`, impossible à extraire à la volée au lancement. Il faut
+> donc désormais **deux fichiers** ensemble pour l'usage `.exe` seul (`allsafe-agent.exe` +
+> `WebView2Loader.dll`, cf. agent/README.md § Installation directe) ; le `.msi` les embarque
+> tous les deux dans le même composant (`wix/main.wxs`), donc un seul artefact à
+> double-cliquer pour cette voie-là. Alternative écartée : basculer en MSVC (loader lié
+> statiquement, vrai "un seul .exe") aurait changé tout le pipeline de cross-compilation
+> déjà en place, jamais testé — risque jugé disproportionné face au gain (éviter un fichier
+> statique de 200 Ko sans logique). **Reste non vérifié** : comportement runtime réel du
+> WebView2 sur un poste Windows (chargement, rendu, `invoke` JS → Rust) — cf. § Vérification.
 
 ## Contexte
 

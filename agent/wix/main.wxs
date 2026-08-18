@@ -37,6 +37,14 @@
           <Component Id="MainExecutable" Guid="44E7BDA5-2EED-496E-BF11-CB2F0D3BF578">
             <File Id="AllsafeAgentEXE" Name="allsafe-agent.exe" KeyPath="yes"
                   Source="target/x86_64-pc-windows-gnu/release/allsafe-agent.exe" />
+            <!-- WebView2Loader.dll (18/08/2026, passage de la fenêtre graphique à Tauri,
+                 cf. gui.rs) — obligatoire à côté de l'exe sur cette cible GNU (import
+                 statique résolu par Windows avant même le lancement du programme, pas un
+                 chargement à la demande qu'on pourrait éviter). Généré automatiquement par
+                 `tauri-build` dans le même dossier que l'exe compilé — même `Source`, juste
+                 le nom de fichier qui change. -->
+            <File Id="WebView2LoaderDLL" Name="WebView2Loader.dll"
+                  Source="target/x86_64-pc-windows-gnu/release/WebView2Loader.dll" />
             <!-- Service Windows (13/08/2026, mode recommandé — cf. deploy/README.md).
                  Name="AllsafeAgent" doit correspondre exactement à SERVICE_NAME dans
                  service.rs. Arguments="service-run" : sous-commande cachée dédiée au SCM

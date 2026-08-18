@@ -1,3 +1,6 @@
 /target
 /.cargo-cache
 /dist
+# Schémas générés par tauri-codegen (18/08/2026, cf. build.rs) — artefact de build comme
+# /target, jamais à committer.
+/gen

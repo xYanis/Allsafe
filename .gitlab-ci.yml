@@ -120,6 +120,12 @@ build-agent:
   artifacts:
     paths:
       - agent/target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
+      # WebView2Loader.dll (18/08/2026, passage à Tauri, cf. gui.rs) — généré automatiquement
+      # par `tauri-build` à côté de l'exe, obligatoire pour lancer l'exe seul (déjà embarqué
+      # dans le `.msi`, cf. wix/main.wxs, mais l'usage ".exe seul" en a besoin séparément).
+      # Composant Microsoft redistribuable — jamais signé par nous (cf. bloc signature
+      # ci-dessus, qui ne touche qu'à `allsafe-agent.exe`/`.msi`).
+      - agent/target/x86_64-pc-windows-gnu/release/WebView2Loader.dll
       - agent/allsafe-agent.msi
       - agent/target/debian/*.deb
     expire_in: 1 week

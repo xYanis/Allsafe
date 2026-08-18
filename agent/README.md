@@ -29,33 +29,47 @@ Docker (ex. `127.0.0.1:8000` dans `docker-compose.yml`), c'est le port du **fron
 schéma `http://` ou `https://` obligatoire (`hhtp://` ou toute coquille dans le schéma fait
 échouer l'appel avec `URL scheme is not allowed`, avant même la moindre tentative réseau).
 
-## Installation directe (17/08/2026 — sans .msi ni script, un seul .exe)
+## Installation directe (17/08/2026 — sans .msi ni script ; GUI Tauri le 18/08/2026)
 
 > ✅ **Vérifié par compilation + link croisés réels** (`src/install.rs`/`src/gui.rs`/
-> `build.rs`, `x86_64-pc-windows-gnu`) — un vrai bug de linking a été trouvé et corrigé au
-> passage (`.rsrc` du manifeste UAC élagué par `ld` sans le correctif `build.rs`, cf.
-> docs/AGENTS.md § Vérification). **Reste non vérifié** : le comportement runtime sur un
-> vrai poste Windows.
+> `build.rs`, `x86_64-pc-windows-gnu`, conteneur `rust:1-trixie`) — script CI complet
+> (`.gitlab-ci.yml::build-agent`) rejoué avec succès de bout en bout : build, `.msi`, `.deb`,
+> vérifications `msiinfo`. **Reste non vérifié** : le comportement runtime sur un vrai poste
+> Windows (chargement WebView2, rendu, `invoke` JS → Rust).
 
 Pensé pour les **actifs critiques** (jeton unique par actif, cf. § Installation rapide
-ci-dessous pour le cas parc/non-critique) : un seul fichier `allsafe-agent.exe` à copier sur
-le poste (`agent/dist/` ou compilé soi-même), aucun `.msi`/script à côté.
+ci-dessous pour le cas parc/non-critique) : deux fichiers à copier sur le poste
+(`agent/dist/` ou compilés soi-même) — `allsafe-agent.exe` **et** `WebView2Loader.dll`, dans
+le même dossier. Pas de `.msi`, pas de script, mais pas non plus un seul fichier isolé (cf.
+encadré ci-dessous).
 
-- **Double-clic, sans argument** → ouvre une petite fenêtre (URL du serveur + jeton),
-  demande l'élévation UAC automatiquement (manifeste `requireAdministrator`, `build.rs`).
-  Bouton "Installer" : service Windows + PATH système + enrôlement, en un clic.
+- **Double-clic sur `allsafe-agent.exe`, sans argument** → ouvre une fenêtre (menu
+  Installation/Réparation/Mise à jour/Désinstallation, rendue en HTML/CSS via WebView2 —
+  cf. `ui/`), demande l'élévation UAC automatiquement (manifeste `requireAdministrator`,
+  `build.rs`). Écran Installation : serveur + jeton, service Windows + PATH + enrôlement en
+  un clic.
 - **Ligne de commande équivalente** (même effet, pratique pour scripter) :
   ```powershell
   .\allsafe-agent.exe install --token <JETON> --server http://<hôte-allsafe>:3000
   ```
-- **Désinstallation** : `allsafe-agent.exe uninstall` (admin) — arrête/désenregistre le
-  service et retire le `PATH`. Ne supprime pas les fichiers (un exe ne peut pas se
-  supprimer lui-même en cours d'exécution) — à faire à la main si besoin
-  (`Program Files\Allsafe Agent`, `%ProgramData%\allsafe-agent`).
+- **Désinstallation** : `allsafe-agent.exe uninstall` (admin), ou depuis l'écran
+  "Désinstallation" de la fenêtre — arrête/désenregistre le service et retire le `PATH`. Ne
+  supprime pas les fichiers (un exe ne peut pas se supprimer lui-même en cours d'exécution)
+  — à faire à la main si besoin (`Program Files\Allsafe Agent`, `%ProgramData%\allsafe-agent`).
 
 L'exécutable se copie lui-même vers `Program Files\Allsafe Agent\allsafe-agent.exe` au
-premier lancement (même emplacement que le `.msi`, pour que les deux voies restent
-interchangeables) — inutile de le placer soi-même à cet endroit avant.
+premier lancement (même emplacement que le `.msi`) — inutile de le placer soi-même à cet
+endroit avant.
+
+> ⚠️ **Pourquoi deux fichiers, pas un seul** — décision actée le 18/08/2026 : sur la cible
+> `x86_64-pc-windows-gnu` (notre seul pipeline de build, cross-compilé depuis Linux/CI),
+> `WebView2Loader.dll` (~200 Ko, redistribuable Microsoft, généré automatiquement par
+> `tauri-build` à côté de l'exe compilé) est un import **statique**, résolu par Windows
+> avant même le lancement du programme — impossible à extraire "à la volée" au démarrage.
+> Basculer en MSVC lierait le loader statiquement (vrai "un seul .exe"), mais changerait tout
+> le pipeline de cross-compilation déjà en place (jamais testé, risque disproportionné pour
+> ce gain). Le `.msi` embarque déjà les deux fichiers ensemble (cf. `wix/main.wxs`) — un seul
+> artefact à double-cliquer pour qui préfère cette voie.
 
 ## Build "bulk" — jeton réutilisable pré-rempli dans le .msi
 
@@ -228,19 +242,19 @@ cargo build --release --target x86_64-pc-windows-gnu
 # → target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
 ```
 
-✅ **Vérifié par compilation + link croisés réels** (17/08/2026, cf. `install.rs`/`gui.rs`) :
-`build.rs` embarque un manifeste `requireAdministrator` via
-[`winres`](https://crates.io/crates/winres), pointé explicitement sur
-`x86_64-w64-mingw32-windres`/`x86_64-w64-mingw32-ar` (pas les noms nus `windres`/`ar` — le
-défaut de `winres` hors hôte Windows — introuvables avec un `mingw-w64` installé normalement
-via `apt-get`, qui ne fournit que les binaires préfixés). ⚠️ **Piège corrigé au passage,
-GNU/`ld` spécifique** : sans la ligne `cargo:rustc-link-arg=<OUT_DIR>/resource.o` ajoutée
-dans `build.rs` après `res.compile()`, l'éditeur de liens GNU élague silencieusement l'objet
-ressource (aucun symbole de code à résoudre dedans → jamais extrait de l'archive statique
-`libresource.a`) — le manifeste ne finit **jamais** dans l'exécutable, sans la moindre erreur
-de build pour le signaler (confirmé/corrigé via `objdump -h` : `.rsrc` absent puis présent).
-La fenêtre graphique (`native-windows-gui`) compile et **link** aussi correctement (exécutable
-PE valide produit) — reste non vérifié : le rendu/comportement réel sur un poste Windows.
+✅ **Vérifié par compilation + link croisés réels** (18/08/2026, conteneur, cf.
+`install.rs`/`gui.rs`) : `build.rs` embarque un manifeste `requireAdministrator` via
+`tauri_build::WindowsAttributes::app_manifest` (remplace un appel `winres` manuel antérieur).
+⚠️ **Historique, gardé pour mémoire** : la version manuelle avait un piège GNU/`ld`
+spécifique — sans forcer `cargo:rustc-link-arg=<OUT_DIR>/resource.o`, l'éditeur de liens GNU
+élague silencieusement l'objet ressource (aucun symbole de code à résoudre dedans → jamais
+extrait de l'archive statique), le manifeste ne finissant **jamais** dans l'exécutable sans
+la moindre erreur de build pour le signaler. `tauri_build` (via `embed-resource`, successeur
+de `winres`) n'a pas ce problème — vérifié empiriquement (`requireAdministrator` bien présent
+dans le binaire compilé, pas seulement supposé), pas besoin de reproduire le contournement.
+La fenêtre graphique (`tauri`, rendu WebView2) compile et **link** aussi correctement
+(exécutable PE valide, `WebView2Loader.dll` généré à côté) — reste non vérifié : le
+rendu/comportement réel sur un poste Windows.
 
 Le `.msi` est généré avec [`wixl`](https://gitlab.gnome.org/GNOME/msitools) (paquet Debian/
 Ubuntu `wixl`, alternative libre au WiX Toolset officiel qui est Windows-only/.NET) à partir

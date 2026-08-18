@@ -1056,6 +1056,35 @@ async def auto_bascule_summary(
     }
 
 
+@router.get("/new-since-count")
+async def new_vulns_since_count(
+    since: datetime = Query(..., description="Horodatage ISO de la dernière visite"),
+    limit: int = Query(8, ge=1, le=100, description="Nombre de lignes détaillées renvoyées (`total` reste exact)"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Rattrapage — nouvelles vulnérabilités détectées sur le parc (`detected_at`)
+    depuis `since`, tous statuts confondus. Distinct de `/auto-bascule-summary`
+    (qui suit l'inverse : des vulns déjà connues qui se RÉSOLVENT seules) — même
+    forme de réponse, pour le bandeau "depuis votre dernière visite" du Dashboard."""
+    q = (
+        select(Vulnerability, CVE, Asset)
+        .join(CVE, Vulnerability.cve_id == CVE.id)
+        .join(Asset, Vulnerability.asset_id == Asset.id)
+        .where(Vulnerability.detected_at >= since)
+        .order_by(Vulnerability.detected_at.desc())
+    )
+    rows = (await session.execute(q)).all()
+
+    def _row(v: Vulnerability, c: CVE, a: Asset) -> dict:
+        return {"cve_id": c.cve_id, "severity": c.severity, "asset_name": a.name}
+
+    return {
+        "since": since.isoformat(),
+        "total": len(rows),
+        "items": [_row(v, c, a) for v, c, a in rows[:limit]],
+    }
+
+
 def _vuln_dict(
     v: Vulnerability, c: CVE, a: Asset,
     resolved_elsewhere_count: int = 0, patched_elsewhere_count: int = 0,

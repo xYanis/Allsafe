@@ -72,6 +72,10 @@ export const bulkAcceptedRisk = (vuln_ids, validated_by, notes, accepted_risk_un
   api.post('/vulnerabilities/bulk-accepted-risk', { vuln_ids, validated_by, notes, accepted_risk_until })
 // Rattrapage des bascules automatiques depuis la dernière visite (bandeau Dashboard)
 export const autoBasculeSummary = (since, limit) => api.get('/vulnerabilities/auto-bascule-summary', { params: { since, limit } })
+// Rattrapage — nouvelles vulnérabilités détectées depuis la dernière visite (bandeau Dashboard)
+export const newVulnsSinceCount = (since, limit) => api.get('/vulnerabilities/new-since-count', { params: { since, limit } })
+// Rattrapage — actifs ajoutés/supprimés depuis la dernière visite (bandeau Dashboard)
+export const assetsLifecycleSince = (since, limit) => api.get('/assets/lifecycle-since', { params: { since, limit } })
 // Pendant "actif terminé" (11/08/2026) — endpoint séparé plutôt que fusionné dans
 // auto-bascule-summary, cf. sa docstring backend (bandeau + WelcomeOverlay déjà écrits
 // pour un format CVE, y mélanger un autre format les aurait cassés).

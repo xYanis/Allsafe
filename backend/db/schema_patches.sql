@@ -758,3 +758,19 @@ INSERT INTO scan_policies (id, criticite, frequency, hour, weekday) VALUES
     (gen_random_uuid(), 'moyenne',  'weekly', 0, 6),
     (gen_random_uuid(), 'faible',   'weekly', 0, 6)
 ON CONFLICT (criticite) DO NOTHING;
+
+-- Journal "actif supprimé" (18/08/2026, cf. models.py::AssetDeletionLog) — la ligne
+-- `assets` disparaît sans laisser de trace à la suppression, contrairement à un ajout
+-- (assets.created_at, toujours consultable) : sans ce journal, le bandeau "depuis votre
+-- dernière visite" du Dashboard ne pourrait jamais signaler une suppression après coup.
+-- Pas de FK sur assets (l'actif n'existe plus par définition) — même raisonnement que
+-- patch_check_asset_completions ci-dessus, asset_name/hostname dupliqués en texte.
+CREATE TABLE IF NOT EXISTS asset_deletion_logs (
+    id          UUID PRIMARY KEY,
+    asset_name  VARCHAR NOT NULL,
+    hostname    VARCHAR,
+    asset_type  VARCHAR,
+    deleted_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_asset_deletion_logs_deleted_at ON asset_deletion_logs(deleted_at);
+GRANT SELECT, INSERT, UPDATE, DELETE ON asset_deletion_logs TO cbr_app;

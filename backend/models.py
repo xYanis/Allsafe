@@ -194,6 +194,25 @@ class PatchCheckAssetCompletion(Base):
     completed_at        = Column(DateTime(timezone=True), nullable=False)
 
 
+class AssetDeletionLog(Base):
+    """Journal append-only — un actif a été supprimé (18/08/2026, demande explicite :
+    étoffer le bandeau "depuis votre dernière visite" du Dashboard, qui ne pouvait
+    montrer que des CVE/ajouts d'actifs, jamais des suppressions — la ligne disparaît
+    de `assets` sans laisser de trace, contrairement à un ajout (`Asset.created_at`,
+    toujours consultable après coup). Alimenté par routers/assets.py::delete_asset,
+    juste avant la suppression réelle.
+
+    `asset_name`/`hostname` en texte, pas de FK vers `assets` (l'actif n'existe plus par
+    définition) — même raisonnement que `PatchCheckAssetCompletion` juste au-dessus."""
+    __tablename__ = "asset_deletion_logs"
+
+    id           = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    asset_name   = Column(String, nullable=False)
+    hostname     = Column(String)
+    asset_type   = Column(String)
+    deleted_at   = Column(DateTime(timezone=True), nullable=False)
+
+
 # models/feed.py
 from sqlalchemy import Column, String, DateTime, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID

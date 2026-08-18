@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
 from database import get_session
-from models import Asset, Vulnerability, NetworkStatus, CVE, Agent
+from models import Asset, Vulnerability, NetworkStatus, CVE, Agent, AssetDeletionLog
 from services.asset_scanner import scan_asset, apply_scan_result
 from services.asset_importer import _build_cpe
 from services.crypto import encrypt_password, decrypt_password
@@ -350,11 +350,50 @@ async def delete_asset(asset_id: str, session: AsyncSession = Depends(get_sessio
     asset = await session.get(Asset, asset_id)
     if not asset:
         raise HTTPException(404, "Actif introuvable")
+    # Journal (18/08/2026, cf. models.AssetDeletionLog) : la ligne `assets` va disparaître
+    # sans laisser de trace, contrairement à un ajout (`Asset.created_at`, toujours
+    # consultable) — sans ce snapshot, le bandeau "depuis votre dernière visite" du
+    # Dashboard ne pourrait jamais signaler une suppression après coup.
+    session.add(AssetDeletionLog(
+        asset_name=asset.name, hostname=asset.hostname, asset_type=asset.asset_type,
+        deleted_at=datetime.now(timezone.utc),
+    ))
     # Pas de ON DELETE CASCADE sur la FK — on supprime explicitement les vulnérabilités
     # liées avant l'actif, sinon la contrainte bloque la suppression.
     await session.execute(sa_delete(Vulnerability).where(Vulnerability.asset_id == asset_id))
     await session.delete(asset)
     await session.commit()
+
+
+@router.get("/lifecycle-since")
+async def assets_lifecycle_since(
+    since: datetime = Query(..., description="Horodatage ISO de la dernière visite"),
+    limit: int = Query(8, ge=1, le=100, description="Nombre de noms détaillés renvoyés par catégorie"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Rattrapage — actifs ajoutés (`Asset.created_at`) ou supprimés
+    (`AssetDeletionLog`, cf. models.py) depuis `since`. Même esprit et même
+    forme de réponse que `/vulnerabilities/auto-bascule-summary`, pour le
+    bandeau "depuis votre dernière visite" du Dashboard."""
+    added_rows = (await session.execute(
+        select(Asset.name, Asset.hostname, Asset.asset_type)
+        .where(Asset.created_at >= since)
+        .order_by(Asset.created_at.desc())
+    )).all()
+    removed_rows = (await session.execute(
+        select(AssetDeletionLog.asset_name, AssetDeletionLog.hostname, AssetDeletionLog.asset_type)
+        .where(AssetDeletionLog.deleted_at >= since)
+        .order_by(AssetDeletionLog.deleted_at.desc())
+    )).all()
+
+    def _names(rows):
+        return [{"name": name, "hostname": hostname, "asset_type": asset_type} for name, hostname, asset_type in rows[:limit]]
+
+    return {
+        "since": since.isoformat(),
+        "added_count": len(added_rows), "added": _names(added_rows),
+        "removed_count": len(removed_rows), "removed": _names(removed_rows),
+    }
 
 
 def _asset_dict(

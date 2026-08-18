@@ -4,7 +4,8 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates } from '../api/client.js'
+import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, newVulnsSinceCount, assetsLifecycleSince, securityEventsCount, incidentsPendingCount, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates } from '../api/client.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import ExploitBadge from '../components/ExploitBadge.jsx'
@@ -655,6 +656,7 @@ let dashboardCache = null
 
 export default function Dashboard() {
   const { isAnonymous } = usePresentation()
+  const { user } = useAuth()
   const [kpis, setKpis] = useState(() => dashboardCache?.kpis ?? null)
   const [openVulns, setOpenVulns] = useState(() => dashboardCache?.openVulns ?? [])
   const [patchedVulns, setPatchedVulns] = useState(() => dashboardCache?.patchedVulns ?? [])
@@ -1028,11 +1030,20 @@ export default function Dashboard() {
       .catch(() => {})
   }, [selectedAssetIds, isAnonymous])
 
-  // Bandeau de rattrapage — une seule fois au montage du Dashboard. Pas de
-  // compte utilisateur dans CBR (cf. CLAUDE.md) : "depuis votre dernière
-  // visite" est donc suivi par navigateur (localStorage), pas par session
-  // serveur. Absent en mode Présentation : les cve_id/noms d'actifs renvoyés
-  // par l'API sont réels, jamais anonymisés côté serveur pour cet endpoint.
+  // Bandeau de rattrapage — une seule fois au montage du Dashboard. Repère
+  // "dernière visite" suivi par navigateur (localStorage), pas par session
+  // serveur — un même compte ouvert sur deux postes aura donc deux rattrapages
+  // indépendants, assumé (même mécanique avant l'authentification réelle).
+  // Absent en mode Présentation : les cve_id/noms d'actifs renvoyés par l'API
+  // sont réels, jamais anonymisés côté serveur pour ces endpoints.
+  //
+  // Étoffé le 18/08/2026 (demande explicite) pour rassembler ici tout ce qui a
+  // pu se passer sans que personne ne regarde l'écran (cycle autonome de nuit,
+  // sync NVD, actifs ajoutés/retirés côté AD/SSH...), plutôt que de laisser
+  // chaque signal dans son coin (WelcomeOverlay au login, badges de la sidebar,
+  // pages dédiées) — mêmes sources que WelcomeOverlay.jsx pour la partie
+  // sécurité/NIS 2, composées ici en un seul bandeau persistant au lieu d'un
+  // écran qui se referme après quelques secondes.
   useEffect(() => {
     if (isAnonymous) return
     const key = 'last_seen_auto_bascule'
@@ -1043,13 +1054,30 @@ export default function Dashboard() {
       localStorage.setItem(key, now)
       return
     }
-    autoBasculeSummary(since)
-      .then(r => {
-        localStorage.setItem(key, now)
-        if (r.data.total > 0) setCatchUp(r.data)
-      })
-      .catch(() => {})
-  }, [isAnonymous])
+    // Alertes de sécurité (déception/honeypots) réservées à l'admin dans le reste
+    // de l'app (cf. CLAUDE.md § Authentification, /api/security/* hors compteur
+    // badge) — même restriction reprise ici côté affichage, demande explicite.
+    const isAdmin = user?.role === 'admin'
+    Promise.allSettled([
+      autoBasculeSummary(since),
+      newVulnsSinceCount(since),
+      assetsLifecycleSince(since),
+      isAdmin ? securityEventsCount() : Promise.resolve(null),
+      incidentsPendingCount(),
+    ]).then(([bascule, newVulns, lifecycle, security, nis2]) => {
+      localStorage.setItem(key, now)
+      const b  = bascule.status  === 'fulfilled' ? bascule.value.data  : null
+      const nv = newVulns.status === 'fulfilled' ? newVulns.value.data : null
+      const lc = lifecycle.status === 'fulfilled' ? lifecycle.value.data : null
+      const sec = security?.status === 'fulfilled' ? security.value?.data : null
+      const n2 = nis2.status === 'fulfilled' ? nis2.value.data : null
+      const nis2Total = (n2?.overdue || 0) + (n2?.imminent || 0)
+      const securityCount = sec?.unacknowledged || 0
+      const hasAnything = (b?.total > 0) || (nv?.total > 0) || (lc?.added_count > 0)
+        || (lc?.removed_count > 0) || securityCount > 0 || nis2Total > 0
+      if (hasAnything) setCatchUp({ bascule: b, newVulns: nv, lifecycle: lc, securityCount, nis2Total })
+    })
+  }, [isAnonymous, user])
 
   // Progression du contrôle automatique de patch au démarrage (lecture seule).
   // CRITICAL : signalement seul (badge, validation manuelle requise).
@@ -1661,43 +1689,111 @@ export default function Dashboard() {
         </div>
       </PageHero>
 
-      {/* Rattrapage : ce qui a basculé automatiquement depuis la dernière visite
-          sur ce navigateur (cycle de nuit compris) — cf. useEffect ci-dessus.
-          Persistant (pas de setTimeout comme le flash) : peut contenir
-          plusieurs lignes, l'analyste doit pouvoir le lire à son rythme. */}
+      {/* Rattrapage : tout ce qui s'est passé depuis la dernière visite sur ce
+          navigateur (cycle de nuit compris) — cf. useEffect ci-dessus. Persistant
+          (pas de setTimeout comme le flash) : peut contenir plusieurs rubriques,
+          l'analyste doit pouvoir le lire à son rythme. Purement informatif — aucune
+          rubrique n'appelle à une action, cf. leurs pages respectives pour agir. */}
       {catchUp && (
         <div className="text-sm px-4 py-3 rounded-xl flex items-start gap-3" style={{ background: 'rgba(63,185,80,0.08)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.25)' }}>
           <span className="text-base leading-none mt-0.5">👋</span>
-          <div className="flex-1">
-            <p className="font-medium">
-              Depuis votre dernière visite : {catchUp.patched_count > 0 && <>{catchUp.patched_count} corrigée{catchUp.patched_count > 1 ? 's' : ''} automatiquement</>}
-              {catchUp.patched_count > 0 && catchUp.false_positive_count > 0 && ', '}
-              {catchUp.false_positive_count > 0 && <>{catchUp.false_positive_count} qualifiée{catchUp.false_positive_count > 1 ? 's' : ''} faux positif</>}
-              {' '}— sans action de votre part.
-            </p>
-            {catchUp.items?.length > 0 && (
-              <ul className="mt-1.5 space-y-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
-                {catchUp.items.map((it, i) => (
-                  <li key={i}>
-                    {/* Consulter la CVE sans quitter le Dashboard : ouvre son
-                        justificatif de clôture (chargé par recherche serveur, donc
-                        trouvable même si la vuln est hors des listes plafonnées).
-                        Désactivé en Présentation : les cve_id y sont fictifs. */}
-                    {isAnonymous
-                      ? <span className="font-mono">{it.cve_id}</span>
-                      : <button onClick={() => consultCatchUpCve(it)}
-                          className="font-mono hover:underline" style={{ color: '#58a6ff' }}
-                          title="Consulter le justificatif de clôture de cette CVE">
-                          {it.cve_id}
-                        </button>}
-                    {' '}sur {it.asset_name}
-                    {' — '}{it.status === 'patched' ? 'corrigée' : 'faux positif'}
-                  </li>
-                ))}
-                {catchUp.total > catchUp.items.length && (
-                  <li style={{ color: 'var(--text-muted)' }}>… et {catchUp.total - catchUp.items.length} de plus (voir "Vulnérabilités traitées" ci-dessous)</li>
+          <div className="flex-1 space-y-2.5">
+            <p className="font-medium">Depuis votre dernière visite</p>
+
+            {catchUp.bascule?.total > 0 && (
+              <div>
+                <p style={{ color: 'var(--text-primary)' }}>
+                  {catchUp.bascule.patched_count > 0 && <>{catchUp.bascule.patched_count} corrigée{catchUp.bascule.patched_count > 1 ? 's' : ''} automatiquement</>}
+                  {catchUp.bascule.patched_count > 0 && catchUp.bascule.false_positive_count > 0 && ', '}
+                  {catchUp.bascule.false_positive_count > 0 && <>{catchUp.bascule.false_positive_count} qualifiée{catchUp.bascule.false_positive_count > 1 ? 's' : ''} faux positif</>}
+                  {' '}— sans action de votre part.
+                </p>
+                {catchUp.bascule.items?.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {catchUp.bascule.items.map((it, i) => (
+                      <li key={i}>
+                        {/* Consulter la CVE sans quitter le Dashboard : ouvre son
+                            justificatif de clôture (chargé par recherche serveur, donc
+                            trouvable même si la vuln est hors des listes plafonnées).
+                            Désactivé en Présentation : les cve_id y sont fictifs. */}
+                        {isAnonymous
+                          ? <span className="font-mono">{it.cve_id}</span>
+                          : <button onClick={() => consultCatchUpCve(it)}
+                              className="font-mono hover:underline" style={{ color: '#58a6ff' }}
+                              title="Consulter le justificatif de clôture de cette CVE">
+                              {it.cve_id}
+                            </button>}
+                        {' '}sur {it.asset_name}
+                        {' — '}{it.status === 'patched' ? 'corrigée' : 'faux positif'}
+                      </li>
+                    ))}
+                    {catchUp.bascule.total > catchUp.bascule.items.length && (
+                      <li style={{ color: 'var(--text-muted)' }}>… et {catchUp.bascule.total - catchUp.bascule.items.length} de plus (voir "Vulnérabilités traitées" ci-dessous)</li>
+                    )}
+                  </ul>
                 )}
-              </ul>
+              </div>
+            )}
+
+            {/* Nouvelles vulnérabilités détectées sur le parc — inverse du rattrapage
+                ci-dessus (des problèmes qui apparaissent, pas qui se résolvent seuls),
+                même source que la sync NVD/le matching CPE qui tourne en fond. */}
+            {catchUp.newVulns?.total > 0 && (
+              <div>
+                <p style={{ color: 'var(--text-primary)' }}>
+                  {catchUp.newVulns.total} nouvelle{catchUp.newVulns.total > 1 ? 's' : ''} vulnérabilité{catchUp.newVulns.total > 1 ? 's' : ''} détectée{catchUp.newVulns.total > 1 ? 's' : ''} sur le parc.
+                </p>
+                {catchUp.newVulns.items?.length > 0 && (
+                  <ul className="mt-1 space-y-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {catchUp.newVulns.items.map((it, i) => (
+                      <li key={i}>
+                        <span className="font-mono">{it.cve_id}</span>{' '}({it.severity}) sur {it.asset_name}
+                      </li>
+                    ))}
+                    {catchUp.newVulns.total > catchUp.newVulns.items.length && (
+                      <li style={{ color: 'var(--text-muted)' }}>… et {catchUp.newVulns.total - catchUp.newVulns.items.length} de plus (voir "Vulnérabilités ouvertes" ci-dessous)</li>
+                    )}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* Actifs ajoutés/supprimés — sync AD/SSH, import CSV, ou suppression
+                manuelle depuis Actifs (cf. models.AssetDeletionLog pour la trace,
+                l'actif lui-même n'existe plus une fois supprimé). */}
+            {(catchUp.lifecycle?.added_count > 0 || catchUp.lifecycle?.removed_count > 0) && (
+              <div>
+                <p style={{ color: 'var(--text-primary)' }}>
+                  {catchUp.lifecycle.added_count > 0 && <>{catchUp.lifecycle.added_count} actif{catchUp.lifecycle.added_count > 1 ? 's' : ''} ajouté{catchUp.lifecycle.added_count > 1 ? 's' : ''}</>}
+                  {catchUp.lifecycle.added_count > 0 && catchUp.lifecycle.removed_count > 0 && ', '}
+                  {catchUp.lifecycle.removed_count > 0 && <>{catchUp.lifecycle.removed_count} supprimé{catchUp.lifecycle.removed_count > 1 ? 's' : ''}</>}
+                  {' '}dans l'inventaire.
+                </p>
+                {(catchUp.lifecycle.added?.length > 0 || catchUp.lifecycle.removed?.length > 0) && (
+                  <ul className="mt-1 space-y-0.5 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                    {catchUp.lifecycle.added?.map((a, i) => <li key={`added-${i}`}>+ {a.name}</li>)}
+                    {catchUp.lifecycle.removed?.map((a, i) => <li key={`removed-${i}`}>− {a.name}</li>)}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {/* Alertes de sécurité (déception/honeypots) — réservé admin, même
+                restriction que la page qui les détaille (cf. useEffect ci-dessus). */}
+            {catchUp.securityCount > 0 && (
+              <p style={{ color: 'var(--text-primary)' }}>
+                <Link to="/settings/administration" className="hover:underline">
+                  {catchUp.securityCount} alerte{catchUp.securityCount > 1 ? 's' : ''} de sécurité non acquittée{catchUp.securityCount > 1 ? 's' : ''}
+                </Link>.
+              </p>
+            )}
+
+            {catchUp.nis2Total > 0 && (
+              <p style={{ color: 'var(--text-primary)' }}>
+                <Link to="/incidents" className="hover:underline">
+                  {catchUp.nis2Total} échéance{catchUp.nis2Total > 1 ? 's' : ''} NIS 2 à traiter
+                </Link>.
+              </p>
             )}
           </div>
           <button onClick={() => setCatchUp(null)} className="p-1 rounded-lg flex-shrink-0" style={{ color: 'var(--text-muted)' }} title="Fermer">

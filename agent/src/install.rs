@@ -199,6 +199,82 @@ async fn enroll(token: String, server: String) -> Result<()> {
     Ok(())
 }
 
+/// URL déjà connue si ce poste est déjà enrôlé (`agent.json`) — préremplit le champ
+/// serveur de l'écran "Mise à jour" (gui.rs) pour ne pas la retaper alors qu'elle est
+/// déjà sur disque. `None` sur un poste jamais enrôlé, l'utilisateur la saisit lui-même.
+pub fn known_server() -> Option<String> {
+    crate::config::AgentConfig::load().ok().map(|c| c.server)
+}
+
+/// Compare la version compilée (`CARGO_PKG_VERSION`) à celle publiée par le serveur
+/// (`GET /latest/version`, même route que `agent/deploy/update-agent.*`). `Ok(Some(v))`
+/// si une version différente est disponible, `Ok(None)` si déjà à jour.
+pub async fn check_update(server: &str) -> Result<Option<String>> {
+    #[derive(serde::Deserialize)]
+    struct VersionResponse {
+        version: String,
+    }
+    let url = format!("{}/api/agents/latest/version", server.trim_end_matches('/'));
+    let resp = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("construction du client HTTP")?
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?;
+    if !resp.status().is_success() {
+        anyhow::bail!("réponse inattendue du serveur ({})", resp.status());
+    }
+    let latest = resp.json::<VersionResponse>().await.context("réponse de version invalide")?.version;
+    let current = env!("CARGO_PKG_VERSION");
+    Ok((latest != current).then_some(latest))
+}
+
+/// Télécharge le `.msi` publié (`GET /latest/windows`) et l'exécute silencieusement
+/// (`msiexec /qn`) — même mécanisme que `agent/deploy/update-agent.ps1`, réutilisé ici
+/// plutôt que dupliqué en Rust : le `.msi` gère déjà l'arrêt/redémarrage du service au bon
+/// moment de sa séquence (`wix/main.wxs::ServiceControl`), pas la peine de le refaire à la
+/// main. ⚠️ Si ce binaire est lui-même l'installation en cours d'exécution (lancé depuis
+/// `Program Files\Allsafe Agent`, pas un `.exe` fraîchement téléchargé), `msiexec` peut ne
+/// pas réussir à remplacer un fichier verrouillé par son propre process — cas non géré
+/// ici, limite assumée (cf. `Program Files` vs poste de téléchargement, docs/AGENTS.md).
+pub async fn apply_update(server: &str) -> Result<()> {
+    require_elevated()?;
+
+    let url = format!("{}/api/agents/latest/windows", server.trim_end_matches('/'));
+    let bytes = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .context("construction du client HTTP")?
+        .get(&url)
+        .send()
+        .await
+        .with_context(|| format!("GET {url}"))?
+        .bytes()
+        .await
+        .context("téléchargement du .msi")?;
+
+    let tmp = std::env::temp_dir().join("allsafe-agent-update.msi");
+    std::fs::write(&tmp, &bytes).with_context(|| format!("écriture de {}", tmp.display()))?;
+
+    let log = std::env::temp_dir().join("allsafe-agent-update-install.log");
+    let status = std::process::Command::new("msiexec")
+        .arg("/i")
+        .arg(&tmp)
+        .arg("/qn")
+        .arg("/l*v")
+        .arg(&log)
+        .status()
+        .context("lancement de msiexec")?;
+    let _ = std::fs::remove_file(&tmp);
+
+    if !status.success() {
+        anyhow::bail!("msiexec a échoué (code {:?}) — détail dans {}", status.code(), log.display());
+    }
+    Ok(())
+}
+
 /// Arrête et désenregistre le service + retire l'entrée `PATH`. Ne supprime **pas** les
 /// fichiers (`Program Files\Allsafe Agent`, `%ProgramData%\allsafe-agent`) — un
 /// exécutable Windows ne peut pas se supprimer lui-même pendant qu'il tourne ; laissé à

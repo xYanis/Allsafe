@@ -18,6 +18,19 @@
 // `x86_64-w64-mingw32-*` fournis par mingw-w64, sans quoi `res.compile()` échoue avec
 // "No such file or directory" (repéré et corrigé avant tout build réel, pas laissé à
 // découvrir par l'utilisateur).
+//
+// 18/08/2026 — ajout de la dépendance `Microsoft.Windows.Common-Controls` (rendu constaté
+// en conditions réelles sur un poste, capture à l'appui : boutons/contrôles non thémés,
+// rendu "Windows 98" malgré `nwg::init()` qui tente pourtant d'activer les styles visuels
+// tout seul à l'exécution via un contexte d'activation `CreateActCtxW` — cf. code source de
+// `native-windows-gui`, `win32/mod.rs::enable_visual_styles`). Cette astuce runtime cohabite
+// mal avec un manifeste déjà embarqué par l'exe lui-même (celui-ci devient le manifeste de
+// processus par défaut, prioritaire) : le fait de déclarer nous-mêmes la dépendance dans CE
+// manifeste, plutôt que de compter sur le contournement de `nwg`, est l'approche standard et
+// évite l'ambiguïté. `dpiAware` ajouté au passage (même bloc, coût nul) — évite un rendu flou
+// par mise à l'échelle bitmap sur les écrans HiDPI, autre symptôme classique de "vieille appli
+// Win32". ⚠️ Non re-vérifié visuellement (pas de poste Windows disponible pour capturer un
+// nouveau rendu depuis ici) — hypothèse solide (mécanisme Win32 documenté), pas confirmée.
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut res = winres::WindowsResource::new();
@@ -33,6 +46,22 @@ fn main() {
       </requestedPrivileges>
     </security>
   </trustInfo>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
+  <asmv3:application xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
+    <asmv3:windowsSettings xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">
+      <dpiAware>true</dpiAware>
+    </asmv3:windowsSettings>
+  </asmv3:application>
 </assembly>
 "#,
         );

@@ -578,6 +578,23 @@ function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
             </div>
           )}
 
+          {/* Agent (17/08/2026) : contrairement au SSH/WinRM, ce scan est asynchrone — pas
+              de résultat immédiat, juste un flag posé côté serveur que l'agent ramasse à son
+              prochain sondage (≤60s en mode service persistant, cf. CLAUDE.md §1 — jamais
+              Allsafe qui se connecte au poste). Ne marche pas si l'agent tourne en
+              planification externe (cron/tâche planifiée) plutôt qu'en service, cf.
+              docs/AGENTS.md. */}
+          {result?.agent_scan_requested && (
+            <div className="p-4 rounded-xl" style={{ background: 'rgba(88,166,255,0.1)', border: '1px solid rgba(88,166,255,0.3)' }}>
+              <p className="font-semibold text-sm mb-1" style={{ color: '#58a6ff' }}>Scan demandé à l'agent</p>
+              <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Cet actif est collecté par agent, pas par SSH/WinRM — la collecte se fera au
+                prochain sondage de l'agent (moins d'une minute s'il tourne en service
+                persistant). Recharge la page dans un instant pour voir le résultat.
+              </p>
+            </div>
+          )}
+
           {/* Confirmation explicite (07/08/2026, demande explicite) : jusqu'ici seule
               la date "Dernier scan" dans le tableau signalait un scan réussi — miroir
               positif du bloc "Actif injoignable" ci-dessus, même condition symétrique

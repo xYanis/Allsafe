@@ -385,6 +385,41 @@ mettre à jour `Cargo.toml`). Les deux valeurs doivent être changées ensemble 
 lien automatique entre elles dans ce MVP (le backend et le binaire agent sont deux projets distincts,
 compilés séparément — rien ne garantit qu'ils partagent le même dépôt/pipeline de build).
 
+## Signature (18/08/2026)
+
+Sans signature, Windows affiche "Éditeur : Inconnu" sur la fenêtre UAC déclenchée au lancement de
+`allsafe-agent.exe` (manifeste `requireAdministrator`, cf. § Vérification) — normal, pas un bug.
+
+Étape du **build CI** (`.gitlab-ci.yml::build-agent`), jamais un script séparé à lancer à la main :
+`osslsigncode` (tourne nativement sous Linux, pas besoin de `signtool`/Windows SDK) signe le `.exe`
+et le `.msi` juste après leur construction, **seulement si** deux variables CI/CD sont configurées
+(Settings > CI/CD > Variables) :
+- `AGENT_SIGNING_PFX` — variable de type **File**, le certificat de signature de code (`.pfx`,
+  clé privée + certificat).
+- `AGENT_SIGNING_PASSWORD` — variable **masquée**, mot de passe du `.pfx`.
+
+Sans elles, le job continue normalement et publie des artefacts non signés (message explicite dans
+les logs) — jamais un échec bloquant tant que le certificat n'existe pas.
+
+Deux étapes **humaines, hors CI**, à faire une fois avant que ça serve à quelque chose :
+1. **Générer le certificat** (poste admin, PowerShell) — auto-signé, suffisant pour un outil
+   100% interne (jamais distribué hors du parc) :
+   ```powershell
+   New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=Allsafe" `
+     -CertStoreLocation Cert:\CurrentUser\My -KeyUsage DigitalSignature
+   ```
+   Exporter en `.pfx` (clé privée, à mettre dans `AGENT_SIGNING_PFX`) et en `.cer` (public).
+2. **Distribuer le `.cer` public à tout le parc par GPO** (Configuration ordinateur > Paramètres
+   Windows > Paramètres de sécurité > Stratégies de clé publique > **Éditeurs de confiance** ET
+   **Autorités de certification racines de confiance**, puisqu'auto-signé) — sans cette étape, la
+   fenêtre UAC reste jaune/non vérifiée même signée (elle affiche juste "Allsafe" au lieu
+   d'"Inconnu" comme Subject, la confiance elle-même se construit sur le parc, pas dans le binaire).
+
+Mécanisme vérifié en conditions réelles (conteneur, certificat de test jetable, horodatage DigiCert
+réel, 18/08/2026) : signature réussie sur `.exe` et `.msi`, Subject du certificat bien lu dans le
+binaire signé (`osslsigncode verify`). Pas de certificat réel généré ni distribué — ça reste à faire
+côté infrastructure Allsafe.
+
 ## Frontend
 
 `pages/Agents.jsx` — page standalone, pas un onglet Administration (les agents sont de l'exploitation

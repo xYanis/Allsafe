@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,7 +6,7 @@ from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
 from database import get_session
-from models import Asset, Vulnerability, NetworkStatus, CVE
+from models import Asset, Vulnerability, NetworkStatus, CVE, Agent
 from services.asset_scanner import scan_asset, apply_scan_result
 from services.asset_importer import _build_cpe
 from services.crypto import encrypt_password, decrypt_password
@@ -277,12 +278,32 @@ async def scan_asset_endpoint(
     asset = await session.get(Asset, asset_id)
     if not asset:
         raise HTTPException(404, "Actif introuvable")
+
+    # Agent (17/08/2026) : même bouton "Scanner" que le SSH/WinRM, mais ne se connecte
+    # jamais au poste (CLAUDE.md §1) — pose juste le flag que la boucle persistante de
+    # l'agent (`agent/src/daemon.rs`) ramasse à son prochain sondage `GET /pending` (≤60s),
+    # même mécanisme que l'ancien bouton "Scanner maintenant" de la page Agents (retiré) —
+    # simplement rattaché à l'action déjà connue de l'utilisateur plutôt qu'à un bouton à
+    # part. Fiabilité inchangée : ne fonctionne que si l'agent tourne en mode service/`run`
+    # persistant, pas en planification externe (cron/tâche planifiée, cf. docs/AGENTS.md).
+    if asset.collection_method == "agent":
+        agent = (
+            await session.execute(
+                select(Agent).where(Agent.asset_id == asset.id, Agent.status == "enrolled")
+            )
+        ).scalar_one_or_none()
+        if not agent:
+            raise HTTPException(409, "Aucun agent actif rattaché à cet actif.")
+        agent.pending_scan_requested_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"reachable": None, "agent_scan_requested": True}
+
     if asset.collection_method != "service_account":
-        # Sans ce garde-fou, un clic sur un actif collecté autrement (agent, ou hôte ESXi
-        # depuis la sync vSphere) ouvrirait une vraie session SSH/WinRM avec des commandes
-        # pensées pour Debian/RHEL/Windows contre un shell qui n'a rien à voir (BusyBox
-        # ESXi...), et apply_scan_result() écraserait silencieusement le hardware/cpe_list
-        # posé par la méthode de collecte réelle (13/08/2026, intégration vSphere).
+        # Sans ce garde-fou, un clic sur un actif collecté autrement (hôte ESXi depuis la
+        # sync vSphere) ouvrirait une vraie session SSH/WinRM avec des commandes pensées
+        # pour Debian/RHEL/Windows contre un shell qui n'a rien à voir (BusyBox ESXi...), et
+        # apply_scan_result() écraserait silencieusement le hardware/cpe_list posé par la
+        # méthode de collecte réelle (13/08/2026, intégration vSphere).
         raise HTTPException(400, "Cet actif n'est pas scanné par SSH/WinRM (collection_method != service_account)")
 
     username = creds.username or asset.scan_username

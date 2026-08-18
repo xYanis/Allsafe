@@ -50,7 +50,7 @@ AGENT_DIST_DIR = "/app/agent-dist"
 # Pas de mécanisme de mise à jour automatique côté agent dans ce MVP : cette constante ne
 # sert qu'à comparer côté serveur ce que chaque agent déclare à son dernier check-in
 # (`Agent.agent_version`) pour repérer les postes en retard (`_agent_dict::outdated`).
-CURRENT_AGENT_VERSION = "0.1.3"
+CURRENT_AGENT_VERSION = "0.1.4"
 
 
 def _hash(raw: str) -> str:

@@ -13,7 +13,7 @@
   <Product Id="*"
            Name="Allsafe Agent"
            Language="1033"
-           Version="0.1.3.0"
+           Version="0.1.4.0"
            Manufacturer="Allsafe"
            UpgradeCode="F7307503-099E-4424-9611-81DE4739933C">
 

@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "allsafe-agent"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -15,6 +15,7 @@ dependencies = [
  "serde_json",
  "sysinfo",
  "tokio",
+ "winapi",
  "windows-service",
  "winreg",
  "winres",

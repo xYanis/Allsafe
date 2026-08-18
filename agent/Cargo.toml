@@ -1,6 +1,6 @@
 [package]
 name = "allsafe-agent"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Agent Allsafe (lecture seule) pour postes Windows/Linux — complète le scan centralisé SSH/WinRM (cf. CLAUDE.md § non-intervention)."
 license = "Proprietary"
@@ -49,26 +49,41 @@ sysinfo = "0.32"
 # cf. service.rs) — dispatch synchrone appelé avant toute création de runtime tokio.
 windows-service = "0.7"
 # Auto-installation (17/08/2026, cf. install.rs/gui.rs, docs/AGENTS.md § Installation
-# rapide) — fenêtre graphique minimale (serveur + jeton) affichée quand l'exécutable est
-# lancé sans argument (double-clic), plutôt que d'exiger un PowerShell/une ligne de
-# commande. `native-windows-derive` est le compagnon macro de `native-windows-gui` (le
-# `#[derive(NwgUi)]` sur `gui.rs::InstallWindow`), toujours utilisé ensemble.
-# ⚠️ NON VÉRIFIÉ EN COMPILATION (pas de toolchain Rust/mingw-w64 disponible dans
-# l'environnement où ce code a été écrit, 17/08/2026) — à builder et tester avant de
-# considérer ce mode acquis, cf. § Vérification dans docs/AGENTS.md.
-# Toutes les features par défaut gardées (pas de sélection fine des composants ici) : le
-# nom exact des feature flags pertinents ("textbox"/"button"/...) n'a pas pu être vérifié
-# sans toolchain — un mauvais nom ferait échouer la compilation entière plutôt que de
-# juste manquer un composant. À affiner une fois un premier build réel obtenu.
-native-windows-gui = "1.0"
-native-windows-derive = "1.0"
+# rapide) — fenêtre graphique (serveur + jeton, menu Installation/Réparation/Mise à
+# jour/Désinstallation) affichée quand l'exécutable est lancé sans argument (double-clic),
+# plutôt que d'exiger un PowerShell/une ligne de commande.
+#
+# 18/08/2026 — remplace `native-windows-gui` (retiré) : rendu Win32 classique plafonnant à
+# un thème "Windows 7 correct" au mieux (Common Controls v6 n'apporte jamais le rendu
+# Fluent/moderne des applis natives récentes, quel que soit le manifeste — limite du Win32
+# classique lui-même, pas un réglage manqué, cf. docs/AGENTS.md § Vérification), jugé
+# insuffisant en conditions réelles. `tauri` rend l'interface en HTML/CSS via le WebView2
+# déjà présent nativement sur Windows 10 (1803+)/11 — aucun runtime supplémentaire à
+# installer sur le parc. ✅ Vérifié par compilation + link croisés réels (toolchain mingw-w64,
+# conteneur, 18/08/2026) : l'arbre de dépendances complet (`tauri`/`wry`/`webview2-com`,
+# lié aux bindings COM Windows) compile et **link** pour `x86_64-pc-windows-gnu` malgré une
+# réputation de support GNU historiquement fragile dans l'écosystème — pas de repli MSVC
+# nécessaire pour ce projet. **Reste non vérifié** : comportement runtime réel du WebView2
+# (chargement de la page, appels `invoke` JS → Rust) sur un vrai poste Windows.
+tauri = { version = "2", features = [] }
+# `FreeConsole` (18/08/2026, cf. gui.rs) — l'exécutable reste subsystem "console" (la CLI
+# `enroll`/`checkin`/`install --token...` a besoin que sa sortie `println!` s'affiche dans
+# le terminal appelant), donc Windows alloue quand même une console au lancement, y compris
+# pour le mode graphique (double-clic) — fenêtre noire vide visible derrière la fenêtre
+# Tauri tant qu'on ne s'en détache pas explicitement (constaté en conditions réelles,
+# initialement avec native-windows-gui — même souci, indépendant du framework graphique
+# utilisé puisqu'il vient du subsystem de l'exe lui-même). `winapi` déjà présent
+# transitivement (`tauri`/`windows-service`) — déclaré ici en direct pour l'appeler depuis
+# gui.rs sans dépendre d'un détail d'implémentation d'un tiers.
+winapi = { version = "0.3", features = ["wincon"] }
 
 [build-dependencies]
-# Manifeste `requireAdministrator` (17/08/2026, cf. build.rs) — seulement actif quand la
-# cible est Windows (vérifié dans build.rs via CARGO_CFG_TARGET_OS), no-op sinon. Nécessite
-# `windres` sur le PATH pour la compilation croisée depuis Linux — fourni par le paquet
-# mingw-w64 déjà requis pour compiler l'exécutable Windows (cf. agent/README.md § Build).
-winres = "0.1"
+# `tauri-build` (18/08/2026, remplace `winres` direct) — gère lui-même l'icône + le
+# manifeste Windows (dont `requireAdministrator`, injecté via
+# `WindowsAttributes::app_manifest`, cf. build.rs) en un seul appel unifié : pas de risque de
+# conflit entre deux embarqueurs de ressource séparés (`winres` manuel + celui de `tauri`)
+# qui se marcheraient dessus sur le même identifiant de ressource.
+tauri-build = { version = "2", features = [] }
 
 [profile.release]
 opt-level = "z"

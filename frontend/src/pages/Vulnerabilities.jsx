@@ -17,6 +17,8 @@ import StatusHistoryModal from '../components/StatusHistoryModal.jsx'
 import OtherInstancesModal from '../components/OtherInstancesModal.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import ConnectivityDot from '../components/ConnectivityDot.jsx'
+import AssetDropdown from '../components/AssetDropdown.jsx'
+import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { MODULES } from '../constants/modules.js'
 import {
@@ -32,7 +34,7 @@ import {
 // rouge/l'ambre/le vert du module n'a pas ce double-sens.
 const MODULE_HOVER = `${MODULES.cybervuln.color}0a`
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(CYBERVULN_CARD_TINT)
 const TOOLTIP_STYLE = { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)' }
 
 function Btn({ children, onClick, variant = 'primary', disabled, title }) {
@@ -78,6 +80,11 @@ export default function Vulnerabilities() {
   const [data, setData] = useState({ items: [], total: 0 })
   const [page, setPage] = useState(1)
   const [filters, setFilters] = useState({ status: 'open', severity: '', validated_by: '', max_age_years: '', search: '', kev: false, msf_module: false })
+  // Filtre par actif (18/08/2026, retour utilisateur — absent jusqu'ici sur cette page
+  // alors que le backend le supporte déjà, cf. asset_id sur GET /vulnerabilities) :
+  // même composant/pattern que Dashboard.jsx et Reports.jsx (AssetDropdown.jsx),
+  // état séparé de `filters` (tableau, pas une simple valeur de <select>).
+  const [selectedAssetIds, setSelectedAssetIds] = useState([])
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Deep-link depuis le bandeau de rattrapage (Dashboard) : ?cve=CVE-XXXX ouvre
@@ -90,6 +97,21 @@ export default function Vulnerabilities() {
       setFilters({ status: '', severity: '', validated_by: '', max_age_years: '', search: cve })
       setPage(1)
       setSearchParams({}, { replace: true })   // consommé : ne pas re-appliquer au prochain rendu
+    }
+  }, [searchParams, setSearchParams])
+
+  // Deep-link par actif (18/08/2026, ex. AgentHistory.jsx "Vulnérabilités ouvertes") :
+  // ?asset_id=<uuid> filtre sur cet actif, tous statuts (le lien annonce un compte "ouvertes"
+  // précis, pas la peine de re-filtrer aussi sur status='open' vu que c'est déjà implicite
+  // dans ce que l'utilisateur vient de cliquer — le laisser voir aussi les autres statuts
+  // de cet actif au passage plutôt que de re-imposer 'open' sans le dire).
+  useEffect(() => {
+    const assetId = searchParams.get('asset_id')
+    if (assetId) {
+      setSelectedAssetIds([assetId])
+      setFilters(f => ({ ...f, status: '' }))
+      setPage(1)
+      setSearchParams({}, { replace: true })
     }
   }, [searchParams, setSearchParams])
   const [sort, setSort] = useState({ by: 'score', dir: 'desc' })
@@ -123,13 +145,12 @@ export default function Vulnerabilities() {
   const [acceptRiskModal, setAcceptRiskModal] = useState(null) // risque accepté unitaire (vuln ciblée)
   const perPage = 50
 
-  // Les 3 listes de candidats (awaiting-fix/false-positive/critical-review) sont
-  // bornées par défaut par le backend aux CVE publiées il y a moins de 2 ans
-  // (cf. routers/vulnerabilities.py, CANDIDATE_MAX_AGE_YEARS) — sélectionner un
-  // actif ici lève cette fenêtre pour lui seul, jamais globalement (cf. bouton
-  // "CVE anciennes" ci-dessous).
+  // Les 3 listes de candidats (awaiting-fix/false-positive/critical-review) restent
+  // bornées par défaut par le backend aux CVE publiées il y a moins de 2 ans (cf.
+  // routers/vulnerabilities.py, CANDIDATE_MAX_AGE_YEARS) — le sélecteur qui permettait
+  // de lever cette fenêtre par actif a été retiré (18/08/2026, redondant/confus avec le
+  // filtre par actif du tableau principal, cf. AssetDropdown ci-dessous).
   const [assetList, setAssetList] = useState([])
-  const [candidateAssetId, setCandidateAssetId] = useState('')
 
   useEffect(() => {
     if (isAnonymous) return
@@ -138,22 +159,22 @@ export default function Vulnerabilities() {
 
   const loadBulkCandidates = useCallback(() => {
     if (isAnonymous) return
-    criticalReviewCandidates(candidateAssetId).then(r => setBulkCandidates(r.data.items || [])).catch(() => {})
-  }, [isAnonymous, candidateAssetId])
+    criticalReviewCandidates('').then(r => setBulkCandidates(r.data.items || [])).catch(() => {})
+  }, [isAnonymous])
 
   useEffect(() => { loadBulkCandidates() }, [loadBulkCandidates])
 
   const loadFpCandidates = useCallback(() => {
     if (isAnonymous) return
-    falsePositiveCandidates(candidateAssetId).then(r => setFpCandidates(r.data.items || [])).catch(() => {})
-  }, [isAnonymous, candidateAssetId])
+    falsePositiveCandidates('').then(r => setFpCandidates(r.data.items || [])).catch(() => {})
+  }, [isAnonymous])
 
   useEffect(() => { loadFpCandidates() }, [loadFpCandidates])
 
   const loadAfCandidates = useCallback(() => {
     if (isAnonymous) return
-    awaitingFixCandidates(candidateAssetId).then(r => setAfCandidates(r.data.items || [])).catch(() => {})
-  }, [isAnonymous, candidateAssetId])
+    awaitingFixCandidates('').then(r => setAfCandidates(r.data.items || [])).catch(() => {})
+  }, [isAnonymous])
 
   useEffect(() => { loadAfCandidates() }, [loadAfCandidates])
 
@@ -219,6 +240,7 @@ export default function Vulnerabilities() {
       if (filters.max_age_years) params.max_age_years = filters.max_age_years
       if (filters.kev) params.kev = true
       if (filters.msf_module) params.msf_module = true
+      if (selectedAssetIds.length) params.asset_id = selectedAssetIds.join(',')
       const ageCutoff = filters.max_age_years ? Date.now() - filters.max_age_years * 365 * 86400000 : null
       fetchVulns(params).then(r => {
         const realItems = (r.data.items || []).map(anonymizeVuln)
@@ -230,6 +252,7 @@ export default function Vulnerabilities() {
           if (ageCutoff && v.cve?.published && new Date(v.cve.published).getTime() < ageCutoff) return false
           if (filters.kev && !v.cve?.kev) return false
           if (filters.msf_module && !v.cve?.msf_module) return false
+          if (selectedAssetIds.length && !selectedAssetIds.includes(v.asset?.id)) return false
           return true
         })
         const merged = sortVulnList([...realItems, ...fakeItems], sort)
@@ -245,8 +268,9 @@ export default function Vulnerabilities() {
     if (filters.max_age_years) params.max_age_years = filters.max_age_years
     if (filters.kev) params.kev = true
     if (filters.msf_module) params.msf_module = true
+    if (selectedAssetIds.length) params.asset_id = selectedAssetIds.join(',')
     fetchVulns(params).then(r => setData(r.data)).finally(() => setLoading(false))
-  }, [page, filters, sort, isAnonymous])
+  }, [page, filters, sort, isAnonymous, selectedAssetIds])
 
   useEffect(() => { load() }, [load])
 
@@ -431,7 +455,7 @@ export default function Vulnerabilities() {
   // formule, couleur du module de cette page (CyberVuln).
   const activeSelectStyle = { background: `${MODULES.cybervuln.color}1f`, color: MODULES.cybervuln.color, border: `1px solid ${MODULES.cybervuln.color}59`, borderRadius: 8, padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer' }
 
-  const hasFilters = filters.status || filters.severity || filters.validated_by || filters.max_age_years || filters.search || filters.kev || filters.msf_module
+  const hasFilters = filters.status || filters.severity || filters.validated_by || filters.max_age_years || filters.search || filters.kev || filters.msf_module || selectedAssetIds.length > 0
 
   // Badge "déjà résolu ailleurs" (04/08/2026) — `resolved_elsewhere_count` vient
   // du serveur (une seule requête groupée par page, cf. routers/vulnerabilities.py),
@@ -528,21 +552,7 @@ export default function Vulnerabilities() {
         icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
         title="Vulnérabilités" color="#f85149"
         subtitle="Suivi et gestion des vulnérabilités par actif"
-      >
-        {!isAnonymous && assetList.length > 0 && (
-          <select
-            value={candidateAssetId}
-            onChange={e => setCandidateAssetId(e.target.value)}
-            title="Les listes de candidats ci-contre sont bornées aux CVE publiées il y a moins de 2 ans — choisir un actif lève cette limite pour lui seul"
-            style={candidateAssetId ? activeSelectStyle : selectStyle}
-          >
-            <option value="">CVE des 2 dernières années (tous actifs)</option>
-            {assetList.map(a => (
-              <option key={a.id} value={a.id}>CVE anciennes incluses — {a.name}</option>
-            ))}
-          </select>
-        )}
-      </PageHero>
+      />
 
       {!isAnonymous && (afCandidates.length > 0 || fpCandidates.length > 0 || bulkCandidates.length > 0 || arCandidates.length > 0) && (
         <div className="flex items-center flex-wrap gap-2">
@@ -607,6 +617,9 @@ export default function Vulnerabilities() {
           className="font-mono"
           style={{ ...selectStyle, cursor: 'text', width: 190 }}
         />
+        {assetList.length > 0 && (
+          <AssetDropdown assetList={assetList} selected={selectedAssetIds} onChange={ids => { setSelectedAssetIds(ids); setPage(1) }} />
+        )}
         <select value={filters.status} onChange={e => setFilter('status', e.target.value)} style={filters.status !== 'open' ? activeSelectStyle : selectStyle}>
           <option value="">Tous statuts</option>
           {STATUSES.slice(1).map(s => <option key={s} value={s}>{STATUS_LABELS[s] || s}</option>)}
@@ -655,7 +668,7 @@ export default function Vulnerabilities() {
           </span>
         </label>
         {hasFilters && (
-          <button onClick={() => { setFilters({ status: '', severity: '', validated_by: '', max_age_years: '', search: '', kev: false, msf_module: false }); setPage(1) }}
+          <button onClick={() => { setFilters({ status: '', severity: '', validated_by: '', max_age_years: '', search: '', kev: false, msf_module: false }); setSelectedAssetIds([]); setPage(1) }}
             className="text-xs px-2.5 py-1.5 rounded-lg transition-colors"
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
           >Réinitialiser</button>

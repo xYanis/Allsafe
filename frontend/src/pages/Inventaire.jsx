@@ -10,6 +10,8 @@ import PageHero from '../components/PageHero.jsx'
 import OsLogo from '../components/OsLogo.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { MODULES } from '../constants/modules.js'
+import { formatDisks } from '../utils/hardware.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 // Survol de ligne teinté Inventaire (11/08/2026, tour visuel) — pas de CTA principal coloré sur
 // cette page (les deux boutons d'en-tête, "Scanner tout"/"Exporter en PDF", restent neutres),
@@ -24,12 +26,7 @@ const filterSelectStyle = {
   color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
 }
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
-
-function formatDisks(disks) {
-  if (!disks || disks.length === 0) return '—'
-  return disks.map(d => `${d.name} ${d.total_gb ?? '?'} Go`).join(', ')
-}
+const CARD = tintedCard(MODULES.inventaire.color)
 
 function PackagesModal({ asset, data, onClose, onRescan, rescanning }) {
   const [search, setSearch] = useState('')

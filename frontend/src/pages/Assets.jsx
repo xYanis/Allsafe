@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { assets as fetchAssets, createAsset, updateAsset, deleteAsset, scanAsset, getAssetPackages, findingsByAsset } from '../api/client.js'
 import { Link } from 'react-router-dom'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
@@ -17,6 +17,8 @@ import PageHero from '../components/PageHero.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { TYPE_LABELS, merakiModelLabel, assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import { MODULES } from '../constants/modules.js'
+import { formatDisks } from '../utils/hardware.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 // Couleur du module Inventaire (11/08/2026, tour visuel — cohérence sidebar → page, cf.
 // docs/FRONTEND.md § Tour visuel) : CTA principal + survol de ligne, même patron que
@@ -33,7 +35,7 @@ const filterSelectStyle = {
   color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none', cursor: 'pointer',
 }
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULE_COLOR)
 const SOURCE_STYLES = {
   active_directory: { background: 'rgba(88,166,255,0.1)',  color: '#58a6ff', border: '1px solid rgba(88,166,255,0.2)' },
   ssh:              { background: 'rgba(63,185,80,0.1)',   color: '#3fb950', border: '1px solid rgba(63,185,80,0.2)' },
@@ -522,11 +524,6 @@ function MatchRow({ label, declared, detected, match }) {
   )
 }
 
-function formatDisks(disks) {
-  if (!disks || disks.length === 0) return '—'
-  return disks.map(d => `${d.name} ${d.total_gb ?? '?'} Go`).join(', ')
-}
-
 function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
   const [search, setSearch] = useState('')
   const [auditFindings, setAuditFindings] = useState([])
@@ -578,19 +575,32 @@ function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
             </div>
           )}
 
-          {/* Agent (17/08/2026) : contrairement au SSH/WinRM, ce scan est asynchrone — pas
-              de résultat immédiat, juste un flag posé côté serveur que l'agent ramasse à son
-              prochain sondage (≤60s en mode service persistant, cf. CLAUDE.md §1 — jamais
-              Allsafe qui se connecte au poste). Ne marche pas si l'agent tourne en
-              planification externe (cron/tâche planifiée) plutôt qu'en service, cf.
-              docs/AGENTS.md. */}
-          {result?.agent_scan_requested && (
-            <div className="p-4 rounded-xl" style={{ background: 'rgba(88,166,255,0.1)', border: '1px solid rgba(88,166,255,0.3)' }}>
-              <p className="font-semibold text-sm mb-1" style={{ color: '#58a6ff' }}>Scan demandé à l'agent</p>
+          {/* Scan agent (18/08/2026) : demande asynchrone (ramassée au prochain sondage
+              ≤60s de l'agent) — sondée depuis Assets.jsx::pollAgentScan pour boucler
+              automatiquement vers le rendu normal (succès/erreur ci-dessus/ci-dessous) dès
+              que le check-in arrive, sans que l'utilisateur n'ait à rafraîchir la page. */}
+          {result?.agent_scan_requested && !result.agent_scan_timeout && (
+            <div className="p-4 rounded-xl flex items-center gap-3" style={{ background: 'rgba(88,166,255,0.1)', border: '1px solid rgba(88,166,255,0.3)' }}>
+              <svg className="w-4 h-4 animate-spin flex-shrink-0" fill="none" stroke="#58a6ff" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              <div>
+                <p className="font-semibold text-sm" style={{ color: '#58a6ff' }}>Scan demandé à l'agent</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                  En attente du prochain sondage de l'agent (jusqu'à 60 secondes) — cette fenêtre se
+                  mettra à jour d'elle-même dès que le résultat arrivera.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {result?.agent_scan_timeout && (
+            <div className="p-4 rounded-xl" style={{ background: 'rgba(251,143,68,0.1)', border: '1px solid rgba(251,143,68,0.3)' }}>
+              <p className="font-semibold text-sm mb-1" style={{ color: '#fb8f44' }}>Toujours en attente</p>
               <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
-                Cet actif est collecté par agent, pas par SSH/WinRM — la collecte se fera au
-                prochain sondage de l'agent (moins d'une minute s'il tourne en service
-                persistant). Recharge la page dans un instant pour voir le résultat.
+                L'agent n'a pas encore répondu — la demande reste enregistrée et sera exécutée dès son
+                prochain sondage. Vérifiez qu'il tourne bien (service Windows ou <code>run</code>) et
+                qu'il joint le serveur Allsafe.
               </p>
             </div>
           )}
@@ -780,6 +790,10 @@ export default function Assets() {
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [scanLoading, setScanLoading] = useState({})
   const [scanModal, setScanModal] = useState(null)
+  // Sondage du résultat d'un scan agent (18/08/2026) : incrémenté à chaque nouvelle
+  // demande de scan pour invalider silencieusement un sondage précédent encore en vol
+  // (rescan manuel pendant l'attente, ou fermeture/réouverture sur un autre actif).
+  const pollGenRef = useRef({})
   const [pendingUpdatesModal, setPendingUpdatesModal] = useState(null)
   const [filterOs, setFilterOs] = useState('')
   const [filterCriticite, setFilterCriticite] = useState('')
@@ -930,6 +944,17 @@ export default function Assets() {
     setScanLoading(l => ({ ...l, [asset.id]: true }))
     try {
       const { data } = await scanAsset(asset.id)
+      if (data.agent_scan_requested) {
+        // Scan agent : la demande n'est que posée (ramassée au prochain sondage ≤60s de
+        // l'agent, cf. routers/assets.py) — sans le sondage ci-dessous la modale restait
+        // muette jusqu'à revisite manuelle, perçu comme "le bouton ne renvoie rien"
+        // (18/08/2026, retour utilisateur).
+        setScanModal({ asset, result: { agent_scan_requested: true } })
+        const gen = (pollGenRef.current[asset.id] || 0) + 1
+        pollGenRef.current[asset.id] = gen
+        pollAgentScan(asset, data.requested_at, gen)
+        return
+      }
       // Le scan peut corriger le nom/hostname déclarés (cf. routers/assets.py) —
       // répercute la correction dans la modale et la liste sans recharger la page.
       const renamed = data.name_corrected
@@ -951,6 +976,48 @@ export default function Assets() {
     } finally {
       setScanLoading(l => ({ ...l, [asset.id]: false }))
     }
+  }
+
+  const AGENT_POLL_INTERVAL_MS = 4000
+  const AGENT_POLL_TIMEOUT_MS = 90000 // sondage agent ≤60s + marge
+
+  function pollAgentScan(asset, requestedAt, gen) {
+    const baseline = requestedAt ? new Date(requestedAt).getTime() : Date.now()
+    const deadline = Date.now() + AGENT_POLL_TIMEOUT_MS
+    const tick = async () => {
+      if (pollGenRef.current[asset.id] !== gen) return
+      let data = null
+      try {
+        const res = await getAssetPackages(asset.id)
+        data = res.data
+      } catch {
+        // erreur transitoire — retenté au prochain tick
+      }
+      if (pollGenRef.current[asset.id] !== gen) return
+      const lastScanTime = data?.last_scan ? new Date(data.last_scan).getTime() : 0
+      if (data && lastScanTime >= baseline) {
+        const result = { ...data.last_scan_result, packages: data.packages, last_scan: data.last_scan }
+        setScanModal(m => (m && m.asset.id === asset.id) ? { asset: m.asset, result } : m)
+        if (result.reachable) {
+          setAssetList(prev => prev.map(a => a.id === asset.id
+            ? {
+                ...a, package_count: (data.packages || []).length, last_scan: data.last_scan,
+                available_updates_count: (data.packages || []).filter(p => p.available_version).length,
+              }
+            : a
+          ))
+        }
+        return
+      }
+      if (Date.now() < deadline) {
+        setTimeout(tick, AGENT_POLL_INTERVAL_MS)
+      } else {
+        setScanModal(m => (m && m.asset.id === asset.id)
+          ? { asset: m.asset, result: { agent_scan_requested: true, agent_scan_timeout: true } }
+          : m)
+      }
+    }
+    setTimeout(tick, AGENT_POLL_INTERVAL_MS)
   }
 
   // Le bouton "Scanner" de la ligne privilégie le résultat déjà en base (rapide,

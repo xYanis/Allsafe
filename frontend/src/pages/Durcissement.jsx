@@ -10,6 +10,7 @@ import OsLogo from '../components/OsLogo.jsx'
 import CategoryIcon from '../components/CategoryIcon.jsx'
 import ComplianceChecklist, { complianceSummary } from '../components/ComplianceChecklist.jsx'
 import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 // Durcissement (12/08/2026, ex-section "Durcissement / conformité" de la modale de scan
 // d'Assets.jsx, demande utilisateur — "sortir la modal pour en faire un module à part") : vue
@@ -23,7 +24,7 @@ import { MODULES } from '../constants/modules.js'
 // dépliage inline de la ligne, même esprit que les sections repliables de
 // ComplianceChecklist.jsx — une seule ligne dépliée à la fois.
 const MODULE_HOVER = `${MODULES.inventaire.color}0a`
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.inventaire.color)
 
 function checksFor(asset) {
   // web_compliance (17/08/2026, asset_type="website") : même principe que network_compliance
@@ -212,6 +213,13 @@ export default function Durcissement() {
       setExpandedId(target.id)
       searchParams.delete('asset')
       setSearchParams(searchParams, { replace: true })
+      // Sans ça, la ligne se dépliait bien mais restait hors écran dans un tableau non paginé
+      // (potentiellement des dizaines d'actifs) — perçu à tort comme "revenu sur la page de
+      // base sans rien garder de sélectionné" (18/08/2026, retour utilisateur). Un frame
+      // d'attente : la ligne doit être montée avant de pouvoir la cibler par id.
+      requestAnimationFrame(() => {
+        document.getElementById(`durcissement-row-${target.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
     }
   }, [assetList, searchParams, setSearchParams])
 
@@ -325,11 +333,12 @@ export default function Durcissement() {
                 return (
                   <Fragment key={asset.id}>
                     <tr
+                      id={`durcissement-row-${asset.id}`}
                       onClick={() => setExpandedId(isOpen ? null : asset.id)}
                       className="cursor-pointer"
-                      style={{ borderBottom: isOpen ? 'none' : '1px solid var(--border-subtle)' }}
-                      onMouseEnter={e => e.currentTarget.style.background = MODULE_HOVER}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      style={{ borderBottom: isOpen ? 'none' : '1px solid var(--border-subtle)', background: isOpen ? MODULE_HOVER : 'transparent' }}
+                      onMouseEnter={e => { if (!isOpen) e.currentTarget.style.background = MODULE_HOVER }}
+                      onMouseLeave={e => { if (!isOpen) e.currentTarget.style.background = 'transparent' }}
                     >
                       <td className="px-4 py-3 font-semibold" style={{ color: 'var(--text-primary)' }}>
                         <span className="inline-block mr-1.5 transition-transform" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)' }}>›</span>

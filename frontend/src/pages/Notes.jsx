@@ -8,13 +8,21 @@ import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
 import NoteThemeFormModal from '../components/NoteThemeFormModal.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 function fmtDate(iso) {
   if (!iso) return '—'
   return new Date(iso).toLocaleDateString('fr-FR') + ' ' + new Date(iso).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
 }
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.documentation.color)
+// Gris uniforme (18/08/2026, demande explicite) : chaque thème avait sa propre couleur
+// choisie librement (NoteThemeFormModal), rendant la nav thèmes/l'accent des sujets
+// incohérents d'un thème à l'autre — remplacé par cette teinte fixe partout où `t.color`/
+// `selectedTheme.color` servait d'accent visuel. Le champ `color` lui-même n'est pas
+// retiré du modèle/formulaire (pas demandé), juste plus utilisé pour cet accent.
+const THEME_ACCENT = MODULES.parametres.color
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
 // cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
@@ -158,18 +166,18 @@ export default function Notes() {
                   title="Double-clic pour modifier"
                   className="group flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
                   style={{
-                    background: active ? `color-mix(in srgb, ${t.color} 14%, transparent)` : 'transparent',
-                    boxShadow: active ? `inset 3px 0 0 0 ${t.color}` : 'none',
+                    background: active ? `color-mix(in srgb, ${THEME_ACCENT} 14%, transparent)` : 'transparent',
+                    boxShadow: active ? `inset 3px 0 0 0 ${THEME_ACCENT}` : 'none',
                   }}
                   onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-secondary)' }}
                   onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
                 >
                   <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{
-                    background: active ? `color-mix(in srgb, ${t.color} 22%, transparent)` : 'var(--bg-secondary)',
+                    background: active ? `color-mix(in srgb, ${THEME_ACCENT} 22%, transparent)` : 'var(--bg-secondary)',
                     fontSize: 15,
                   }}>{t.icon}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium truncate" style={{ color: active ? t.color : 'var(--text-primary)' }}>{t.name}</span>
+                    <span className="block text-sm font-medium truncate" style={{ color: active ? THEME_ACCENT : 'var(--text-primary)' }}>{t.name}</span>
                     <span className="block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.subject_count} sujet{t.subject_count > 1 ? 's' : ''}</span>
                   </span>
                   <button onClick={e => { e.stopPropagation(); setDeleteThemeTarget(t) }}
@@ -208,8 +216,8 @@ export default function Notes() {
                     {selectedSubjects.map(s => (
                       <div key={s.id} onClick={() => navigate(`/notes/${s.id}`)}
                         className="tree-row group flex items-center gap-2 px-2 py-1.5 cursor-pointer"
-                        style={{ '--accent': selectedTheme.color }}>
-                        <span aria-hidden="true" className="flex-shrink-0 rounded-full" style={{ width: 5, height: 5, background: selectedTheme.color }} />
+                        style={{ '--accent': THEME_ACCENT }}>
+                        <span aria-hidden="true" className="flex-shrink-0 rounded-full" style={{ width: 5, height: 5, background: THEME_ACCENT }} />
                         <span className="text-sm flex-1 min-w-0 truncate" style={{ color: 'var(--text-secondary)' }}>{s.title}</span>
                         <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{fmtDate(s.updated_at)}</span>
                         <button onClick={e => { e.stopPropagation(); setDeleteSubjectTarget(s) }}
@@ -222,7 +230,7 @@ export default function Notes() {
 
                 <button onClick={() => handleCreateSubject(selectedTheme.id)} disabled={creatingSubjectFor === selectedTheme.id}
                   className="tree-row w-full flex items-center gap-2 px-2 py-1.5 text-left disabled:opacity-50"
-                  style={{ '--accent': selectedTheme.color, color: 'var(--text-faint)' }}>
+                  style={{ '--accent': THEME_ACCENT, color: 'var(--text-faint)' }}>
                   <span className="flex-shrink-0 text-sm leading-none w-[5px] text-center">+</span>
                   <span className="text-sm">Nouveau sujet</span>
                 </button>

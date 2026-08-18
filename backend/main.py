@@ -28,7 +28,7 @@ from auth_deps import require_admin, require_auth, require_page
 from config import settings
 from database import SessionLocal, init_db
 from models import User, SyncState
-from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents, integrations, scan_policies
+from routers import cves, assets, vulnerabilities, analysis, reports, sync, stats, remediation, patch_check, connections, watch, identities, security, backup, withsecure, meraki, prtg, glpi, vsphere, incidents, analysts, auth, users, windows_app_mappings, crises, organization_roles, services, documents, audits, notes, agents, integrations, scan_policies, release_notes
 from services.auth import hash_password
 from services.cpe_matcher import run_cpe_matching
 from services.patch_checker import run_full_patch_check_cycle, PATCH_CYCLE_STATE_KEY
@@ -155,7 +155,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request, call_next):
-    """En-têtes de réponse (10/08/2026, cf. AUDIT_SECURITE.md #11) — les pièces jointes
+    """En-têtes de réponse (10/08/2026, cf. audit/AUDIT_SECURITE_1.md #11) — les pièces jointes
     (Documentation/Incidents/Audits) ne valident que la signature magique des premiers
     octets, pas le contenu entier ; servies en Content-Disposition: inline pour PDF/images,
     `nosniff` empêche un navigateur de re-deviner un type MIME différent du `Content-Type`
@@ -170,7 +170,7 @@ async def security_headers(request, call_next):
 @app.exception_handler(DBAPIError)
 async def handle_malformed_id_param(request: Request, exc: DBAPIError):
     """404 propre plutôt qu'un 500 (10/08/2026, trouvé par fuzzing schemathesis en amont
-    du passage en prod, cf. AUDIT_SECURITE.md) : un ID de chemin qui n'est pas un UUID
+    du passage en prod, cf. audit/AUDIT_SECURITE_1.md) : un ID de chemin qui n'est pas un UUID
     syntaxiquement valide (ex. `/api/documents/0/download`) fait planter `session.get(...)`
     avec une exception asyncpg non interceptée — 79 usages de ce genre dans les routers,
     un handler global plutôt que patcher chaque route une par une (cf. principe "penser
@@ -258,6 +258,7 @@ app.include_router(audits.router,          prefix="/api/audits",          tags=[
 # propre schéma d'auth, incompatible avec un garde-fou uniforme posé ici — cf. routers/agents.py.
 app.include_router(agents.router,          prefix="/api/agents",          tags=["Agents"])
 app.include_router(integrations.router,    prefix="/api/integrations",    tags=["Intégrations"],           dependencies=_authed)
+app.include_router(release_notes.router,   prefix="/api/release-notes",   tags=["Notes de version"],        dependencies=_authed)
 
 
 @app.get("/api/health")

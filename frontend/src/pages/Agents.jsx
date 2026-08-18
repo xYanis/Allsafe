@@ -1,108 +1,19 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
   listAgents, createEnrollmentToken, listEnrollmentTokens, deleteEnrollmentToken,
-  revokeAgent, deleteAgent, assets as fetchAssets,
+  revokeAgent, deleteAgent, assets as fetchAssets, agentLatestVersion,
 } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import OsLogo from '../components/OsLogo.jsx'
+import { StatusBadge, VersionBadge, TokenStateBadge, DistroBadge, formatDateTime, contactFreshness, FRESHNESS_COLOR } from '../components/AgentBadges.jsx'
 import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.inventaire.color
-
-const STATUS_STYLES = {
-  enrolled: { background: 'rgba(63,185,80,0.12)', color: '#3fb950', border: '1px solid rgba(63,185,80,0.3)' },
-  revoked:  { background: 'rgba(248,81,73,0.12)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' },
-}
-
-function StatusBadge({ value }) {
-  const s = STATUS_STYLES[value] || STATUS_STYLES.enrolled
-  return <span style={{ ...s, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, display: 'inline-block' }}>
-    {value === 'revoked' ? 'Révoqué' : 'Enrôlé'}
-  </span>
-}
-
-// Pastille de couleur plutôt qu'un pill texte (17/08/2026, demande explicite — moins de
-// bruit visuel dans la colonne) : le sens (à jour/mise à jour dispo) reste accessible via
-// le tooltip au survol. Version en police mono (--font-mono) — lisibilité/alignement d'un
-// numéro de version, cohérent avec le reste de l'app (titres PageHero notamment) — et dans
-// la même couleur que la pastille juste à côté, plutôt qu'un gris neutre découplé du sens
-// qu'elle porte.
-function VersionBadge({ version, outdated }) {
-  if (!version) return <span style={{ color: 'var(--text-muted)' }}>—</span>
-  const color = outdated ? '#d29922' : '#3fb950'
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span style={{ color, fontFamily: 'var(--font-mono)' }}>{version}</span>
-      <span
-        title={outdated ? "Une version plus récente de l'agent est disponible" : "Ce poste tourne la dernière version publiée de l'agent"}
-        style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block', background: color }}
-      />
-    </span>
-  )
-}
-
-// État du jeton d'enrôlement ayant servi à créer cet agent (17/08/2026, demande explicite —
-// distinct du statut de l'agent lui-même, qui ne dit rien du jeton une fois l'enrôlement fait).
-const TOKEN_STATUS_STYLES = {
-  active:    { color: '#3fb950', label: 'Actif',   title: "Le jeton d'enrôlement est toujours valide (non expiré, non épuisé)." },
-  expired:   { color: '#8b949e', label: 'Expiré',  title: "Le jeton d'enrôlement a dépassé sa date d'expiration." },
-  exhausted: { color: '#8b949e', label: 'Épuisé',  title: "Le jeton d'enrôlement a atteint son nombre maximal d'utilisations." },
-  revoked:   { color: '#f85149', label: 'Révoqué', title: "Le jeton d'enrôlement a été révoqué après l'enrôlement." },
-}
-
-function TokenStateBadge({ status }) {
-  const s = TOKEN_STATUS_STYLES[status] || TOKEN_STATUS_STYLES.revoked
-  return (
-    <span className="inline-flex items-center gap-1.5" title={s.title}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0, display: 'inline-block', background: s.color }} />
-      <span style={{ color: 'var(--text-secondary)' }}>{s.label}</span>
-    </span>
-  )
-}
-
-// Distribution précise (ex. "Debian 12", "Windows Server 2019") — distincte de la colonne
-// "OS" (juste windows/linux, déclaré par l'agent lui-même) : vient de l'actif rattaché
-// (Asset.os/os_version, alimenté par le premier scan). OsLogo.jsx sait déjà distinguer
-// Debian/Ubuntu d'un Linux générique à partir de ce texte (même composant que Assets.jsx/
-// Inventaire.jsx) — absente tant qu'aucun scan n'a encore eu lieu sur l'actif.
-function DistroBadge({ os, version }) {
-  if (!os) return <span style={{ color: 'var(--text-muted)' }}>—</span>
-  return (
-    <span className="inline-flex items-center gap-1.5" style={{ color: 'var(--text-secondary)' }}>
-      <OsLogo os={os} size={16} />
-      {os}{version ? ` ${version}` : ''}
-    </span>
-  )
-}
-
-function formatDateTime(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-}
-
-// Rapport de coupure (13/08/2026, boucle persistante — agent/src/daemon.rs::DaemonState) —
-// icône discrète, affichée seulement si la coupure est récente (< 7 jours) : au-delà, plus
-// vraiment exploitable pour l'analyste, autant ne pas encombrer la colonne indéfiniment
-// (le champ reste en base, juste plus affiché ici).
-const GAP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000
-
-function GapBadge({ startedAt, failedAttempts }) {
-  if (!startedAt) return null
-  const started = new Date(startedAt)
-  if (Date.now() - started.getTime() > GAP_MAX_AGE_MS) return null
-  const title = `Hors ligne depuis le ${formatDateTime(startedAt)} (${failedAttempts ?? '?'} tentative${failedAttempts > 1 ? 's' : ''} échouée${failedAttempts > 1 ? 's' : ''})`
-  return (
-    <span title={title} className="inline-flex" style={{ color: '#d29922' }}>
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-      </svg>
-    </span>
-  )
-}
 
 const inputStyle = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 const labelStyle = { color: 'var(--text-muted)' }
@@ -114,6 +25,80 @@ const labelStyle = { color: 'var(--text-muted)' }
 // (même idiome que ValidateDropdown.jsx) plutôt que `absolute` : échappe au `overflow`/
 // empilement de la modale, aligné pile sous (ou au-dessus si pas la place) le champ plutôt
 // que dans un coin — bascule automatique selon l'espace disponible.
+// Téléchargement des paquets construits (18/08/2026, demande explicite) — 3 formats, mêmes
+// routes publiques déjà utilisées par agent/deploy/update-agent.*/le poste lui-même
+// (GET /agents/latest/*, cf. routers/agents.py) : pas de nouvel endpoint pour le .msi/.deb,
+// seul le .exe autonome (zippé avec WebView2Loader.dll, indispensable à côté de lui) est
+// nouveau. Simple <a> natif (routes publiques, pas de session à porter) plutôt qu'un
+// téléchargement piloté en JS — le navigateur gère nativement Content-Disposition.
+const DOWNLOAD_OPTIONS = [
+  { href: '/api/agents/latest/windows-exe', os: 'windows', label: 'Windows — .exe autonome', desc: 'Poste critique, assistant graphique (installation/réparation/mise à jour)' },
+  { href: '/api/agents/latest/windows', os: 'windows', label: 'Windows — .msi (GPO)', desc: 'Déploiement de parc via GPO/script, jeton pré-rempli possible' },
+  { href: '/api/agents/latest/linux', os: 'linux', label: 'Linux — .deb', desc: 'apt install ./allsafe-agent*.deb' },
+]
+
+function DownloadDropdown({ color }) {
+  const [open, setOpen] = useState(false)
+  const [menuStyle, setMenuStyle] = useState({})
+  const btnRef = useRef(null)
+  const menuRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handler(e) {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target) &&
+        menuRef.current && !menuRef.current.contains(e.target)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // `position: fixed` mesuré (pas `absolute`) — cf. AssetSearchSelect ci-dessus : le menu
+  // était rendu à l'intérieur de PageHero, dont le conteneur racine a `overflow-hidden`
+  // (trame de points/lueur d'ambiance), ce qui coupait le menu au lieu de le montrer
+  // (retour utilisateur, "caché dans la tuile d'agent").
+  function openMenu() {
+    if (btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setMenuStyle({ position: 'fixed', top: r.bottom + 6, right: window.innerWidth - r.right, zIndex: 9999 })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      <button ref={btnRef} onClick={openMenu}
+        className="px-4 py-2 text-sm font-medium rounded-lg flex items-center gap-1.5"
+        style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+        Télécharger l'agent
+        <svg className="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={open ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+        </svg>
+      </button>
+      {open && (
+        <div ref={menuRef} className="rounded-xl overflow-hidden"
+          style={{ ...menuStyle, width: 280, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          {DOWNLOAD_OPTIONS.map(o => (
+            <a key={o.href} href={o.href} onClick={() => setOpen(false)}
+              className="flex items-start gap-2.5 px-3.5 py-2.5 transition-colors"
+              style={{ borderBottom: '1px solid var(--border)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+              <span className="flex-shrink-0 mt-0.5"><OsLogo os={o.os} size={18} /></span>
+              <span className="min-w-0">
+                <p className="text-sm font-medium" style={{ color }}>{o.label}</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{o.desc}</p>
+              </span>
+            </a>
+          ))}
+        </div>
+      )}
+    </>
+  )
+}
+
 function AssetSearchSelect({ assetList, value, onChange, emptyLabel }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
@@ -396,6 +381,12 @@ export default function Agents() {
   const [deleteAgentTarget, setDeleteAgentTarget] = useState(null)
   const [deleteTokenTarget, setDeleteTokenTarget] = useState(null)
   const [error, setError] = useState('')
+  // Version courante de l'agent (18/08/2026, demande explicite) — affichée à côté du titre
+  // de page, même source que le champ `outdated` de chaque ligne (CURRENT_AGENT_VERSION,
+  // cf. routers/agents.py), déjà exposée publiquement pour la distribution des paquets
+  // (GET /agents/latest/version, utilisé aussi par l'agent lui-même pour se mettre à jour).
+  const [latestVersion, setLatestVersion] = useState(null)
+  useEffect(() => { agentLatestVersion().then(r => setLatestVersion(r.data?.version)).catch(() => {}) }, [])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -448,17 +439,26 @@ export default function Agents() {
     <div className="p-6 space-y-5">
       <PageHero
         icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
-        title="Agents"
+        title={<>Agents{latestVersion && (
+          <Link to="/agents/notes-de-version" title="Voir les notes de version de l'agent"
+            className="text-xs font-semibold px-2 py-0.5 rounded-full hover:underline"
+            style={{ color: '#39c5cf', background: 'rgba(57,197,207,0.12)', border: '1px solid rgba(57,197,207,0.3)' }}>
+            v{latestVersion}
+          </Link>
+        )}</>}
         color="#39c5cf"
         subtitle="Collecte alternative pour les postes, en complément du compte de service AD/SSH — lecture seule."
       >
-        {isAdmin && (
-          <button onClick={() => setTokenModal(true)}
-            className="px-4 py-2 text-sm font-medium rounded-lg"
-            style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}>
-            + Jeton d'enrôlement
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          <DownloadDropdown color={MODULE_COLOR} />
+          {isAdmin && (
+            <button onClick={() => setTokenModal(true)}
+              className="px-4 py-2 text-sm font-medium rounded-lg"
+              style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}>
+              + Jeton d'enrôlement
+            </button>
+          )}
+        </div>
       </PageHero>
 
       {error && (
@@ -467,7 +467,7 @@ export default function Agents() {
         </div>
       )}
 
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -495,11 +495,13 @@ export default function Agents() {
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><DistroBadge os={a.asset_os} version={a.asset_os_version} /></td>
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{a.asset_name || '—'}</td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><VersionBadge version={a.agent_version} outdated={a.outdated} /></td>
-                  <td className="px-4 py-3 text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
-                    <span className="inline-flex items-center gap-1.5">
+                  <td className="px-4 py-3 text-xs whitespace-nowrap">
+                    <Link to={`/agents/${a.id}`} className="inline-flex items-center gap-1.5 hover:underline"
+                      title="Voir l'historique des contacts de cet agent"
+                      style={{ color: FRESHNESS_COLOR[contactFreshness(a.last_seen_at)] }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: 'currentColor' }} />
                       {formatDateTime(a.last_seen_at)}
-                      <GapBadge startedAt={a.last_gap_started_at} failedAttempts={a.last_gap_failed_attempts} />
-                    </span>
+                    </Link>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap"><StatusBadge value={a.status} /></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><TokenStateBadge status={a.token_status} /></td>
@@ -527,7 +529,7 @@ export default function Agents() {
       </div>
 
       {isAdmin && pendingTokens.length > 0 && (
-        <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
           <div className="px-5 py-3.5" style={{ borderBottom: '1px solid var(--border)' }}>
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Jetons en attente</h2>
           </div>

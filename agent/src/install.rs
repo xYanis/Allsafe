@@ -78,6 +78,29 @@ fn ensure_installed_exe() -> Result<PathBuf> {
     }
     std::fs::copy(&current, &target)
         .with_context(|| format!("copie de {} vers {}", current.display(), target.display()))?;
+
+    // WebView2Loader.dll (18/08/2026, passage à Tauri, cf. gui.rs) — import STATIQUE de
+    // l'exe, résolu par Windows au chargement du process, avant même `main()`. Sans lui à
+    // côté du binaire installé, le service ne démarre jamais du tout (le process ne se
+    // lance pas), et le SCM finit par expirer avec l'erreur 1053 ("le service n'a pas
+    // répondu assez vite") — trompeur, on croirait à un bug dans `service.rs` alors que le
+    // process n'a jamais réussi à démarrer (constaté en conditions réelles). N'affecte que
+    // le mode "poste isolé" (`install.rs` ci-dessus) : le `.msi` embarque déjà les deux
+    // fichiers ensemble dans le même composant, cf. wix/main.wxs.
+    if let Some(current_dir) = current.parent() {
+        let dll_source = current_dir.join("WebView2Loader.dll");
+        if let Some(target_dir) = target.parent() {
+            let dll_target = target_dir.join("WebView2Loader.dll");
+            std::fs::copy(&dll_source, &dll_target).with_context(|| {
+                format!(
+                    "copie de {} vers {} — WebView2Loader.dll doit être à côté de allsafe-agent.exe",
+                    dll_source.display(),
+                    dll_target.display()
+                )
+            })?;
+        }
+    }
+
     Ok(target)
 }
 

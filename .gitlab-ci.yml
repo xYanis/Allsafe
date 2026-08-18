@@ -86,6 +86,15 @@ build-agent:
     # défectueux sans le signaler.
     - "msiinfo suminfo allsafe-agent.msi | grep -q 'Template: x64;1033'"
     - msiinfo export allsafe-agent.msi Environment | grep -q INSTALLFOLDER
+    # Manifeste Windows embarqué dans l'exe (18/08/2026) : `build.rs` fait maintenant échouer
+    # le build si `tauri_build` échoue (avant : simple warning avalé — un exe sans manifeste
+    # est passé un vrai test utilisateur, crash immédiat "TaskDialogIndirect introuvable" faute
+    # de dépendance Common-Controls v6, cf. STATUS.md). Cette assertion couvre en plus le cas
+    # où `tauri_build` réussirait sans erreur mais sans réellement embarquer le manifeste (bug
+    # amont non détecté par le code de retour) — même esprit que les vérifications msiinfo
+    # ci-dessus : échec net plutôt qu'artefact silencieusement cassé.
+    - strings target/x86_64-pc-windows-gnu/release/allsafe-agent.exe | grep -q "requireAdministrator"
+    - strings target/x86_64-pc-windows-gnu/release/allsafe-agent.exe | grep -q "Microsoft.Windows.Common-Controls"
     # Signature Authenticode (18/08/2026) — étape du build, jamais un script séparé à lancer
     # à la main : no-op tant que le certificat n'est pas configuré (deux variables CI/CD,
     # Settings > CI/CD > Variables) :
@@ -135,7 +144,7 @@ test-backend:
   needs: ["build-backend"]
   script:
     # SECRET_KEY/DB_PASSWORD : config.py refuse de démarrer avec la valeur par défaut "changeme"
-    # (garde-fou anti-.env-oublié, cf. AUDIT_SECURITE.md) — valeurs factices, jamais utilisées
+    # (garde-fou anti-.env-oublié, cf. audit/AUDIT_SECURITE_1.md) — valeurs factices, jamais utilisées
     # pour une vraie connexion (les 13 tests sont des fonctions pures ou une AsyncSession mockée,
     # aucune vraie base n'est nécessaire, cf. backend/tests/).
     - docker run --rm -e SECRET_KEY=ci-not-a-real-secret -e DB_PASSWORD=ci-not-a-real-password $BACKEND_IMAGE pytest

@@ -8,8 +8,14 @@ import { CbrLogoTile } from './CbrMark.jsx'
 // explicite de l'utilisateur). Non interactif — pas de bouton "continuer"
 // comme WelcomeOverlay, la déconnexion est déjà décidée, il n'y a rien à
 // confirmer une deuxième fois.
-const HOLD_MS = 550
-const EXIT_MS = 380
+// Logo en grand + wordmark dégradé dessous (18/08/2026, demande explicite :
+// "la même chose en terme d'animation" que le splash d'ouverture de Login.jsx)
+// — mêmes classes partagées (`brand-splash-title`/`brand-splash-exit`, cf.
+// index.css) et mêmes durées : connexion et déconnexion sont toutes deux des
+// écrans "une fois par session", pas une UI vue en boucle, le même temps de
+// pose est justifié des deux côtés.
+const HOLD_MS = 2600
+const EXIT_MS = 550
 
 export default function LogoutOverlay({ onExitStart, onDone }) {
   const [exiting, setExiting] = useState(false)
@@ -27,9 +33,9 @@ export default function LogoutOverlay({ onExitStart, onDone }) {
   return (
     <div className={`welcome-overlay${exiting ? ' welcome-overlay-exit' : ''}`} style={{ background: 'var(--bg-app)' }}>
       <div className="home-glow" />
-      <div className="relative z-10 flex flex-col items-center text-center">
-        <CbrLogoTile size={56} rounded={18} className="brand-pop mb-3" />
-        <p className="logout-text text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+      <div className="relative z-10 flex flex-col items-center gap-4 text-center">
+        <CbrLogoTile size={96} rounded={26} className="brand-pop" />
+        <p className="brand-splash-title text-3xl font-bold tracking-tight" style={{ fontFamily: 'var(--font-mono)', animationDelay: '650ms' }}>
           Déconnexion…
         </p>
       </div>

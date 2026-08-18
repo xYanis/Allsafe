@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { autoBasculeSummary, securityEventsCount, incidentsPendingCount } from '../api/client.js'
+import { useAuth } from '../contexts/AuthContext.jsx'
+import { CbrLogoTile } from './CbrMark.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const AUTO_DISMISS_MS = 9000  // filet de sécurité si l'utilisateur ne clique jamais
 const EXIT_MS = 380
@@ -44,7 +47,19 @@ async function loadRecap() {
 // plus tard) : Home.jsx s'en sert pour monter son propre en-tête/tuiles PENDANT que cet écran se
 // floute/s'efface, plutôt qu'après coup — les deux animations se chevauchent (le flou de sortie
 // masque le raccord) au lieu de révéler une Home déjà figée, statique, une fois l'écran disparu.
+// "Boss" réservé au compte Yanis Hortholary (18/08/2026, demande explicite) — tous les
+// autres comptes n'ont que leur prénom, extrait de `full_name` (`User.full_name`, cf.
+// routers/auth.py::me). Comparaison sur le nom complet plutôt que l'email : c'est le nom
+// qui identifie la personne dans l'app (Analyst, dropdowns...), l'email n'est qu'un
+// identifiant de connexion.
+function greetingName(fullName) {
+  if (!fullName) return null
+  if (fullName.trim() === 'Yanis Hortholary') return 'Boss'
+  return fullName.trim().split(/\s+/)[0]
+}
+
 export default function WelcomeOverlay({ onExitStart, onDone }) {
+  const { user } = useAuth()
   const [exiting, setExiting] = useState(false)
   const [recap, setRecap] = useState(null) // null = chargement
 
@@ -72,26 +87,31 @@ export default function WelcomeOverlay({ onExitStart, onDone }) {
 
   return (
     <div className={`welcome-overlay${exiting ? ' welcome-overlay-exit' : ''}`} style={{ background: 'var(--bg-app)' }} onClick={dismiss}>
+      <div className="hero-grid hero-grid-boot" />
       <div className="home-glow home-glow--high" />
       <div className="relative z-10 flex flex-col items-center text-center w-full max-w-sm px-6" onClick={e => e.stopPropagation()}>
-        <span className="welcome-crown-wrap">
-          <span className="welcome-crown-glow" aria-hidden="true" />
-          <span className="welcome-crown" role="img" aria-hidden="true">👑</span>
+        <span className="welcome-core-wrap">
+          <span className="welcome-core-ring" aria-hidden="true" />
+          <span className="welcome-core-ping" aria-hidden="true" />
+          <CbrLogoTile size={88} rounded={24} className="brand-pop" />
         </span>
-        <h1 className="welcome-title text-4xl font-bold tracking-tight">
-          Bienvenue Boss !
+        <p className="welcome-status text-[11px] font-semibold uppercase" style={{ color: 'var(--brand)', letterSpacing: '0.22em', fontFamily: 'var(--font-mono)' }}>
+          Allsafe — session active
+        </p>
+        <h1 className="welcome-title text-3xl font-bold tracking-tight mt-5">
+          {greetingName(user?.full_name) ? `Bienvenue, ${greetingName(user?.full_name)}.` : 'Session initialisée.'}
         </h1>
-        <p className="welcome-sub text-sm mt-2" style={{ color: 'var(--text-secondary)' }}>
+        <p className="welcome-sub text-sm mt-4" style={{ color: 'var(--text-secondary)' }}>
           {recap === null ? 'Vérification en cours…'
             : recap.length === 0 ? 'Rien à signaler depuis votre dernière visite.'
             : 'Depuis votre dernière visite :'}
         </p>
 
         {recap && recap.length > 0 && (
-          <div className="w-full mt-4 space-y-2">
+          <div className="w-full mt-8 space-y-3.5">
             {recap.map((line, i) => (
-              <div key={i} className="welcome-recap-row flex items-center gap-2.5 text-sm rounded-xl px-3 py-2.5 text-left"
-                style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', animationDelay: `${260 + i * 70}ms` }}>
+              <div key={i} className="welcome-recap-row flex items-center gap-3 text-sm rounded-xl px-4 py-3.5 text-left"
+                style={{ ...tintedCard('var(--brand)'), animationDelay: `${260 + i * 70}ms` }}>
                 <span className="text-base flex-shrink-0">{line.icon}</span>
                 <span style={{ color: 'var(--text-primary)' }}>{line.text}</span>
               </div>
@@ -100,7 +120,7 @@ export default function WelcomeOverlay({ onExitStart, onDone }) {
         )}
 
         <button onClick={dismiss}
-          className="welcome-continue mt-5 text-xs px-4 py-2 rounded-lg font-medium"
+          className="welcome-continue mt-9 text-xs px-4 py-2 rounded-lg font-medium"
           style={{ background: 'color-mix(in srgb, var(--brand) 15%, transparent)', color: 'var(--brand)', border: '1px solid color-mix(in srgb, var(--brand) 35%, transparent)' }}>
           Continuer →
         </button>

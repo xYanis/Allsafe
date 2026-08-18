@@ -5,6 +5,7 @@ import CrisisFormModal from '../components/CrisisFormModal.jsx'
 import CrisisDetailModal from '../components/CrisisDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
@@ -100,7 +101,7 @@ export default function Crises() {
         </div>
       )}
 
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

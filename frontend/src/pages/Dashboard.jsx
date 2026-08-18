@@ -28,8 +28,9 @@ import {
   computeDashboardStats, fakePatchCheckResult, fakeAnalysis,
 } from '../utils/fakeData.js'
 import { MODULES } from '../constants/modules.js'
+import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(CYBERVULN_CARD_TINT)
 // Style "filtre actif" (17/08/2026) — même formule que CVEs.jsx/Vulnerabilities.jsx, couleur du
 // module de cette page (CyberVuln).
 const ACTIVE_SELECT_STYLE = { background: `${MODULES.cybervuln.color}1f`, color: MODULES.cybervuln.color, border: `1px solid ${MODULES.cybervuln.color}59`, outline: 'none', cursor: 'pointer' }

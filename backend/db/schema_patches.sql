@@ -547,7 +547,7 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS network_compliance JSON;
 ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS status VARCHAR;
 
 -- Anti-doublon (asset_id, cve_id) sur vulnerabilities (11/08/2026, incident réel : 6 paires
--- dupliquées trouvées en base, cf. AUDIT_SECURITE.md/STATUS.md). Le check "exists" applicatif
+-- dupliquées trouvées en base, cf. audit/AUDIT_SECURITE_1.md/STATUS.md). Le check "exists" applicatif
 -- dans run_cpe_matching (services/cpe_matcher.py) n'est pas atomique : deux passes de matching
 -- concurrentes (bouton manuel + cycle automatique, ou deux clics rapprochés) peuvent toutes les
 -- deux constater "pas encore là" et insérer chacune leur ligne. La contrainte fait respecter
@@ -792,3 +792,44 @@ CREATE TABLE IF NOT EXISTS password_reset_requests (
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_user_id ON password_reset_requests(user_id);
 CREATE INDEX IF NOT EXISTS idx_password_reset_requests_status ON password_reset_requests(status);
 GRANT SELECT, INSERT, UPDATE, DELETE ON password_reset_requests TO cbr_app;
+
+-- Historique des check-ins agent (18/08/2026, cf. models.py::AgentCheckinLog) — page dédiée
+-- "historique des contacts" par agent (Sécurité > Agents) ; jusqu'ici seul le dernier contact
+-- (agents.last_seen_at) était retenu. Alimenté uniquement par POST /agents/checkin, jamais
+-- par le sondage GET /agents/pending (60s, lecture seule). CASCADE : l'historique n'a de sens
+-- que pour la durée de vie de l'agent lui-même.
+CREATE TABLE IF NOT EXISTS agent_checkin_logs (
+    id                  UUID PRIMARY KEY,
+    agent_id            UUID NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    checked_in_at       TIMESTAMPTZ NOT NULL,
+    package_count       INTEGER,
+    agent_version       VARCHAR,
+    gap_started_at      TIMESTAMPTZ,
+    gap_failed_attempts INTEGER,
+    on_demand           BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_agent_checkin_logs_agent_id ON agent_checkin_logs(agent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_checkin_logs_checked_in_at ON agent_checkin_logs(checked_in_at);
+GRANT SELECT, INSERT, UPDATE, DELETE ON agent_checkin_logs TO cbr_app;
+
+-- Distinction scan planifié (cycle horaire, cf. agent/src/daemon.rs::CHECKIN_INTERVAL) vs
+-- scan à la demande (bouton "Scanner" satisfait au sondage 60s suivant) dans l'historique
+-- des check-ins (18/08/2026, retour utilisateur — "voir le cycle des scans avec historique").
+ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS on_demand BOOLEAN NOT NULL DEFAULT false;
+
+-- Notes de version (18/08/2026, demande explicite, cf. models.py::ReleaseNote) : `allsafe`
+-- (page Paramètres) et `agent` (page dédiée, Sécurité > Agents) dans la même table, distinguées
+-- par `scope` plutôt que deux tables séparées — même forme exacte des deux côtés (version/
+-- catégorie/titre/description), pas de raison de dupliquer le schéma.
+CREATE TABLE IF NOT EXISTS release_notes (
+    id          UUID PRIMARY KEY,
+    scope       VARCHAR NOT NULL,
+    version     VARCHAR,
+    category    VARCHAR NOT NULL DEFAULT 'feature',
+    title       VARCHAR NOT NULL,
+    description TEXT,
+    created_by  VARCHAR,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_release_notes_scope ON release_notes(scope, created_at DESC);
+GRANT SELECT, INSERT, UPDATE, DELETE ON release_notes TO cbr_app;

@@ -9,6 +9,7 @@ import {
 } from '../utils/fakeData.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 // Module Surveillance Identités (CyberVeille, couleur bleue #58a6ff) — repère
 // les items de fuite de données concernant l'entreprise, en croisant des
@@ -31,8 +32,8 @@ import PageHero from '../components/PageHero.jsx'
 // GITHUB_TOKEN configuré). Un premier brouillon à base d'API payantes (HIBP,
 // IntelX, Hunter.io, Shodan, Censys, SecurityTrails) a été explicitement
 // écarté pour rester 100% gratuit (cf. STATUS.md).
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const ACCENT = '#58a6ff'
+const CARD = tintedCard(ACCENT)
 
 const KIND_OPTIONS = [
   { value: 'name',     label: 'Nom' },

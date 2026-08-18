@@ -6,6 +6,7 @@ import SeverityBadge from '../components/SeverityBadge.jsx'
 import AuditFormModal, { AUDIT_TYPES, AUDIT_STATUSES } from '../components/AuditFormModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.securite.color
 
@@ -115,7 +116,7 @@ export default function Audits() {
         </div>
       )}
 
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

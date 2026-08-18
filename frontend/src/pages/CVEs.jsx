@@ -5,6 +5,7 @@ import SeverityBadge from '../components/SeverityBadge.jsx'
 import ExploitBadge from '../components/ExploitBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import { MODULES } from '../constants/modules.js'
+import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
 
 const REFRESH_OPTIONS = [7, 15]
 // Survol de ligne teinté CyberVuln (11/08/2026, tour visuel) — cf. même remarque que
@@ -84,7 +85,7 @@ function RefreshDropdown({ onSelect, status }) {
   )
 }
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(CYBERVULN_CARD_TINT)
 const INPUT_STYLE = {
   background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8,
   color: 'var(--text-secondary)', padding: '6px 12px', fontSize: 13, outline: 'none',

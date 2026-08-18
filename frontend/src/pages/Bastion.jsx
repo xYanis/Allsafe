@@ -1,7 +1,8 @@
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.securite.color)
 
 export default function Bastion() {
   return (

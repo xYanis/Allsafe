@@ -27,9 +27,10 @@ import { SERVICE_COLOR_PALETTE } from '../constants/serviceColors.js'
 import ServiceIcon from '../components/ServiceIcon.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const MODULE_COLOR = '#8b949e' // MODULES.parametres.color — module Paramètres, cf. PageHero ci-dessous
+const CARD = tintedCard(MODULE_COLOR)
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
 

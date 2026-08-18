@@ -6,8 +6,10 @@ import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, redactText, isFakeId } from '../utils/fakeData.js'
 import WeeklyArchives from '../components/WeeklyArchives.jsx'
+import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.rapports.color)
 
 export default function Reports() {
   const { isAnonymous } = usePresentation()

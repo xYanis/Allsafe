@@ -11,6 +11,7 @@ import DocumentTypeFormModal from '../components/DocumentTypeFormModal.jsx'
 import UploadDocumentModal from '../components/UploadDocumentModal.jsx'
 import DocumentPreviewModal from '../components/DocumentPreviewModal.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.documentation.color
 
@@ -58,7 +59,7 @@ function DocumentTypeCard({ type, docs, isAdmin, onUpload, onDeleteDoc, onDelete
 
   return (
     <div className="lift-card rounded-2xl p-5 transition-colors" onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
-      style={{ background: 'var(--bg-card)', border: `1px solid ${dragOver ? MODULE_COLOR : 'var(--border)'}` }}>
+      style={{ ...tintedCard(MODULE_COLOR), border: dragOver ? `1px solid ${MODULE_COLOR}` : tintedCard(MODULE_COLOR).border }}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <h2 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>{type.name}</h2>
         <div className="flex gap-1.5 flex-shrink-0">

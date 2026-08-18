@@ -296,7 +296,13 @@ async def scan_asset_endpoint(
             raise HTTPException(409, "Aucun agent actif rattaché à cet actif.")
         agent.pending_scan_requested_at = datetime.now(timezone.utc)
         await session.commit()
-        return {"reachable": None, "agent_scan_requested": True}
+        # `requested_at` sert de référence au sondage frontend (Assets.jsx::pollAgentScan,
+        # 18/08/2026) pour détecter la fin du scan sans dépendre de l'horloge du navigateur.
+        return {
+            "reachable": None,
+            "agent_scan_requested": True,
+            "requested_at": agent.pending_scan_requested_at.isoformat(),
+        }
 
     if asset.collection_method != "service_account":
         # Sans ce garde-fou, un clic sur un actif collecté autrement (hôte ESXi depuis la
@@ -478,3 +484,25 @@ def _asset_dict(
             "status_since": (network_status.metrics or {}).get("status_since"),
         } if network_status else None,
     }
+
+
+@router.get("/{asset_id}")
+async def get_asset(asset_id: str, session: AsyncSession = Depends(get_session)):
+    """Un seul actif, même forme que `list_assets` (18/08/2026) — pour les pages de détail
+    qui n'ont besoin que d'un actif (ex. AgentHistory.jsx) sans payer le coût de charger/
+    filtrer toute la liste côté client juste pour ça. Déclaré en tout dernier dans ce
+    fichier : `/{asset_id}` matche n'importe quel chemin à un seul segment, donc DOIT être
+    enregistré après tous les GET à chemin statique (`/lifecycle-since` notamment) sous
+    peine de leur voler la requête (résolution Starlette par ordre d'enregistrement)."""
+    asset = await session.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(404, "Actif introuvable")
+    vuln_count = await session.scalar(select(func.count()).select_from(Vulnerability).where(Vulnerability.asset_id == asset.id))
+    open_vuln_count = await session.scalar(
+        select(func.count()).select_from(Vulnerability).where(Vulnerability.asset_id == asset.id, Vulnerability.status == "open")
+    )
+    network_status = (await session.execute(
+        select(NetworkStatus).where(NetworkStatus.asset_id == asset.id)
+        .order_by(func.coalesce(NetworkStatus.updated_at, NetworkStatus.last_reported_at).desc())
+    )).scalars().first()
+    return _asset_dict(asset, vuln_count or 0, network_status, None, open_vuln_count or 0)

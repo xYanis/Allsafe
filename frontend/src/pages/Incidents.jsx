@@ -8,6 +8,7 @@ import IncidentFormModal, { INCIDENT_CATEGORIES, INCIDENT_SEVERITIES, INCIDENT_S
 import IncidentDetailModal from '../components/IncidentDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -206,7 +207,7 @@ export default function Incidents() {
         </div>
       )}
 
-      <div className="rounded-2xl overflow-hidden" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>

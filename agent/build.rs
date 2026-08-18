@@ -54,10 +54,17 @@ fn main() {
 </assembly>
 "#,
         );
+        // ⚠️ Un échec ici ne doit JAMAIS être avalé en simple warning (erreur réelle vécue le
+        // 18/08/2026) : `try_build` est ce qui embarque le manifeste ci-dessus (dont
+        // `Microsoft.Windows.Common-Controls` — sans lui, `TaskDialogIndirect` introuvable,
+        // crash immédiat au lancement) — un warning silencieux avait laissé passer un exe
+        // sans manifeste jusqu'au test utilisateur. Cause trouvée : `agent/gen/schemas/`
+        // (cache local des schémas ACL Tauri, `.gitignore`, jamais versionné) régénéré par une
+        // version de `tauri-build` différente de celle qui l'avait écrit devient illisible
+        // ("failed to read plugin permissions") — purge `rm -rf agent/gen` si ça se reproduit
+        // après une montée de version tauri/tauri-build.
         let attrs = tauri_build::Attributes::new().windows_attributes(windows);
-        if let Err(e) = tauri_build::try_build(attrs) {
-            println!("cargo:warning=échec de tauri_build (icons/icon.ico manquant ? windres/mingw-w64 manquant ?) : {e}");
-        }
+        tauri_build::try_build(attrs).expect("tauri_build a échoué — manifeste/icône non embarqués, l'exe serait cassé au lancement (cf. commentaire ci-dessus : purger agent/gen/ ?)");
     } else {
         // Hors Windows, `tauri_build::build()` ne fait rien d'utile pour ce projet (pas de
         // cible Linux/macOS pour l'app graphique, `gui.rs`/`install.rs` sont `#[cfg(windows)]`)

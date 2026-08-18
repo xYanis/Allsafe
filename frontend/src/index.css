@@ -409,9 +409,11 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 /* ─── Page d'accueil (Home.jsx) — sélecteur de module ────────────────────────
    Motion en CSS (hors main thread, interruptible via transitions) : entrée en
-   cascade au chargement, hover premium teinté de la couleur du module, feedback
-   au press. Courbe d'ease-out forte (cf. emil-design-eng) — les easings CSS
-   natifs manquent de punch. Tout est neutralisé sous prefers-reduced-motion. */
+   cascade par ligne au chargement, survol confiné à l'icône (18/08/2026 — plus
+   de lift/spotlight sur la tuile entière), feedback au press, sortie vers le
+   module choisi à la sélection. Courbe d'ease-out forte (cf. emil-design-eng) —
+   les easings CSS natifs manquent de punch. Tout est neutralisé sous
+   prefers-reduced-motion. */
 :root {
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
@@ -438,8 +440,23 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 /* `both` : l'état initial (opacity 0) s'applique aussi pendant le delay, donc les
    tuiles restent invisibles avant leur tour dans la cascade. */
-.home-enter { opacity: 0; animation: home-rise 560ms var(--ease-out) both; }
-.home-logo  { animation: home-pop 620ms var(--ease-out) both; }
+.home-enter { opacity: 0; animation: home-rise 1200ms var(--ease-out) both; }
+.home-logo  { animation: home-pop 1200ms var(--ease-out) both; }
+
+/* Tuiles modules : chaque ligne de 4 vient d'une direction opposée (18/08/2026, demande
+   explicite — un simple décalage de temps entre les deux lignes ne se voyait quasiment
+   pas, cf. TILE_ROW_DELAY dans Home.jsx). Remplace .home-enter sur les tuiles seulement,
+   le reste de la page (logo/titre) garde la montée verticale simple. */
+@keyframes home-row-in-left {
+  from { opacity: 0; transform: translateX(-40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes home-row-in-right {
+  from { opacity: 0; transform: translateX(40px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+.home-enter-left  { opacity: 0; animation: home-row-in-left 1300ms var(--ease-out) both; }
+.home-enter-right { opacity: 0; animation: home-row-in-right 1300ms var(--ease-out) both; }
 
 
 .home-glow {
@@ -487,49 +504,75 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 }
 .home-tile:active { transform: scale(0.98); }
 
-.home-icon  { transition: transform 240ms var(--ease-out), background 240ms var(--ease-out); }
-.home-arrow { opacity: 0; transform: translateX(-6px); transition: opacity 220ms var(--ease-out), transform 220ms var(--ease-out); }
-
-/* Contenu au-dessus du spotlight (::after) mais sous le liseré (::before). */
-.home-tile > * { position: relative; z-index: 1; }
-
-/* Spotlight qui suit la souris : radial-gradient positionné en var(--mx/--my),
-   mises à jour en JS directement sur la tuile (pas de re-render). Décoratif —
-   révélé au survol seulement, masqué sous prefers-reduced-motion. */
-.home-tile::after {
-  content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit;
-  background: radial-gradient(240px circle at var(--mx, 50%) var(--my, 0%),
-              color-mix(in srgb, var(--tile) 22%, transparent), transparent 62%);
-  opacity: 0; transition: opacity 260ms var(--ease-out); pointer-events: none;
+/* TEST — tilt 3D des tuiles (18/08/2026, à l'essai, pas encore validé) : la grille porte la
+   perspective (`.home-tiles-grid`) plutôt que chaque tuile individuellement — un seul contexte
+   3D partagé par toutes, plus simple qu'un wrapper par tuile. rotateX/rotateY posés en style
+   inline par Home.jsx (suivi souris, cf. handleTileMove) — la transition CSS sur `transform`
+   est coupée pendant le suivi (sinon effet "élastique" en retard sur le curseur) et rétablie au
+   `mouseleave` pour que le retour à plat soit animé. Glare : dégradé radial qui suit le curseur
+   via --mx/--my (mêmes coordonnées que le tilt), teinté dans la couleur du module (--tile, pas
+   du blanc pur — demande explicite, plus cohérent avec le reste de la tuile déjà teintée) +
+   un peu de blanc pour garder l'effet "reflet". Overlay purement décoratif au-dessus du contenu. */
+.home-tiles-grid { perspective: 1000px; }
+.home-tile-glare {
+  position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--tile) 55%, white 30%), transparent 35%);
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out);
 }
 
-/* Liseré supérieur à la couleur du module, révélé au survol (clip-path : pas de
-   reflow, GPU). --tile est injectée en style inline par tuile. */
-.home-tile::before {
-  content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; z-index: 2;
-  background: var(--tile); clip-path: inset(0 100% 0 0);
-  transition: clip-path 320ms var(--ease-out);
+/* Survol (18/08/2026, demande explicite) : le MOUVEMENT reste confiné à l'icône (scale +
+   rotation, pas juste un scale comme avant) — plus de lift de toute la tuile ni de
+   spotlight qui suit la souris. Mais la tuile garde sa surbrillance (bordure/fond teintés
+   plus fort dans sa couleur) : sans ça, impossible de voir quelle tuile est survolée tant
+   que la souris n'est pas pile sur l'icône (retour utilisateur après une première passe
+   qui avait aussi retiré ça par erreur). */
+.home-icon { transition: transform 240ms var(--ease-out), background 240ms var(--ease-out); }
+@keyframes home-icon-hover {
+  from { transform: scale(1) rotate(0deg); }
+  to   { transform: scale(1.18) rotate(8deg); }
 }
 
 @media (hover: hover) and (pointer: fine) {
   .home-tile:hover {
-    transform: translateY(-4px);
     border-color: color-mix(in srgb, var(--tile) 55%, transparent);
-    background: color-mix(in srgb, var(--tile) 7%, var(--bg-card));
-    box-shadow: 0 14px 34px -14px color-mix(in srgb, var(--tile) 50%, transparent);
+    background: color-mix(in srgb, var(--tile) 9%, var(--bg-card));
   }
-  .home-tile:hover::before { clip-path: inset(0 0 0 0); }
-  .home-tile:hover::after  { opacity: 1; }
-  .home-tile:hover .home-icon  { transform: scale(1.08); background: color-mix(in srgb, var(--tile) 28%, transparent); }
-  .home-tile:hover .home-arrow { opacity: 1; transform: translateX(0); }
+  .home-tile:hover .home-icon {
+    animation: home-icon-hover 600ms var(--ease-out) forwards;
+    background: color-mix(in srgb, var(--tile) 28%, transparent);
+  }
+  .home-tile:hover .home-tile-glare { opacity: 1; }
 }
 
+/* Sélection d'un module (18/08/2026, demande explicite) : jusqu'ici `navigate()` partait
+   instantanément au clic, un cut sec sans transition — désormais la tuile choisie reste
+   éclairée dans sa propre couleur (`.home-tile-selected`, transition déjà portée par
+   `.home-tile` lui-même, pas de nouvelle keyframe) pendant que le reste de la page
+   s'efface (`.home-exit`), cf. Home.jsx::selectModule pour le délai avant `navigate()`
+   (aligné sur la durée de `home-fade-out` ci-dessous). Pas d'overshoot — Home est vue
+   plusieurs fois par jour, pas un écran rare comme Login/Bienvenue Boss qui peuvent se
+   permettre une vraie pause (cf. --ease-bounce plus haut). */
+.home-tile-selected {
+  transform: translateY(-4px) scale(1.03);
+  border-color: var(--tile);
+  background: color-mix(in srgb, var(--tile) 12%, var(--bg-card));
+  box-shadow: 0 20px 44px -16px color-mix(in srgb, var(--tile) 65%, transparent);
+  transition-duration: 320ms;
+}
+@keyframes home-fade-out {
+  from { opacity: 1; transform: scale(1); filter: blur(0); }
+  to   { opacity: 0; transform: scale(0.97); filter: blur(6px); }
+}
+.home-exit { animation: home-fade-out 750ms var(--ease-in-out) both; }
+
 @media (prefers-reduced-motion: reduce) {
-  .home-enter, .home-logo, .home-glow { animation: none; opacity: 1; }
-  .home-tile, .home-tile:hover { transform: none; }
-  .home-tile::before { transition: none; }
-  .home-tile::after, .home-tile:hover::after { display: none; }
-  .home-arrow { transform: none; transition: opacity 200ms ease; }
+  .home-enter, .home-enter-left, .home-enter-right, .home-logo, .home-glow { animation: none; opacity: 1; transform: none; }
+  .home-tile { transform: none; }
+  .home-tile:hover .home-icon { animation: none; }
+  .home-tile-glare { display: none; }
+  .home-tile-selected { transform: none; }
+  .home-exit { animation: none; }
 }
 
 /* ─── Delight de marque — Login.jsx + WelcomeOverlay.jsx uniquement ──────────
@@ -578,9 +621,36 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   animation: brand-text-reveal 1.4s var(--ease-out) both;
 }
 
+/* Logo en grand + wordmark dessous, révélé après coup — écran de transition
+   "rare" (une fois par session : connexion, déconnexion) qui se permet un
+   temps de pose que l'UI courante n'a pas. Partagé entre le splash d'ouverture
+   de Login.jsx et LogoutOverlay.jsx (18/08/2026, demande explicite : "la même
+   chose en terme d'animation" côté déconnexion) — d'où le préfixe `brand-`
+   plutôt que `login-`, contrairement à la convention "jamais réutilisée entre
+   pages" du reste du fichier : ces deux écrans sont volontairement le même
+   rituel d'entrée/sortie de session, pas deux pages distinctes qui
+   convergeraient par coïncidence. */
+@keyframes brand-splash-title-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.brand-splash-title {
+  background-image: var(--brand-text-grad);
+  background-size: 250% 100%; background-position: 0% 0;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  opacity: 0; animation: brand-splash-title-in 750ms var(--ease-out) both;
+}
+
+@keyframes brand-splash-out {
+  from { opacity: 1; transform: scale(1); }
+  to   { opacity: 0; transform: scale(0.85); }
+}
+.brand-splash-exit { animation: brand-splash-out 550ms var(--ease-out) both; }
+
 @media (prefers-reduced-motion: reduce) {
   .brand-pop, .brand-text-shimmer { animation: none; opacity: 1; transform: none; background-position: 0 0; }
   .brand-ring { display: none; }
+  .brand-splash-title, .brand-splash-exit { animation: none; opacity: 1; transform: none; background-position: 0 0; }
 }
 
 /* ─── Login.jsx ───────────────────────────────────────────────────────────── */
@@ -594,14 +664,78 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 }
 .login-enter { opacity: 0; animation: login-rise 550ms var(--ease-out) both; }
 
-/* Bouton de connexion : même overshoot que le logo, la CTA de l'écran mérite
-   un peu plus de présence qu'un simple fondu. */
+/* Champs email/mot de passe (18/08/2026, demande explicite) : chacun arrive
+   d'un côté opposé plutôt que tous deux du bas — email depuis la gauche, mot
+   de passe (juste en dessous) depuis la droite, pour bien les distinguer l'un
+   de l'autre pendant la séquence d'entrée plutôt que de les voir monter en
+   parallèle de façon identique. Même traitement blur que .login-rise
+   ("matérialisation"), juste l'axe qui change. */
+@keyframes login-field-in-left {
+  from { opacity: 0; transform: translateX(-32px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+.login-field-left { opacity: 0; animation: login-field-in-left 750ms var(--ease-out) both; }
+
+@keyframes login-field-in-right {
+  from { opacity: 0; transform: translateX(32px); filter: blur(4px); }
+  to   { opacity: 1; transform: translateX(0); filter: blur(0); }
+}
+.login-field-right { opacity: 0; animation: login-field-in-right 750ms var(--ease-out) both; }
+
+/* Bouton de connexion : montée depuis le bas plus marquée que la simple
+   matérialisation des champs (18px) — la CTA de l'écran mérite un déplacement
+   plus lisible, avec le même overshoot que le logo. */
 @keyframes login-button-pop {
-  0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
+  0%   { opacity: 0; transform: translateY(28px) scale(0.92); }
   70%  { opacity: 1; transform: translateY(0) scale(1.03); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
-.login-button-enter { opacity: 0; animation: login-button-pop 650ms var(--ease-bounce) both; }
+.login-button-enter { opacity: 0; animation: login-button-pop 850ms var(--ease-bounce) both; }
+
+/* Effet "j'entre dans l'application" (18/08/2026, demande explicite) : une fois les
+   identifiants validés, champs et bouton repartent — miroir de leur propre entrée
+   (mêmes axes gauche/droite/bas), PENDANT que le logo/"Allsafe" du splash d'ouverture
+   (cf. section brand-* plus haut) regrossit au centre de l'écran. Exception assumée à
+   la règle générale du fichier ("jamais d'animation de sortie") : ce moment précis
+   n'arrive qu'une fois par session, comme le splash lui-même. */
+@keyframes login-field-out-left {
+  from { opacity: 1; transform: translateX(0); filter: blur(0); }
+  to   { opacity: 0; transform: translateX(-70px); filter: blur(4px); }
+}
+.login-field-left-exit { animation: login-field-out-left 750ms var(--ease-in-out) both; }
+
+@keyframes login-field-out-right {
+  from { opacity: 1; transform: translateX(0); filter: blur(0); }
+  to   { opacity: 0; transform: translateX(70px); filter: blur(4px); }
+}
+.login-field-right-exit { animation: login-field-out-right 750ms var(--ease-in-out) both; }
+
+@keyframes login-button-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to   { opacity: 0; transform: translateY(55px) scale(0.85); }
+}
+.login-button-exit { animation: login-button-out 700ms var(--ease-in-out) both; }
+
+/* Le logo voyage vraiment jusqu'au centre (18/08/2026, demande explicite — l'ancienne
+   version faisait juste réapparaître un second logo déjà centré, un swap déguisé en pop,
+   pas un vrai déplacement) : au lieu de `.brand-pop` (qui ne bouge pas, juste un scale sur
+   place), ce logo PART de la position exacte du petit logo d'en-tête et grossit en glissant
+   jusqu'au centre. Position de départ mesurée au pixel près juste avant la bascule
+   (`getBoundingClientRect`, cf. Login.jsx::handleSubmit) et posée en custom properties CSS
+   (--flip-dx/--flip-dy/--flip-scale) que cette keyframe consomme — un seul jeu de valeurs
+   calculées en JS, pas une position codée en dur qui se déréglerait à la moindre resize/
+   modification de mise en page. Le petit logo d'en-tête, lui, ne se démonte plus pendant
+   cette transition (juste opacity:0) : le démonter aurait fait sauter la mise en page du
+   formulaire encore affiché en dessous (centrage vertical de toute la page, cf. STATUS.md). */
+@keyframes login-logo-flip {
+  from { transform: translate(var(--flip-dx, 0), var(--flip-dy, 0)) scale(var(--flip-scale, 1)); }
+  to   { transform: translate(0, 0) scale(1); }
+}
+.login-logo-flip { animation: login-logo-flip 650ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-logo-flip { animation: none; transform: none; }
+}
 
 /* Erreur de connexion : apparaît puis tremble légèrement — indication d'état
    (cf. emil-design-eng § purpose), pas de la décoration pure. Une seule
@@ -636,8 +770,22 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
    composant CbrLogoTile lui-même, plus haut dans ce fichier — plus une classe
    dédiée à Login). */
 
+/* Splash d'ouverture (18/08/2026, demande explicite) : avant que le vrai
+   en-tête (petit, en place) ne se monte, un logo en grand apparaît seul,
+   centré plein écran, suivi du mot "Allsafe" dessous (`.brand-splash-title`,
+   partagée avec LogoutOverlay.jsx — cf. section brand-* plus haut) — puis
+   tout ce bloc s'efface (`.brand-splash-exit`) en rétrécissant légèrement
+   PENDANT que le vrai en-tête (déjà existant, brand-pop/brand-ring/
+   brand-text-shimmer inchangés) se monte à sa place habituelle : un fondu
+   croisé plutôt qu'un morph d'un seul élément (position fixed → position
+   normale ne s'anime pas nativement), mais les deux mouvements se chevauchent
+   pile pour lire comme "le grand se réduit en le petit". Le logo réutilise
+   .brand-pop tel quel (même pop, juste posé sur une tuile plus grande côté
+   JSX) — pas de nouvelle keyframe nécessaire pour le logo lui-même. */
+
 @media (prefers-reduced-motion: reduce) {
-  .login-enter, .login-button-enter { animation: none; opacity: 1; transform: none; filter: none; }
+  .login-enter, .login-field-left, .login-field-right, .login-button-enter { animation: none; opacity: 1; transform: none; filter: none; }
+  .login-field-left-exit, .login-field-right-exit, .login-button-exit { animation: none; opacity: 1; transform: none; filter: none; }
   .login-error { animation: none; opacity: 1; }
   .hero-grid-boot { animation: none; clip-path: none; }
 }
@@ -663,34 +811,37 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 }
 @keyframes welcome-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* La couronne "atterrit" avec un vrai tour (façon couronne qu'on pose sur une
-   tête) plutôt qu'un simple scale-in, accompagnée d'un halo doré qui pulse et
-   se dissipe une fois — clin d'œil visuel au "Boss" du titre. */
-.welcome-crown-wrap { position: relative; display: inline-flex; }
-@keyframes welcome-crown-pop {
-  0%   { opacity: 0; transform: scale(0.3) rotate(-25deg); }
-  55%  { opacity: 1; transform: scale(1.18) rotate(10deg); }
-  75%  { transform: scale(0.95) rotate(-4deg); }
-  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+/* "Cœur IA" façon HUD (18/08/2026, demande explicite — remplace la couronne "Bienvenue
+   Boss", futuriste façon Jarvis mais posé sur --brand, l'or Allsafe, jamais le bleu/cyan
+   générique de HUD de film). Le logo lui-même reprend .brand-pop tel quel (même pop que
+   partout ailleurs dans l'app, cf. Login.jsx/LogoutOverlay.jsx) — seul l'anneau autour est
+   nouveau : un cercle segmenté qui tourne en continu (repère de "diagnostic système" plutôt
+   que décoratif) + un ping façon sonar qui se dissipe une fois à l'ouverture. */
+.welcome-core-wrap { position: relative; display: inline-flex; margin-bottom: 2.25rem; }
+
+@keyframes welcome-core-spin { to { transform: rotate(360deg); } }
+@keyframes welcome-core-ring-in { from { opacity: 0; } to { opacity: 1; } }
+.welcome-core-ring {
+  position: absolute; inset: -14px; z-index: 0;
+  border-radius: 50%;
+  border: 2px dashed color-mix(in srgb, var(--brand) 55%, transparent);
+  opacity: 0;
+  animation: welcome-core-spin 7s linear infinite, welcome-core-ring-in 500ms var(--ease-out) 300ms forwards;
 }
-.welcome-crown {
-  position: relative; z-index: 1;
-  display: inline-block;
-  font-size: 2.75rem;
-  line-height: 1;
-  margin-bottom: 0.75rem;
-  animation: welcome-crown-pop 800ms var(--ease-bounce) both;
+@keyframes welcome-core-ping {
+  0%   { opacity: 0.6; transform: scale(0.7); }
+  100% { opacity: 0; transform: scale(1.6); }
 }
-@keyframes welcome-crown-glow {
-  0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.5); }
-  45%  { opacity: 0.6; }
-  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.7); }
+.welcome-core-ping {
+  position: absolute; inset: -14px; z-index: 0;
+  border-radius: 50%;
+  border: 1px solid var(--brand);
+  pointer-events: none;
+  animation: welcome-core-ping 1.3s var(--ease-out) 250ms both;
 }
-.welcome-crown-glow {
-  position: absolute; top: 45%; left: 50%; width: 84px; height: 84px; z-index: 0;
-  background: radial-gradient(circle, rgba(227, 179, 65, 0.55), transparent 70%);
-  filter: blur(6px); pointer-events: none;
-  animation: welcome-crown-glow 1.1s var(--ease-out) 150ms both;
+.welcome-status {
+  opacity: 0;
+  animation: home-rise 480ms var(--ease-out) 150ms both;
 }
 
 /* Même traitement que .brand-text-shimmer (dégradé + balayage) mais en classe
@@ -709,19 +860,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   opacity: 0;
   animation: home-rise 560ms var(--ease-out) both;
   animation-delay: 220ms;
-}
-
-/* LogoutOverlay.jsx — même esprit que .welcome-sub, délai raccourci : l'écran
-   est bref (550ms de tenue avant la sortie, cf. HOLD_MS), pas la peine de
-   faire attendre le texte aussi longtemps qu'un écran de bienvenue lu en
-   entier. */
-.logout-text {
-  opacity: 0;
-  animation: home-rise 420ms var(--ease-out) 120ms both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .logout-text { animation: none; opacity: 1; }
 }
 
 /* Récap (bascules auto, alertes sécurité, échéances NIS 2) — glisse depuis la
@@ -763,7 +901,7 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 @media (prefers-reduced-motion: reduce) {
   .welcome-overlay { animation: none; transition: opacity 200ms ease; }
   .welcome-overlay.welcome-overlay-exit { filter: none; }
-  .welcome-crown, .welcome-title, .welcome-sub, .welcome-recap-row, .welcome-continue { animation: none; opacity: 1; transform: none; }
-  .welcome-crown-glow { display: none; }
+  .welcome-status, .welcome-title, .welcome-sub, .welcome-recap-row, .welcome-continue { animation: none; opacity: 1; transform: none; }
+  .welcome-core-ring, .welcome-core-ping { animation: none; opacity: 0; display: none; }
   .welcome-continue:active { transform: none; }
 }

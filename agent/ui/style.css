@@ -1,17 +1,28 @@
-/* Palette reprise de l'appli web Allsafe (frontend/src/constants/modules.js et badges de
-   statut) — continuité visuelle avec le reste du produit plutôt qu'une palette isolée. */
+/* Identité de marque Allsafe reprise telle quelle de frontend/src/index.css — thème sombre
+   (`:root` par défaut du frontend, pas la variante `[data-theme="light"]` utilisée jusqu'au
+   18/08/2026, cf. STATUS.md) — pas la couleur du module Inventaire (cyan) utilisée par erreur
+   dans une première version : le module n'est que l'endroit où vit la page Agents, la marque
+   Allsafe elle-même est noir + or (11/08/2026, cf. CbrMark.jsx). En thème sombre, la tuile de
+   logo (dégradé noir + glyphe or) est déjà celle du frontend par défaut, sans bidouille de
+   cohabitation contrairement au thème clair (qui divergeait volontairement, cf. historique
+   Git). Statuts (success/danger/info/warning) repris des mêmes teintes que le reste de
+   l'appli en dark — plus besoin de variantes assombries pour le contraste sur fond clair. */
 :root {
-  --brand: #39c5cf;       /* Inventaire (module qui héberge la page Agents) */
-  --brand-dark: #0f3d40;
+  --brand: #f5c518;
+  --brand-dark: #a37f00;
+  --brand-tile-grad: linear-gradient(155deg, #2e2e2e 0%, #121212 55%, #000000 100%);
+  --brand-icon: #f5c518;
+  --brand-text-grad: linear-gradient(100deg, #fff6c9 0%, #f5c518 35%, #c99a00 65%, #f5c518 100%);
+  --brand-glow: rgba(245, 197, 24, 0.4);
   --success: #3fb950;
   --danger: #f85149;
   --info: #58a6ff;
   --warning: #d29922;
-  --bg: #ffffff;
-  --bg-secondary: #f6f8fa;
-  --border: #d0d7de;
-  --text: #1f2328;
-  --text-muted: #59636e;
+  --bg: #0d1117;
+  --bg-secondary: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-muted: #8b949e;
 }
 
 * {
@@ -38,18 +49,54 @@ input, textarea {
 
 .banner {
   height: 64px;
-  background: var(--brand);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 12px;
+  padding: 0 20px;
   flex-shrink: 0;
 }
 
+/* Tuile CbrLogoTile reproduite à l'identique (frontend/src/components/CbrMark.jsx) : fond
+   en dégradé sombre, glyphe doré, reflet diagonal + lueur de la couleur de marque. */
+.brand-tile {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  background: var(--brand-tile-grad);
+  box-shadow: 0 13px 30px -10px var(--brand-glow);
+  overflow: hidden;
+}
+
+.brand-tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.14), transparent 55%);
+  pointer-events: none;
+}
+
+.brand-glyph {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 74%;
+  height: 74%;
+  transform: translate(-50%, -50%);
+  fill: var(--brand-icon);
+}
+
 .banner-title {
-  color: #ffffff;
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 700;
   letter-spacing: 0.2px;
+  background: var(--brand-text-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 main {
@@ -119,7 +166,7 @@ main {
 
 .field-input:focus {
   border-color: var(--brand);
-  box-shadow: 0 0 0 3px rgba(57, 197, 207, 0.18);
+  box-shadow: 0 0 0 3px var(--brand-glow);
 }
 
 .status {
@@ -142,21 +189,21 @@ main {
 }
 
 .status[data-kind="info"] {
-  background: rgba(88, 166, 255, 0.1);
-  border-color: rgba(88, 166, 255, 0.3);
-  color: #1a5db8;
+  background: rgba(88, 166, 255, 0.12);
+  border-color: rgba(88, 166, 255, 0.35);
+  color: var(--info);
 }
 
 .status[data-kind="success"] {
-  background: rgba(63, 185, 80, 0.1);
-  border-color: rgba(63, 185, 80, 0.3);
-  color: #1c6e2c;
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.35);
+  color: var(--success);
 }
 
 .status[data-kind="error"] {
-  background: rgba(248, 81, 73, 0.1);
-  border-color: rgba(248, 81, 73, 0.3);
-  color: #a4201a;
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  color: var(--danger);
 }
 
 .menu-list {
@@ -204,18 +251,22 @@ main {
 
 .btn-menu:hover:not(:disabled) {
   border-color: var(--brand);
-  color: var(--brand-dark);
-  background: rgba(57, 197, 207, 0.08);
+  color: var(--brand);
+  background: rgba(245, 197, 24, 0.08);
 }
 
 .btn-primary {
+  /* Texte sombre, pas blanc (18/08/2026, passage au thème sombre) : --brand est un or
+     clair (#f5c518), un texte blanc dessus est illisible — contrairement au thème clair
+     précédent où --brand était un ambre foncé et le blanc contrastait bien. */
   flex: 1;
   background: var(--brand);
-  color: #ffffff;
+  color: #1a1300;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: #2fb0ba;
+  background: var(--brand-dark);
+  color: #fff8e6;
 }
 
 .btn-danger {
@@ -235,7 +286,7 @@ main {
 }
 
 .btn-secondary:hover:not(:disabled) {
-  background: #ebeef1;
+  background: #30363d;
 }
 
 .btn-close {

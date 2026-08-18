@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { MODULES } from '../constants/modules.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
@@ -7,7 +7,7 @@ import WelcomeOverlay from '../components/WelcomeOverlay.jsx'
 import { CbrLogoTile } from '../components/CbrMark.jsx'
 
 const ARROW = (
-  <svg className="home-arrow w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5-5 5M6 12h12" />
   </svg>
 )
@@ -39,7 +39,7 @@ const HOME_MODULES = [
     icon: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" /></svg>,
   },
   {
-    to: '/documentation', label: 'Documentation', color: MODULES.documentation.color, moduleKey: 'documentation',
+    to: '/documentation', label: 'Gouvernance', color: MODULES.documentation.color, moduleKey: 'documentation',
     desc: 'Gouvernance NIS 2 (PSSI, chartes, organigramme) + prise de notes personnelle',
     icon: <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" /></svg>,
   },
@@ -59,49 +59,22 @@ const HOME_MODULES = [
 // titre d'abord (0-210ms, cf. en-tête ci-dessous), un vrai temps de pause, PUIS les tuiles —
 // contrairement à l'ancien réglage (260ms) qui les faisait démarrer avant même que le titre ait
 // fini d'apparaître, les deux temps se lisaient comme un seul mouvement plutôt que deux étapes.
-const TILE_BASE_DELAY = 520
+const TILE_BASE_DELAY = 950
+// Par ligne de 4 plutôt que tuile par tuile (18/08/2026, demande explicite — avant, un
+// décalage de 55ms par tuile faisait apparaître les 8 une par une en diagonale) : toutes
+// les tuiles d'une même ligne (4 colonnes en desktop, cf. grid-cols-4) démarrent ensemble,
+// seule la ligne elle-même est décalée dans le temps. Un simple décalage de temps entre
+// les deux lignes ne suffisait pas à les distinguer (les deux vagues se confondaient,
+// retour utilisateur) — chaque ligne vient maintenant d'une direction opposée
+// (home-enter-left/-right, cf. JSX), ce décalage n'est plus qu'un complément.
+const TILE_ROW_DELAY = 500
 
-// Spotlight à inertie : le gradient (::after) rattrape le curseur avec un léger
-// retard (lissage exponentiel), effet plus « vivant » qu'un suivi instantané.
-// État par tuile dans une WeakMap ; boucle rAF qui s'arrête une fois stabilisée
-// (pas de boucle permanente). Écriture directe sur la tuile → aucun re-render.
-const _spot = new WeakMap()
-
-function _tick(t) {
-  const s = _spot.get(t)
-  if (!s) return
-  const k = 0.16   // 0..1 : plus petit = plus d'inertie
-  s.cx += (s.tx - s.cx) * k
-  s.cy += (s.ty - s.cy) * k
-  t.style.setProperty('--mx', `${s.cx}px`)
-  t.style.setProperty('--my', `${s.cy}px`)
-  if (Math.abs(s.tx - s.cx) > 0.5 || Math.abs(s.ty - s.cy) > 0.5) {
-    s.raf = requestAnimationFrame(() => _tick(t))
-  } else { s.raf = 0 }
-}
-
-function handleMove(e) {
-  const t = e.currentTarget
-  const r = t.getBoundingClientRect()
-  const tx = e.clientX - r.left
-  const ty = e.clientY - r.top
-  let s = _spot.get(t)
-  if (!s) {   // 1er mouvement : on démarre pile sous le curseur (pas de saut)
-    s = { cx: tx, cy: ty, tx, ty, raf: 0 }
-    _spot.set(t, s)
-    t.style.setProperty('--mx', `${tx}px`)
-    t.style.setProperty('--my', `${ty}px`)
-  }
-  s.tx = tx; s.ty = ty
-  if (!s.raf) s.raf = requestAnimationFrame(() => _tick(t))
-}
-
-function handleLeave(e) {
-  const t = e.currentTarget
-  const s = _spot.get(t)
-  if (s && s.raf) cancelAnimationFrame(s.raf)
-  _spot.delete(t)   // prochaine entrée : re-init sous le curseur
-}
+// TEST — tilt 3D des tuiles (18/08/2026, à l'essai, pas encore validé) : rotation suivant la
+// souris + glare (cf. index.css § home-tile-glare). En style inline, pas via React state — un
+// setState par mousemove redessinerait tout le composant à chaque frame pour rien, alors que
+// muter le DOM directement (comme .home-tile porte déjà `will-change: transform`) coûte
+// beaucoup moins cher pour un effet purement visuel qui n'a besoin d'être lu par personne.
+const MAX_TILT_DEG = 10
 
 export default function Home() {
   const navigate = useNavigate()
@@ -118,6 +91,60 @@ export default function Home() {
   // plutôt qu'une vraie transition animée entre les deux écrans. `homeReady` bascule au tout
   // début du fondu de sortie (`onExitStart`, avant `onDone`) : les deux animations se chevauchent.
   const [homeReady, setHomeReady] = useState(() => !showWelcome)
+  // Animation de sortie à la sélection d'un module (18/08/2026, demande explicite) —
+  // `leaving` porte le `to` du module choisi : sa tuile reste éclairée dans sa propre
+  // couleur pendant que tout le reste (en-tête + autres tuiles) s'efface, avant la
+  // navigation réelle. Sans overshoot — Home est vue plusieurs fois par jour (cf.
+  // --ease-bounce, index.css, réservé aux écrans rares Login/Bienvenue) — juste de quoi
+  // confirmer le choix, pas un rituel comme au login. Délai aligné sur la durée de
+  // `.home-exit` (home-fade-out, index.css) : navigate() attend la fin du fondu.
+  const [leaving, setLeaving] = useState(null)
+
+  // TEST — tilt 3D (cf. constante MAX_TILT_DEG plus haut). `tileRefs` indexé par `m.to` : sert
+  // uniquement à effacer le tilt inline de la tuile cliquée dans `selectModule` ci-dessous, sans
+  // quoi son transform inline (plus prioritaire qu'une classe CSS) écraserait silencieusement
+  // `.home-tile-selected` si le clic arrive sans que la souris n'ait quitté la tuile entre-temps.
+  const tileRefs = useRef(new Map())
+  const tiltEnabled = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+
+  function handleTileMove(e) {
+    if (leaving) return
+    const el = e.currentTarget
+    const rect = el.getBoundingClientRect()
+    const px = (e.clientX - rect.left) / rect.width
+    const py = (e.clientY - rect.top) / rect.height
+    const rotateY = (px - 0.5) * MAX_TILT_DEG * 2
+    const rotateX = (0.5 - py) * MAX_TILT_DEG * 2
+    el.style.transform = `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`
+    el.style.setProperty('--mx', `${px * 100}%`)
+    el.style.setProperty('--my', `${py * 100}%`)
+  }
+
+  function handleTileEnter(e) {
+    if (leaving) return
+    // Coupe la transition sur `transform` pendant le suivi (sinon la tuile "traîne" derrière le
+    // curseur) — les autres propriétés (bordure/fond, cf. .home-tile) restent animées comme
+    // aujourd'hui. Réactivée au `mouseleave` pour que le retour à plat soit lui-même animé.
+    e.currentTarget.style.transition = 'border-color 240ms var(--ease-out), background 240ms var(--ease-out), box-shadow 240ms var(--ease-out)'
+  }
+
+  function handleTileLeave(e) {
+    e.currentTarget.style.transition = ''
+    e.currentTarget.style.transform = ''
+  }
+
+  function selectModule(m) {
+    if (leaving) return
+    const path = m.accessiblePaths[0]
+    tileRefs.current.get(m.to)?.style.removeProperty('transform')
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      navigate(path)
+      return
+    }
+    setLeaving(m.to)
+    setTimeout(() => navigate(path), 750)
+  }
 
   // Restriction de modules (31/07/2026, cf. models.py::User.allowed_pages) — une tuile dont
   // aucune page du module n'est autorisée disparaît ; sinon on route vers la première page
@@ -134,18 +161,24 @@ export default function Home() {
   }, [])
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-start pt-14 sm:pt-20 p-6 overflow-hidden" style={{ background: 'var(--bg-app)' }}>
+    <div className="relative min-h-screen flex flex-col items-center justify-start pt-24 sm:pt-32 p-6 overflow-hidden" style={{ background: 'var(--bg-app)' }}>
       {showWelcome && (
         <WelcomeOverlay onExitStart={() => setHomeReady(true)} onDone={() => setShowWelcome(false)} />
       )}
-      <div className="hero-grid" />
+      <div className="hero-grid hero-grid-boot" />
       <div className="home-glow home-glow--high" />
 
       {!homeReady ? null : (
       <>
-      {/* En-tête */}
-      <div className="relative z-10 flex flex-col items-center text-center mb-10 sm:mb-14">
-        <CbrLogoTile size={56} rounded={18} className="home-logo mb-3" />
+      {/* En-tête — même rituel de fond que Login/Bienvenue Boss (grille en révélation
+          circulaire, cf. .hero-grid-boot) pour rester cohérent avec le reste de l'appli,
+          sans reprendre leur overshoot (--ease-bounce) : Home est une page vue plusieurs
+          fois par jour, pas un écran rare, cf. commentaire --ease-bounce dans index.css. */}
+      <div className={`relative z-10 flex flex-col items-center text-center mb-10 sm:mb-14 ${leaving ? 'home-exit' : ''}`}>
+        <div className="relative mb-3">
+          <span className="brand-ring" aria-hidden="true" />
+          <CbrLogoTile size={56} rounded={18} className="home-logo" />
+        </div>
         <h1 className="home-enter text-4xl font-bold tracking-tight" style={{
           fontFamily: 'var(--font-mono)',
           backgroundImage: 'var(--brand-text-grad)', WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
@@ -161,20 +194,37 @@ export default function Home() {
 
       {/* Tuiles modules — 4 colonnes dès lg : les tuiles tiennent en 2 rangées (4+2)
           au lieu de 3 rangées, qui laissait la dernière tuile isolée et souvent
-          coupée par la hauteur de viewport (cf. demande utilisateur, sans scroll). */}
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-5xl">
+          coupée par la hauteur de viewport (cf. demande utilisateur, sans scroll).
+          `h-full` + `line-clamp-2` sur la description (18/08/2026, demande explicite) :
+          avant, une tuile à description courte (ex. Paramètres) était visiblement plus
+          basse qu'une tuile à description longue sur 2-3 lignes (ex. Incidents) — même
+          structure interne partout (icône fixe + titre 1 ligne + description plafonnée
+          à 2 lignes) donne la même hauteur calculée à toutes les tuiles, sans valeur
+          codée en dur qui se déréglerait si un libellé changeait. */}
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-5xl home-tiles-grid">
         {visibleModules.map((m, i) => (
           <button
             key={m.to}
-            onClick={() => navigate(m.accessiblePaths[0])}
-            onMouseMove={handleMove}
-            onMouseLeave={handleLeave}
-            className="home-tile home-enter text-left p-4 rounded-2xl"
+            ref={el => { if (el) tileRefs.current.set(m.to, el); else tileRefs.current.delete(m.to) }}
+            onClick={() => selectModule(m)}
+            onMouseMove={tiltEnabled ? handleTileMove : undefined}
+            onMouseEnter={tiltEnabled ? handleTileEnter : undefined}
+            onMouseLeave={tiltEnabled ? handleTileLeave : undefined}
+            disabled={!!leaving}
+            className={`home-tile text-left p-4 rounded-2xl h-full flex flex-col ${
+              leaving === m.to ? 'home-tile-selected' : leaving ? 'home-exit'
+                // Ligne paire (0-3) depuis la gauche, ligne impaire (4-7) depuis la droite
+                // (18/08/2026, demande explicite — un simple décalage de temps entre les
+                // deux lignes ne se voyait quasiment pas, direction opposée bien plus lisible).
+                : Math.floor(i / 4) % 2 === 0 ? 'home-enter-left' : 'home-enter-right'
+            }`}
             style={{
               '--tile': m.color,
-              animationDelay: `${TILE_BASE_DELAY + i * 55}ms`,
+              animationDelay: `${TILE_BASE_DELAY + Math.floor(i / 4) * TILE_ROW_DELAY}ms`,
             }}
           >
+            {/* TEST — glare du tilt 3D, cf. index.css § home-tile-glare. */}
+            <span className="home-tile-glare" aria-hidden="true" />
             <div className="flex items-start justify-between mb-3">
               <div className="home-icon w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${m.color}22`, color: m.color }}>
                 {m.icon}
@@ -190,7 +240,7 @@ export default function Home() {
                 </span>
               )}
             </div>
-            <p className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)' }}>{m.desc}</p>
+            <p className="text-xs leading-relaxed line-clamp-2" style={{ color: 'var(--text-muted)' }}>{m.desc}</p>
           </button>
         ))}
       </div>

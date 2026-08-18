@@ -8,8 +8,12 @@ import { MODULES } from '../constants/modules.js'
 import PageLoader from '../components/PageLoader.jsx'
 import MarkdownNote from '../components/MarkdownNote.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.documentation.color
+// Gris uniforme (18/08/2026, demande explicite) : cf. Notes.jsx::THEME_ACCENT — même teinte
+// fixe partout où `theme.color` (propre à chaque thème) servait d'accent visuel.
+const THEME_ACCENT = MODULES.parametres.color
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
 // cette page est entièrement redémontée à chaque navigation (pas de keep-alive de route),
@@ -137,7 +141,7 @@ export default function NoteSubject() {
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1 min-w-0">
               {theme && (
-                <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: `${theme.color}1f`, color: theme.color }}>
+                <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: `${THEME_ACCENT}1f`, color: THEME_ACCENT }}>
                   {theme.icon} {theme.name}
                 </span>
               )}
@@ -199,7 +203,7 @@ export default function NoteSubject() {
               className="route-fade w-full text-sm rounded-xl px-4 py-3 outline-none resize-y font-mono transition-colors duration-200"
               style={{ background: 'var(--bg-secondary)', border: `1px solid ${dragOver ? MODULE_COLOR : 'var(--border)'}`, color: 'var(--text-primary)' }} />
           ) : (
-            <div key="preview" className="route-fade rounded-xl px-4 py-3" style={{ background: 'var(--bg-card)', border: `1px solid ${theme?.color || 'var(--border)'}40`, minHeight: 300 }}>
+            <div key="preview" className="route-fade rounded-xl px-4 py-3" style={{ ...tintedCard(theme ? THEME_ACCENT : MODULE_COLOR), minHeight: 300 }}>
               {content.trim() ? <MarkdownNote text={content} /> : (
                 <p className="text-sm" style={{ color: 'var(--text-faint)' }}>Rien à prévisualiser.</p>
               )}

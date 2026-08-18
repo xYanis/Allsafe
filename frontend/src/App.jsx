@@ -13,6 +13,7 @@ import Documentation from './pages/Documentation.jsx'
 import Notes from './pages/Notes.jsx'
 import NoteSubject from './pages/NoteSubject.jsx'
 import Settings from './pages/Settings.jsx'
+import ReleaseNotesPage from './pages/ReleaseNotesPage.jsx'
 import AdministrationSecurity from './pages/AdministrationSecurity.jsx'
 import Watch from './pages/Watch.jsx'
 import Inventaire from './pages/Inventaire.jsx'
@@ -21,6 +22,8 @@ import Audits from './pages/Audits.jsx'
 import AuditDetail from './pages/AuditDetail.jsx'
 import Bastion from './pages/Bastion.jsx'
 import Agents from './pages/Agents.jsx'
+import AgentHistory from './pages/AgentHistory.jsx'
+import AgentReleaseNotes from './pages/AgentReleaseNotes.jsx'
 import SurveillanceIdentites from './pages/SurveillanceIdentites.jsx'
 import FuiteDeDonnees from './pages/FuiteDeDonnees.jsx'
 import RapportVeille from './pages/RapportVeille.jsx'
@@ -86,6 +89,8 @@ export default function App() {
             <Route path="audits/:id" element={<ProtectedRoute page="/audits"><AuditDetail /></ProtectedRoute>} />
             <Route path="bastion" element={<ProtectedRoute page="/bastion"><Bastion /></ProtectedRoute>} />
             <Route path="agents" element={<ProtectedRoute page="/agents"><Agents /></ProtectedRoute>} />
+            <Route path="agents/:id" element={<ProtectedRoute page="/agents"><AgentHistory /></ProtectedRoute>} />
+            <Route path="agents/notes-de-version" element={<ProtectedRoute page="/agents"><AgentReleaseNotes /></ProtectedRoute>} />
             <Route path="reports" element={<ProtectedRoute page="/reports"><Reports /></ProtectedRoute>} />
             <Route path="documentation" element={<ProtectedRoute page="/documentation"><Documentation /></ProtectedRoute>} />
             <Route path="notes" element={<ProtectedRoute page="/notes"><Notes /></ProtectedRoute>} />
@@ -98,6 +103,9 @@ export default function App() {
             {/* Paramètres : jamais restreignable (thème, mode Présentation, son propre compte/
                 déconnexion) — cf. utils/pageAccess.js::canAccessPage. */}
             <Route path="settings" element={<Settings />} />
+            {/* Détaché de Paramètres (18/08/2026, demande explicite) — module à part, donc
+                restreignable comme les autres (contrairement à /settings ci-dessus). */}
+            <Route path="notes-de-version" element={<ProtectedRoute page="/notes-de-version"><ReleaseNotesPage /></ProtectedRoute>} />
             {/* Réservé au rôle admin — le serveur applique déjà la même restriction sur
                 /api/connections et /api/security/* (cf. main.py, require_admin) */}
             <Route path="settings/administration" element={<ProtectedRoute role="admin"><AdministrationSecurity /></ProtectedRoute>} />

@@ -702,6 +702,12 @@ async def apply_scan_result(asset: Asset, result: dict, session: AsyncSession) -
             # reste du scan (paquets, hardware, CPE) mais on renonce à la correction
             # du nom pour ne pas provoquer de collision.
             await session.rollback()
+            # rollback() expire tous les attributs de `asset` — un refresh() explicite
+            # est nécessaire avant de les relire ci-dessous (`asset.os_version` ligne
+            # suivante) : un accès direct sur un attribut expiré hors d'un appel de
+            # session awaité plante en MissingGreenlet (pas de greenlet actif pour le
+            # lazy-load implicite), constaté en conditions réelles au check-in agent.
+            await session.refresh(asset)
             asset.last_scan = datetime.now(timezone.utc)
             asset.installed_packages = result.get("packages", [])
             asset.last_scan_result = result

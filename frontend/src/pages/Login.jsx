@@ -17,6 +17,10 @@ const DODGE_TRIGGER_DISTANCE = 95
 // boucle à chaque micro-mouvement.
 const DODGE_RETURN_DISTANCE = 170
 const FIELDS_MARGIN = 16
+// Effet "j'entre dans l'application" (18/08/2026, demande explicite) : délai entre la
+// connexion validée et la navigation réelle, le temps de voir le formulaire repartir et
+// le logo/Allsafe regrossir — cf. handleSubmit et phase 'entering'.
+const ENTER_MS = 2800
 
 export default function Login() {
   const { login } = useAuth()
@@ -41,8 +45,42 @@ export default function Login() {
 
   const buttonRef = useRef(null)
   const fieldsRef = useRef(null)
+  const headerLogoRef = useRef(null)
   const [dodge, setDodge] = useState({ x: 0, y: 0, rot: 0 })
   const fleeing = !!(dodge.x || dodge.y || dodge.rot)
+  // Position de départ du logo qui voyage vers le centre (18/08/2026, demande explicite) —
+  // mesurée juste avant `setPhase('entering')` dans handleSubmit, cf. index.css::.login-logo-flip.
+  const [flipOrigin, setFlipOrigin] = useState(null)
+
+  // Splash d'ouverture (18/08/2026, demande explicite) : 'splash' (logo seul en
+  // grand, centré) → 'exiting' (le splash s'efface EN MÊME TEMPS que l'en-tête +
+  // le formulaire habituels se montent à leur place normale, cf. index.css §
+  // Login.jsx) → 'docked' (splash retiré du DOM). Sauté directement en 'docked'
+  // avec prefers-reduced-motion — pas de délai artificiel avant de pouvoir se
+  // connecter pour qui a demandé moins de mouvement.
+  // 'entering' (18/08/2026, demande explicite) : une fois les identifiants
+  // validés, effet inverse — champs/bouton repartent (animations sortantes,
+  // exception assumée à la convention "jamais d'animation de sortie" du reste
+  // de l'app, cf. index.css § tokens : ce moment précis, unique par session,
+  // mérite l'effet "on entre dans l'application") pendant que le même logo +
+  // "Allsafe" du splash d'ouverture regrossit et se recentre. `navigate()`
+  // n'est déclenché qu'à la fin de ce délai, cf. handleSubmit.
+  const [phase, setPhase] = useState(() => (
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'docked' : 'splash'
+  ))
+  const entering = phase === 'entering'
+
+  useEffect(() => {
+    if (phase !== 'splash') return
+    const t = setTimeout(() => setPhase('exiting'), 2600)
+    return () => clearTimeout(t)
+  }, [phase])
+
+  useEffect(() => {
+    if (phase !== 'exiting') return
+    const t = setTimeout(() => setPhase('docked'), 550)
+    return () => clearTimeout(t)
+  }, [phase])
 
   // "Runaway login" : tant qu'email ou mot de passe manque, le bouton s'écarte du
   // curseur avant qu'il ne puisse cliquer, avec une petite bascule qui accentue
@@ -105,7 +143,15 @@ export default function Login() {
 
   async function handleForgotSubmit(e) {
     e.preventDefault()
-    if (forgotSubmitting || !forgotEmail.trim()) return
+    if (forgotSubmitting) return
+    // `noValidate` sur le <form> (18/08/2026, demande explicite) — la bulle de validation
+    // native du navigateur ("Veuillez remplir ce champ") ne peut pas être restylée pour
+    // suivre le thème sombre de l'app ; ce message custom reprend le même `.login-error`
+    // que les erreurs serveur juste en dessous.
+    if (!forgotEmail.trim()) {
+      setForgotError('Veuillez renseigner ce champ.')
+      return
+    }
     setForgotSubmitting(true)
     setForgotError('')
     try {
@@ -122,19 +168,45 @@ export default function Login() {
 
   async function handleSubmit(e) {
     e.preventDefault()
-    if (submitting || !canSubmit) return
+    if (submitting) return
+    // `noValidate` sur le <form> (18/08/2026, demande explicite) — la bulle de validation
+    // native du navigateur ("Veuillez remplir ce champ") ne peut pas être restylée pour
+    // suivre le thème sombre de l'app ; ce message custom reprend le même `.login-error`
+    // que les erreurs de connexion (couleur/animation identiques).
+    if (!canSubmit) {
+      setError('Veuillez renseigner tous les champs.')
+      return
+    }
     setSubmitting(true)
     setError('')
     try {
       await login(email.trim(), password)
-      navigate('/', { replace: true, state: { justLoggedIn: true } })
+      // Pas de `finally` sur ce chemin : `submitting` doit rester true jusqu'à la
+      // navigation, le formulaire est en train de repartir, pas la peine de
+      // réactiver le bouton pendant qu'il disparaît.
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        navigate('/', { replace: true, state: { justLoggedIn: true } })
+        return
+      }
+      // Mesuré ICI, juste avant de déclencher la transition — le petit logo d'en-tête
+      // est encore à sa position normale à cet instant précis (cf. .login-logo-flip,
+      // index.css). `96` = taille du logo de destination (cf. JSX plus bas).
+      const rect = headerLogoRef.current?.getBoundingClientRect()
+      if (rect) {
+        setFlipOrigin({
+          dx: rect.left + rect.width / 2 - window.innerWidth / 2,
+          dy: rect.top + rect.height / 2 - window.innerHeight / 2,
+          scale: rect.width / 96,
+        })
+      }
+      setPhase('entering')
+      setTimeout(() => navigate('/', { replace: true, state: { justLoggedIn: true } }), ENTER_MS)
     } catch (err) {
       // Message générique voulu côté serveur (pas d'énumération de comptes) —
       // le 429 (verrou anti-bruteforce) mérite son propre message.
       setError(err?.response?.status === 429
         ? 'Trop de tentatives — réessayez dans quelques minutes.'
         : (err?.response?.data?.detail || 'Email ou mot de passe incorrect.'))
-    } finally {
       setSubmitting(false)
     }
   }
@@ -144,8 +216,37 @@ export default function Login() {
       <div className="hero-grid hero-grid-boot" />
       <div className="home-glow" />
 
-      <div className="relative z-10 flex flex-col items-center text-center mb-6">
-        <div className="relative mb-3">
+      {(phase !== 'docked') && (
+        <div
+          className={`fixed inset-0 z-20 flex flex-col items-center justify-center gap-4 ${phase === 'exiting' ? 'brand-splash-exit' : ''}`}
+          style={{ background: entering ? 'transparent' : 'var(--bg-app)' }}
+        >
+          {/* Pas de `key` ici (18/08/2026) : sur splash→exiting, ce même bloc reste monté en
+              continu, un remontage aurait rejoué le pop/reveal du logo/titre PENDANT que le
+              parent joue sa propre sortie (`brand-splash-exit`) — flicker constaté. Sur
+              'entering' au contraire, tout ce bloc vient d'apparaître pour la première fois
+              (le wrapper au-dessus est conditionné sur `phase !== 'docked'`, faux juste avant) :
+              déjà un montage neuf sans avoir besoin d'une key pour le forcer. */}
+          {entering && flipOrigin ? (
+            <CbrLogoTile size={96} rounded={26} className="login-logo-flip"
+              style={{ '--flip-dx': `${flipOrigin.dx}px`, '--flip-dy': `${flipOrigin.dy}px`, '--flip-scale': flipOrigin.scale }} />
+          ) : (
+            <CbrLogoTile size={96} rounded={26} className="brand-pop" />
+          )}
+          <h1 className="brand-splash-title text-3xl font-bold tracking-tight" style={{
+            fontFamily: 'var(--font-mono)', animationDelay: '650ms',
+          }}>Allsafe</h1>
+        </div>
+      )}
+
+      {phase !== 'splash' && (
+      <div className="relative z-10 flex flex-col items-center text-center mb-6" style={{ opacity: entering ? 0 : 1 }}>
+        {/* Reste monté (juste invisible) pendant 'entering' — le démonter ferait sauter la
+            mise en page du formulaire encore affiché en dessous, toute la page étant centrée
+            verticalement (cf. commentaire .login-logo-flip, index.css). `headerLogoRef` :
+            position de départ du logo qui voyage vers le centre, mesurée dans handleSubmit
+            juste avant que ce bloc ne passe à opacity:0. */}
+        <div ref={headerLogoRef} className="relative mb-3">
           <span className="brand-ring" aria-hidden="true" />
           {/* Rotation périodique désormais portée par CbrLogoTile lui-même
               (.cbr-logo-spin, cf. CbrMark.jsx) — plus une classe posée ici. */}
@@ -155,6 +256,7 @@ export default function Login() {
           fontFamily: 'var(--font-mono)', animationDelay: '260ms',
         }}>Allsafe</h1>
       </div>
+      )}
 
       {/* Plus de cadre/carte autour des champs — ils reposent directement sur le fond de
           page, chacun ne se distinguant que par son propre fond (déjà présent sur les
@@ -163,27 +265,29 @@ export default function Login() {
           session, elle peut se permettre d'être vue plutôt que juste perçue) : logo →
           titre, PUIS une vraie pause avant que les champs n'arrivent un par un, bouton
           en dernier avec un petit rebond — la CTA de l'écran mérite plus de présence
-          qu'un simple fondu. */}
-      {view === 'login' && (
-      <form onSubmit={handleSubmit} className="relative z-10 w-full max-w-sm flex flex-col">
+          qu'un simple fondu. Gaté sur `phase` en plus de `view` : les champs ne se
+          montent qu'une fois le splash d'ouverture parti, pour rejouer leurs propres
+          délais (1100ms/1650ms/2350ms) à partir de ce moment-là. */}
+      {phase !== 'splash' && view === 'login' && (
+      <form onSubmit={handleSubmit} noValidate className="relative z-10 w-full max-w-sm flex flex-col">
         {/* fieldsRef délimite la zone interdite au bouton fuyant (cf. flee() plus haut) :
             mesurée en direct plutôt que codée en dur, pour suivre automatiquement
             l'apparition du message d'erreur. `gap` (pas `space-y-4`, sujet au margin
             collapsing) pour garantir un espacement rigoureusement identique entre
             email/mot de passe/erreur. */}
         <div ref={fieldsRef} className="flex flex-col gap-4">
-          <div className="login-enter" style={{ animationDelay: '900ms' }}>
-            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Email</label>
+          <div className={entering ? 'login-field-left-exit' : 'login-field-left'} style={{ animationDelay: entering ? '500ms' : '1100ms' }}>
+            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--brand)' }}>Email</label>
             <input autoFocus required type="email" value={email} onChange={e => setEmail(e.target.value)}
               className="w-full text-sm rounded-lg px-3 py-2 outline-none"
               style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
-          <div className="login-enter" style={{ animationDelay: '1100ms' }}>
-            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Mot de passe</label>
-            <PasswordInput value={password} onChange={e => setPassword(e.target.value)} />
+          <div className={entering ? 'login-field-right-exit' : 'login-field-right'} style={{ animationDelay: entering ? '250ms' : '1650ms' }}>
+            <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--brand)' }}>Mot de passe</label>
+            <PasswordInput value={password} onChange={e => setPassword(e.target.value)} iconColor="var(--brand)" />
             <div className="flex justify-end mt-1.5">
               <button type="button" onClick={() => { setForgotEmail(email); setView('forgot') }}
-                className="text-xs hover:underline" style={{ color: 'var(--text-muted)' }}>
+                className="text-xs hover:underline" style={{ color: 'var(--brand)' }}>
                 Mot de passe oublié ?
               </button>
             </div>
@@ -198,7 +302,7 @@ export default function Login() {
             fuite s'il était posé sur le même élément que le bouton. `mt-7` volontairement
             plus large que le `gap-4` entre les champs — le bouton respire davantage,
             demande explicite, sans devoir égaler l'espacement des champs entre eux. */}
-        <div className="login-button-enter mt-7" style={{ animationDelay: '1350ms' }}>
+        <div className={`${entering ? 'login-button-exit' : 'login-button-enter'} mt-7`} style={{ animationDelay: entering ? '0ms' : '2350ms' }}>
           <button type="submit" ref={buttonRef} disabled={submitting}
             className="w-full text-sm px-3 py-2.5 rounded-lg font-medium disabled:opacity-50"
             style={{
@@ -218,8 +322,8 @@ export default function Login() {
       </form>
       )}
 
-      {view === 'forgot' && (
-        <form onSubmit={handleForgotSubmit} className="relative z-10 w-full max-w-sm flex flex-col gap-4">
+      {phase !== 'splash' && view === 'forgot' && (
+        <form onSubmit={handleForgotSubmit} noValidate className="relative z-10 w-full max-w-sm flex flex-col gap-4">
           <div className="login-enter">
             <label className="text-xs font-semibold uppercase tracking-wide block mb-1.5" style={{ color: 'var(--text-muted)' }}>Email</label>
             <input autoFocus required type="email" value={forgotEmail} onChange={e => setForgotEmail(e.target.value)}
@@ -245,7 +349,7 @@ export default function Login() {
         </form>
       )}
 
-      {view === 'forgot-sent' && (
+      {phase !== 'splash' && view === 'forgot-sent' && (
         <div className="login-enter relative z-10 w-full max-w-sm text-center space-y-4">
           <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
             Si un compte existe avec cet email, une demande a été transmise à un administrateur —

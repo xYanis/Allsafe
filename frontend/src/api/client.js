@@ -20,6 +20,7 @@ api.interceptors.response.use(
 export const stats      = (params) => api.get('/stats', { params })
 export const cves       = (params) => api.get('/cves', { params })
 export const assets     = () => api.get('/assets')
+export const getAsset    = (id) => api.get(`/assets/${id}`)
 export const createAsset = (data) => api.post('/assets', data)
 export const updateAsset = (id, data) => api.put(`/assets/${id}`, data)
 export const deleteAsset = (id) => api.delete(`/assets/${id}`)
@@ -166,12 +167,16 @@ export const deleteCrisisContact   = (id) => api.delete(`/crises/contacts/${id}`
 // Agents postes (cf. backend/routers/agents.py) — module Sécurité > Agents. Jetons
 // d'enrôlement à usage unique (admin) + liste/révocation des agents enrôlés.
 export const listAgents            = () => api.get('/agents')
+export const agentLatestVersion    = () => api.get('/agents/latest/version')
 export const createEnrollmentToken = (data) => api.post('/agents/enrollment-tokens', data)
 export const listEnrollmentTokens  = () => api.get('/agents/enrollment-tokens')
 export const deleteEnrollmentToken = (id) => api.delete(`/agents/enrollment-tokens/${id}`)
 export const revokeAgent           = (id) => api.post(`/agents/${id}/revoke`)
 export const deleteAgent           = (id) => api.delete(`/agents/${id}`)
 export const requestAgentScan      = (id) => api.post(`/agents/${id}/request-scan`)
+// Historique des contacts (18/08/2026) — page dédiée par agent.
+export const getAgent              = (id) => api.get(`/agents/${id}`)
+export const agentCheckins         = (id, limit) => api.get(`/agents/${id}/checkins`, { params: { limit } })
 
 // Analystes (cf. backend/routers/analysts.py) — remplace la liste ANALYSTS codée en dur,
 // alimente les menus déroulants d'attribution (validé par, déclaré par...). Registre
@@ -261,6 +266,11 @@ export const integrationsStatus = () => api.get('/integrations/status')
 
 // Politiques de scan planifié par criticité (17/08/2026, cf. backend/routers/scan_policies.py) —
 // lecture ouverte à tout connecté, écriture (update/runNow) réservée admin côté serveur.
+export const releaseNotes       = (scope) => api.get('/release-notes', { params: { scope } })
+export const createReleaseNote  = (data) => api.post('/release-notes', data)
+export const updateReleaseNote  = (id, data) => api.patch(`/release-notes/${id}`, data)
+export const deleteReleaseNote  = (id) => api.delete(`/release-notes/${id}`)
+
 export const scanPolicies       = () => api.get('/scan-policies')
 export const updateScanPolicy   = (criticite, data) => api.patch(`/scan-policies/${criticite}`, data)
 export const runScanPolicyNow   = (criticite) => api.post(`/scan-policies/${criticite}/run-now`)

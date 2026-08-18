@@ -2,8 +2,10 @@ import { useState } from 'react'
 import { exportWatch } from '../api/client.js'
 import WeeklyArchives from '../components/WeeklyArchives.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.rapports.color)
 
 const THEMES = [
   'Admin', 'APT', 'Cyber', 'Données', 'Hardware', 'IA',

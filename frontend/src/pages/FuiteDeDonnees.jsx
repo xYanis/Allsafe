@@ -11,6 +11,7 @@ import { hexToRgba } from '../utils/color.js'
 import PageLoader from '../components/PageLoader.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
 // Onglet 100% informatif — aucun rapport avec le registre auditable NIS 2 de
 // Veille technologique (pas de statut/analyste/décision/SLA). Restreint aux
@@ -19,8 +20,8 @@ import PageHero from '../components/PageHero.jsx'
 // sources personnalisées ajoutées ici même) — les autres sources (CERT-FR,
 // éditeurs sécu...) ne remontent jamais ici, même si un de leurs articles
 // mentionne occasionnellement une fuite de données.
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const ACCENT = '#a371f7'
+const CARD = tintedCard(ACCENT)
 
 // Icônes des KPI/pagination — même famille (Heroicons outline) que le reste de l'app.
 const ICON_PATHS = {

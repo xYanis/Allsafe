@@ -1148,6 +1148,40 @@ class Agent(Base):
     enrollment_token_id = Column(_UUID(as_uuid=True), ForeignKey("agent_enrollment_tokens.id", ondelete="SET NULL"), nullable=True)
 
 
+class AgentCheckinLog(Base):
+    """Journal append-only des check-ins réussis (18/08/2026, demande explicite : page
+    dédiée "historique des contacts" par agent — jusqu'ici seul le DERNIER contact
+    (`Agent.last_seen_at`) était retenu, rien d'historisé). Alimenté uniquement par
+    `POST /agents/checkin` (routers/agents.py), jamais par le sondage `GET /agents/pending`
+    (60s, lecture seule sans charge utile) — sinon des milliers de lignes creuses par
+    agent et par jour sans aucune information nouvelle.
+
+    `gap_started_at`/`gap_failed_attempts` dupliquent `Agent.last_gap_started_at`/
+    `last_gap_failed_attempts` au moment de CE check-in précis — `Agent.last_gap_*` ne
+    garde que la dernière coupure connue (remplacée à chaque nouveau rapport), ce journal
+    garde chacune d'elles dans le temps pour la page d'historique.
+
+    `agent_id` en CASCADE (pas de snapshot texte façon `AssetDeletionLog`) : cet historique
+    n'a de sens que pour la durée de vie de l'agent lui-même — supprimer un agent (toujours
+    après révocation, cf. `delete_agent`) emporte son propre historique, cohérent avec le
+    reste de l'identité agent plutôt qu'un journal indépendant à part."""
+    __tablename__ = "agent_checkin_logs"
+
+    id                  = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    agent_id            = Column(_UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True)
+    checked_in_at       = Column(DateTime(timezone=True), nullable=False)
+    package_count       = Column(Integer)
+    agent_version       = Column(String)
+    gap_started_at      = Column(DateTime(timezone=True))
+    gap_failed_attempts = Column(Integer)
+    # Scan planifié (cycle horaire, cf. agent/src/daemon.rs::CHECKIN_INTERVAL) vs scan à la
+    # demande (18/08/2026, retour utilisateur) — capturé juste avant que `checkin()` efface
+    # `Agent.pending_scan_requested_at` (satisfait par tout check-in réussi, cf. routers/agents.py) :
+    # sans cette capture au bon moment, l'info "ce check-in a-t-il été déclenché par une
+    # demande manuelle" est perdue dès que la ligne est écrite.
+    on_demand           = Column(Boolean, nullable=False, default=False)
+
+
 class AgentEnrollmentToken(Base):
     """Jeton d'enrôlement (12/08/2026, généralisé à l'échelle le 13/08/2026) — généré par un
     admin (Sécurité > Agents), collé dans l'agent à l'installation, échangé contre une
@@ -1197,3 +1231,24 @@ class ScanPolicy(Base):
     # 0=lundi..6=dimanche (date.weekday()), utilisé seulement si frequency == 'weekly'
     weekday    = Column(Integer, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=_sfunc.now(), onupdate=_sfunc.now())
+
+
+class ReleaseNote(Base):
+    """Notes de version (18/08/2026, demande explicite) — deux portées séparées par `scope` :
+    `allsafe` (page Paramètres, versionning/fonctionnalités/correctifs de la plateforme dans son
+    ensemble) et `agent` (page dédiée liée à Sécurité > Agents, propre au binaire `allsafe-agent`,
+    `version` y prend alors le sens du semver réel du binaire — cf. CURRENT_AGENT_VERSION,
+    routers/agents.py). Alimenté en fin de session par l'assistant, revu/validé par
+    l'utilisateur — pas de statut brouillon/publié séparé : une note existe ou n'existe pas,
+    la validation se fait par relecture directe sur la page plutôt que par un workflow
+    d'approbation à part, qui aurait été disproportionné pour ce besoin."""
+    __tablename__ = "release_notes"
+
+    id          = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    scope       = Column(String, nullable=False)              # 'allsafe' | 'agent'
+    version     = Column(String)                               # optionnel (surtout rempli côté agent)
+    category    = Column(String, nullable=False, default="feature")  # 'feature' | 'fix'
+    title       = Column(String, nullable=False)
+    description = Column(Text)
+    created_by  = Column(String)
+    created_at  = Column(DateTime(timezone=True), server_default=_sfunc.now())

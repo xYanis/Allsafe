@@ -41,7 +41,9 @@ Pensé pour les **actifs critiques** (jeton unique par actif, cf. § Installatio
 ci-dessous pour le cas parc/non-critique) : deux fichiers à copier sur le poste
 (`agent/dist/` ou compilés soi-même) — `allsafe-agent.exe` **et** `WebView2Loader.dll`, dans
 le même dossier. Pas de `.msi`, pas de script, mais pas non plus un seul fichier isolé (cf.
-encadré ci-dessous).
+encadré ci-dessous). Depuis l'appli (18/08/2026) : bouton "Télécharger l'agent" sur la page
+Agents sert les deux fichiers déjà zippés ensemble (`GET /api/agents/latest/windows-exe`) —
+plus besoin d'aller chercher `WebView2Loader.dll` séparément.
 
 - **Double-clic sur `allsafe-agent.exe`, sans argument** → ouvre une fenêtre (menu
   Installation/Réparation/Mise à jour/Désinstallation, rendue en HTML/CSS via WebView2 —
@@ -255,6 +257,21 @@ dans le binaire compilé, pas seulement supposé), pas besoin de reproduire le c
 La fenêtre graphique (`tauri`, rendu WebView2) compile et **link** aussi correctement
 (exécutable PE valide, `WebView2Loader.dll` généré à côté) — reste non vérifié : le
 rendu/comportement réel sur un poste Windows.
+
+⚠️ **`build.rs` fait maintenant échouer le build si `tauri_build` échoue** (18/08/2026 —
+avant : simple `cargo:warning` avalé, un exe sans manifeste embarqué est passé un vrai test
+utilisateur, crash immédiat `TaskDialogIndirect introuvable` au lancement). Si ça arrive en
+dev local avec le message `failed to read plugin permissions` : purger le cache de build
+périmé plutôt que chercher un bug dans le code —
+```bash
+rm -rf agent/gen agent/target/x86_64-pc-windows-gnu/release/build
+```
+Cause déjà rencontrée : `target/` garde des chemins absolus des builds précédents ; changer de
+point de montage Docker d'une session à l'autre (`-v $(pwd):/work` puis `-v $(pwd)/agent:/agent`
+par exemple) laisse un `OUT_DIR` obsolète dans le cache que `tauri_build` ne sait plus relire. Un
+`cargo build` en CI n'y est jamais exposé (job sans `cache:` GitLab, `target/` toujours vide au
+départ) — vérification en plus (grep sur le manifeste embarqué) ajoutée au job `build-agent` par
+sécurité, cf. `.gitlab-ci.yml`.
 
 Le `.msi` est généré avec [`wixl`](https://gitlab.gnome.org/GNOME/msitools) (paquet Debian/
 Ubuntu `wixl`, alternative libre au WiX Toolset officiel qui est Windows-only/.NET) à partir

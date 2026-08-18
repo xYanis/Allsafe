@@ -22,10 +22,19 @@ export const MODULES = {
   // collectées, pas une fonction de sécurité offensive/opérationnelle comme Audits/Bastion.
   inventaire:     { label: 'Inventaire',     color: '#39c5cf', dark: '#053338', paths: ['/assets', '/inventaire', '/durcissement', '/agents'] },
   securite:       { label: 'Sécurité',       color: '#3fb950', dark: '#04262a', paths: ['/audits', '/bastion'] },
-  documentation:  { label: 'Documentation',  color: '#e3b341', dark: '#3a2a04', paths: ['/documentation', '/notes'] },
+  // Module ex-« Documentation », renommé « Gouvernance » le 18/08/2026 (demande utilisateur,
+  // plus cohérent avec son contenu — PSSI/chartes/organigramme) — pur renommage d'affichage,
+  // clé/routes/`documentation.py` inchangés (même principe que le rebranding CBR → Allsafe).
+  documentation:  { label: 'Gouvernance',    color: '#e3b341', dark: '#3a2a04', paths: ['/documentation', '/notes'] },
   rapports:       { label: 'Rapports',       color: '#a371f7', dark: '#2e1065', paths: ['/reports', '/rapport-veille', '/rapport-surveillance', '/rapport-incidents'] },
   incidents:      { label: 'Incidents',      color: '#b5793a', dark: '#2b1c08', paths: ['/incidents', '/crises'] },
   parametres:     { label: 'Paramètres',     color: '#8b949e', dark: '#1c2128', paths: ['/settings'] },
+  // Détaché de Paramètres (18/08/2026, demande explicite) — devient un module à part entière,
+  // juste en dessous de Paramètres dans la nav (cf. Layout.jsx::NAV_GROUPS). Couleur rose,
+  // seule teinte encore libre parmi les modules existants (rouge/bleu/cyan/vert/or/violet/
+  // marron/gris déjà pris). Le scope "agent" des notes de version reste sur sa page dédiée
+  // sous Inventaire (/agents/notes-de-version) — seul le scope "allsafe" bouge ici.
+  notesDeVersion: { label: 'Notes de version', color: '#f778ba', dark: '#4a0e2a', paths: ['/notes-de-version'] },
 }
 
 const DEFAULT_COLOR = MODULES.cyberveille.color

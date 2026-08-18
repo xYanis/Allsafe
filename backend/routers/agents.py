@@ -24,21 +24,23 @@ leurs routes publiques) :
 """
 
 import glob
+import io
 import os
 import secrets
 import hashlib
+import zipfile
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_deps import require_admin, require_agent, require_page
 from database import get_session
-from models import Agent, AgentEnrollmentToken, Asset, User
+from models import Agent, AgentCheckinLog, AgentEnrollmentToken, Asset, User
 from services.asset_scanner import apply_scan_result
 
 router = APIRouter()
@@ -241,16 +243,30 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
     if not asset_id:
         # Jeton "libre" (pas lié à un actif existant) : le premier enrôlement crée
         # l'actif — poste encore inconnu d'Allsafe (cf. models.py::AgentEnrollmentToken).
-        # `os` volontairement laissé vide (pas "Linux"/"Windows" générique) : le premier
-        # check-in le précise via `apply_scan_result` (ne remplit `os` que s'il est vide,
-        # cf. asset_scanner.py) — un placeholder générique aurait bloqué cette correction.
-        asset = Asset(
-            name=data.hostname, hostname=data.hostname,
-            asset_type="workstation", source="agent", collection_method="agent",
-        )
-        session.add(asset)
-        await session.flush()
-        asset_id = asset.id
+        # `hostname` porte une contrainte unique (`ix_assets_hostname`) — un poste déjà
+        # réenrôlé avec un autre jeton "libre" (jeton perdu, agent.json effacé...) ferait
+        # planter un `INSERT` en 500 brut sans cette vérification préalable (constaté en
+        # conditions réelles, 18/08/2026, deux enrôlements successifs sur le même hostname
+        # `deployapp`) : on rattache le nouvel agent à l'actif existant plutôt que d'en
+        # recréer un second en doublon.
+        existing = (await session.execute(
+            select(Asset).where(Asset.hostname == data.hostname)
+        )).scalar_one_or_none()
+        if existing:
+            asset = existing
+            asset.collection_method = "agent"
+            asset_id = asset.id
+        else:
+            # `os` volontairement laissé vide (pas "Linux"/"Windows" générique) : le premier
+            # check-in le précise via `apply_scan_result` (ne remplit `os` que s'il est vide,
+            # cf. asset_scanner.py) — un placeholder générique aurait bloqué cette correction.
+            asset = Asset(
+                name=data.hostname, hostname=data.hostname,
+                asset_type="workstation", source="agent", collection_method="agent",
+            )
+            session.add(asset)
+            await session.flush()
+            asset_id = asset.id
     else:
         asset = await session.get(Asset, asset_id)
         asset.collection_method = "agent"
@@ -303,6 +319,27 @@ async def latest_agent_linux():
     return FileResponse(path, media_type="application/vnd.debian.binary-package", filename=os.path.basename(path))
 
 
+@router.get("/latest/windows-exe")
+async def latest_agent_windows_exe():
+    """`.exe` autonome (18/08/2026, cf. page Agents > téléchargement) — zippé avec
+    `WebView2Loader.dll` : l'exe seul ne se lance pas sans ce fichier à côté de lui (cible
+    GNU, cf. agent/README.md § Build). Le `.msi` (route ci-dessus) embarque déjà les deux,
+    ce zip n'existe que pour l'usage ".exe seul" (poste critique, cf. CLAUDE.md § Agents)."""
+    exe_path = os.path.join(AGENT_DIST_DIR, "allsafe-agent.exe")
+    dll_path = os.path.join(AGENT_DIST_DIR, "WebView2Loader.dll")
+    if not os.path.isfile(exe_path) or not os.path.isfile(dll_path):
+        raise HTTPException(404, "Exécutable Windows non disponible côté serveur.")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(exe_path, "allsafe-agent.exe")
+        zf.write(dll_path, "WebView2Loader.dll")
+    buf.seek(0)
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="allsafe-agent.zip"'},
+    )
+
+
 # ─── Scan à la demande (boucle persistante, jamais l'inverse — CLAUDE.md §1) ───
 
 @router.get("/pending")
@@ -346,13 +383,29 @@ async def checkin(
 
     # Rapport de coupure — le dernier connu reste affiché tant qu'un nouveau ne le
     # remplace pas (jamais effacé silencieusement en son absence, cf. models.py::Agent).
+    gap_started_at = None
     if payload.offline_since is not None:
-        agent.last_gap_started_at = datetime.fromtimestamp(payload.offline_since, tz=timezone.utc)
+        gap_started_at = datetime.fromtimestamp(payload.offline_since, tz=timezone.utc)
+        agent.last_gap_started_at = gap_started_at
         agent.last_gap_failed_attempts = payload.failed_attempts
 
     # Tout check-in réussi satisfait une éventuelle demande de scan en attente — que ce
     # soit elle qui l'ait déclenché ou simplement le cycle normal qui soit arrivé entre-temps.
+    # `on_demand` capturé AVANT l'effacement (18/08/2026) : c'est la seule fenêtre où on peut
+    # encore savoir si CE check-in précis a été déclenché par une demande manuelle plutôt que
+    # par le cycle horaire normal (cf. models.py::AgentCheckinLog.on_demand).
+    on_demand = agent.pending_scan_requested_at is not None
     agent.pending_scan_requested_at = None
+
+    # Journal (18/08/2026, cf. models.py::AgentCheckinLog) — un check-in réussi seulement,
+    # jamais le sondage /pending. `checked_in_at` posé ici (pas server_default) : doit
+    # correspondre exactement au moment de CE check-in, pas d'un défaut SQL.
+    session.add(AgentCheckinLog(
+        agent_id=agent.id, checked_in_at=datetime.now(timezone.utc),
+        package_count=payload.package_count, agent_version=payload.agent_version,
+        gap_started_at=gap_started_at, gap_failed_attempts=payload.failed_attempts,
+        on_demand=on_demand,
+    ))
 
     result = payload.model_dump()
     result = await apply_scan_result(asset, result, session)
@@ -373,6 +426,55 @@ async def list_agents(session: AsyncSession = Depends(get_session), _user: User 
         _agent_dict(a, asset_name, asset_os, asset_os_version, token)
         for a, asset_name, asset_os, asset_os_version, token in rows
     ]}
+
+
+@router.get("/{agent_id}")
+async def get_agent(agent_id: str, session: AsyncSession = Depends(get_session), _user: User = Depends(require_page("/agents"))):
+    """Détail d'un agent — alimente la page d'historique des contacts (chargement direct
+    par URL, sans dépendre de la liste déjà chargée côté Sécurité > Agents)."""
+    row = (await session.execute(
+        select(Agent, Asset.name, Asset.os, Asset.os_version, AgentEnrollmentToken)
+        .outerjoin(Asset, Agent.asset_id == Asset.id)
+        .outerjoin(AgentEnrollmentToken, Agent.enrollment_token_id == AgentEnrollmentToken.id)
+        .where(Agent.id == agent_id)
+    )).first()
+    if not row:
+        raise HTTPException(404, "Agent introuvable.")
+    a, asset_name, asset_os, asset_os_version, token = row
+    return _agent_dict(a, asset_name, asset_os, asset_os_version, token)
+
+
+@router.get("/{agent_id}/checkins")
+async def agent_checkins(
+    agent_id: str,
+    limit: int = Query(200, ge=1, le=1000),
+    session: AsyncSession = Depends(get_session),
+    _user: User = Depends(require_page("/agents")),
+):
+    """Historique des check-ins réussis (18/08/2026, cf. models.py::AgentCheckinLog) — le
+    plus récent d'abord. `total` distinct de la longueur d'`items` : la page peut afficher
+    "X affichés sur Y au total" même quand `limit` tronque la liste."""
+    if not await session.get(Agent, agent_id):
+        raise HTTPException(404, "Agent introuvable.")
+    total = (await session.execute(
+        select(func.count()).select_from(AgentCheckinLog).where(AgentCheckinLog.agent_id == agent_id)
+    )).scalar_one()
+    rows = (await session.execute(
+        select(AgentCheckinLog).where(AgentCheckinLog.agent_id == agent_id)
+        .order_by(AgentCheckinLog.checked_in_at.desc()).limit(limit)
+    )).scalars().all()
+    return {
+        "total": total,
+        "items": [{
+            "id": str(r.id),
+            "checked_in_at": r.checked_in_at.isoformat() if r.checked_in_at else None,
+            "package_count": r.package_count,
+            "agent_version": r.agent_version,
+            "gap_started_at": r.gap_started_at.isoformat() if r.gap_started_at else None,
+            "gap_failed_attempts": r.gap_failed_attempts,
+            "on_demand": r.on_demand,
+        } for r in rows],
+    }
 
 
 @router.post("/{agent_id}/revoke")

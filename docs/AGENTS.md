@@ -184,9 +184,10 @@ nouveau jeton généré par un admin.
 | `DELETE /api/agents/enrollment-tokens/{id}` | admin | Révoque un jeton non utilisé |
 | `POST /api/agents/enroll` | public (protégé par le jeton dans le corps) | Échange le jeton contre une identité `Agent`, retourne le credential une seule fois |
 | `GET /api/agents/latest/version`/`/windows`/`/linux` | public | Distribution des paquets déjà construits (`agent/dist/`, cf. § Mise à jour) |
+| `GET /api/agents/latest/windows-exe` | public | `.exe` autonome zippé avec `WebView2Loader.dll` (18/08/2026, page Agents > "Télécharger l'agent") — l'exe seul ne se lance pas sans ce fichier à côté, cf. § Interface graphique. Le `.msi` embarque déjà les deux, ce zip n'existe que pour l'usage ".exe seul" |
 | `GET /api/agents/pending` | `require_agent` | Scan à la demande — sondé à intervalle court par la boucle persistante (`daemon.rs`), lecture seule |
 | `POST /api/agents/{id}/request-scan` | admin | Pose le flag de scan à la demande — ne se connecte jamais au poste (CLAUDE.md §1), l'agent vient le chercher lui-même |
-| `POST /api/agents/checkin` | `require_agent` | Pousse le résultat de collecte (même shape que `asset_scanner.py::_build_result()`), efface le flag de scan à la demande, enregistre un éventuel rapport de coupure |
+| `POST /api/agents/checkin` | `require_agent` | Pousse le résultat de collecte (même shape que `asset_scanner.py::_build_result()`), efface le flag de scan à la demande, enregistre un éventuel rapport de coupure. Journalisé dans `AgentCheckinLog` (page "dernier contact" par agent) avec `on_demand` (18/08/2026) : capturé juste avant l'effacement du flag, distingue un check-in issu du cycle horaire normal d'un check-in qui répond à une demande manuelle |
 | `GET /api/agents` | `require_page("/agents")` | Liste des agents enrôlés |
 | `POST /api/agents/{id}/revoke` | admin | Révoque un agent |
 | `DELETE /api/agents/{id}` | admin | Supprime définitivement un agent déjà révoqué |
@@ -321,6 +322,34 @@ Empaquetage documenté dans `agent/README.md` :
   installer dans `Program Files (x86)` par Windows Installer sans erreur ni avertissement, constaté
   en réel sur `DEPLOYAPP` (cf. `agent/README.md` § Build).
 
+## Interface graphique (Tauri, 18/08/2026)
+
+Assistant graphique de l'`.exe` autonome (installation/réparation/mise à jour/désinstallation) —
+`native-windows-gui` remplacé par Tauri/WebView2 (rendu web moderne, thème sombre repris à
+l'identique de l'identité Allsafe : `--brand`/`--brand-grad`/`--font-mono`, cf. `agent/ui/style.css`).
+Compromis assumé : sur cible `x86_64-pc-windows-gnu` (cross-compilation depuis Linux, jamais MSVC),
+`WebView2Loader.dll` ne peut pas être lié statiquement — distribution en 2 fichiers (`.exe` + `.dll`
+à côté), déjà géré par `install.rs::ensure_installed_exe()` et `wix/main.wxs` pour le `.msi`. Pour
+l'usage `.exe` seul (page Agents > "Télécharger l'agent"), le zip servi par
+`GET /api/agents/latest/windows-exe` embarque les deux, cf. § Endpoints.
+
+⚠️ **Piège vécu réellement, deux fois** : le manifeste Windows (`requireAdministrator` + dépendance
+`Microsoft.Windows.Common-Controls` v6 — sans elle, `TaskDialogIndirect` introuvable, crash immédiat
+au lancement, `tao`/`muda` en ont besoin indépendamment du rendu WebView2) est injecté par
+`build.rs::tauri_build::try_build()`. Une erreur silencieuse de cet appel (avalée en simple
+`cargo:warning` avant le 18/08/2026) a laissé passer un `.exe` sans manifeste jusqu'à un vrai test
+utilisateur — `build.rs` fait maintenant échouer le build entier (`.expect(...)`) si `try_build`
+échoue. Cause déjà rencontrée localement : `target/` garde des chemins absolus d'un montage Docker
+différent d'une session à l'autre (`OUT_DIR` périmé, message `failed to read plugin permissions`) —
+purger `agent/gen` et `agent/target/x86_64-pc-windows-gnu/release/build` en local si ça se reproduit ;
+sans objet en CI (pas de `cache:` GitLab, `target/` toujours vide au départ). `.gitlab-ci.yml`
+vérifie en plus (`strings` sur l'exe produit) que le manifeste est bien présent, en garde-fou.
+
+`icons/icon.png` (généré depuis le SVG du logo, `rsvg-convert`) est **obligatoire** en plus de
+`icons/icon.ico` : `tauri::generate_context!()` en a besoin pour l'icône runtime embarquée
+(RGBA, indépendante du `.ico` utilisé pour la ressource PE Windows) — son absence fait échouer le
+build avec exactement le même symptôme que le piège ci-dessus.
+
 ## Mode persistant — service/daemon (13/08/2026)
 
 Remplace la planification externe (cron/tâche planifiée) comme mode **recommandé par défaut** :
@@ -453,7 +482,27 @@ admin). **Rattachée au module Inventaire depuis le 12/08/2026** (déplacée de 
 demande utilisateur — plus cohérent : l'agent est une méthode de collecte du patrimoine, au même
 titre que le compte de service, pas une fonction de sécurité offensive/opérationnelle comme Audits/
 Bastion). Liste des agents enrôlés (logo OS réel, `OsLogo.jsx`), génération de jeton (modale, secret
-affiché une seule fois avec avertissement « copiez-le maintenant »), révocation.
+affiché une seule fois avec avertissement « copiez-le maintenant »), révocation. **Téléchargement**
+(18/08/2026) : menu déroulant "Télécharger l'agent" (`.exe` autonome / `.msi` GPO / `.deb`, logo OS
+réel par option, `position: fixed` mesuré via `getBoundingClientRect` — un `absolute` se faisait
+couper par l'`overflow-hidden` de `PageHero`) vers les routes publiques `GET /agents/latest/*`.
+Badge de version courante à côté du titre (`GET /agents/latest/version`), cliquable vers
+`/agents/notes-de-version`.
+
+`pages/AgentHistory.jsx` (`/agents/:id`, "dernier contact") — étoffée le 18/08/2026 (retour
+utilisateur, restait trop pauvre) : criticité/type d'actif/fin de support OS/état réseau/mises à
+jour en attente/patrimoine matériel complet (mêmes données que la modale de scan d'Assets.jsx, un
+seul appel `GET /assets/{id}`, nouvel endpoint générique réutilisable). **Cycle de scan** : cadence
+réelle affichée (cycle horaire + sondage 60s pour une demande manuelle, cf. `daemon.rs`), prochain
+scan attendu, historique des check-ins avec badge "à la demande" (`AgentCheckinLog.on_demand`, cf.
+§ Endpoints) distinguant un check-in planifié d'une réponse à `POST /{id}/request-scan`. Toutes les
+tuiles/cartes reprennent le dégradé teinté à la couleur du module (`utils/cardStyle.js::tintedCard`,
+généralisé à toute l'app le même jour).
+
+`pages/AgentReleaseNotes.jsx` (`/agents/notes-de-version`) — changelog du binaire `allsafe-agent`
+par version réelle (semver, `CURRENT_AGENT_VERSION`), même composant partagé que la page Notes de
+version d'Allsafe (`ReleaseNotesPanel.jsx`, `scope="agent"` — cf. CLAUDE.md § module Notes de
+version pour le détail du modèle de données).
 
 `pages/Durcissement.jsx` (nouveau, 12/08/2026, module Inventaire) — vue dédiée sur les checks de
 durcissement/conformité de tout le parc, extraite de la modale « Résultat du scan » d'`Assets.jsx`

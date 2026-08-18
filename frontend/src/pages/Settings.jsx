@@ -10,8 +10,10 @@ import PageHero from '../components/PageHero.jsx'
 import PasswordInput from '../components/PasswordInput.jsx'
 import PasswordStrengthHint, { passwordMeetsPolicy } from '../components/PasswordStrengthHint.jsx'
 import ScanPolicyFormModal, { SCAN_POLICY_CRITICITE_LABELS, SCAN_POLICY_WEEKDAY_LABELS } from '../components/ScanPolicyFormModal.jsx'
+import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULES.parametres.color)
 const TEXT_INPUT = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 
 function fmtDate(iso) {
@@ -231,20 +233,22 @@ export default function Settings() {
               <button key={s.key} onClick={() => s.link ? navigate(s.link) : setSection(s.key)}
                 className="flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
                 style={{
-                  background: active ? 'color-mix(in srgb, var(--accent-blue) 12%, transparent)' : 'transparent',
-                  boxShadow: active ? 'inset 3px 0 0 0 var(--accent-blue)' : 'none',
+                  // Gris du module Paramètres (18/08/2026, demande explicite — uniforme, pas le
+                  // bleu accent générique repris par erreur d'un autre pattern de l'app).
+                  background: active ? `color-mix(in srgb, ${MODULES.parametres.color} 12%, transparent)` : 'transparent',
+                  boxShadow: active ? `inset 3px 0 0 0 ${MODULES.parametres.color}` : 'none',
                 }}
                 onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-secondary)' }}
                 onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
               >
                 <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{
-                  background: active ? 'color-mix(in srgb, var(--accent-blue) 20%, transparent)' : 'var(--bg-secondary)',
-                  color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                  background: active ? `color-mix(in srgb, ${MODULES.parametres.color} 20%, transparent)` : 'var(--bg-secondary)',
+                  color: active ? MODULES.parametres.color : 'var(--text-muted)',
                 }}>
                   <SectionIcon name={s.icon} />
                 </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-sm font-medium truncate" style={{ color: active ? 'var(--accent-blue)' : 'var(--text-primary)' }}>{s.label}</span>
+                  <span className="block text-sm font-medium truncate" style={{ color: active ? MODULES.parametres.color : 'var(--text-primary)' }}>{s.label}</span>
                   <span className="hidden lg:block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{s.desc}</span>
                 </span>
                 {s.link && (

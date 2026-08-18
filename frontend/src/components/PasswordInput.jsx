@@ -6,7 +6,7 @@ const EYE_OFF = <svg className="w-4 h-4" fill="none" stroke="currentColor" viewB
 // Champ mot de passe avec bascule afficher/masquer — même charpente visuelle que
 // les autres inputs de l'app (AnalystFormModal.jsx, etc.), factorisé dès la 2e
 // utilisation (Login, changement de mot de passe forcé, création de compte).
-export default function PasswordInput({ value, onChange, minLength, autoFocus, placeholder, id }) {
+export default function PasswordInput({ value, onChange, minLength, autoFocus, placeholder, id, iconColor = 'var(--text-muted)' }) {
   const [visible, setVisible] = useState(false)
 
   return (
@@ -26,7 +26,7 @@ export default function PasswordInput({ value, onChange, minLength, autoFocus, p
       <button type="button" onClick={() => setVisible(v => !v)}
         title={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
         className="absolute right-0 top-0 h-full px-2.5 flex items-center"
-        style={{ color: 'var(--text-muted)' }}
+        style={{ color: iconColor }}
         tabIndex={-1}
       >
         {visible ? EYE_OFF : EYE_OPEN}

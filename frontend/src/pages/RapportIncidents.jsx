@@ -5,10 +5,11 @@ import IncidentNIS2Badges from '../components/IncidentNIS2Badges.jsx'
 import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
+import { tintedCard } from '../utils/cardStyle.js'
 
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
 const MODULE_COLOR = MODULES.incidents.color
 const HERO_COLOR = MODULES.rapports.color
+const CARD = tintedCard(HERO_COLOR)
 
 const STATUS_STYLES = {
   declared:    { background: 'rgba(139,148,158,0.12)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' },

@@ -16,9 +16,10 @@ import AuditFindingModal, { FINDING_STATUSES } from '../components/AuditFindingM
 import { AUDIT_TYPES, AUDIT_METHODOLOGIES, AUDIT_STATUSES } from '../components/AuditFormModal.jsx'
 import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
+import { tintedCard } from '../utils/cardStyle.js'
 
 const MODULE_COLOR = MODULES.securite.color
-const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
+const CARD = tintedCard(MODULE_COLOR)
 const field = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
 const inputCls = 'w-full text-sm rounded-lg px-3 py-2 outline-none'
 

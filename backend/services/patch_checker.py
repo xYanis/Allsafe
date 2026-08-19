@@ -1460,7 +1460,19 @@ async def check_patch(
 
 # ─── Application du résultat à la vulnérabilité ───────────────────────────────
 
-def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, session) -> bool:
+# Étiquettes de bascule automatique (18/08/2026, cf. audit/AUDIT_SECURITE.md #34) — deux
+# variantes plutôt qu'une seule : `installed_packages` d'un actif `collection_method="agent"`
+# vient d'un check-in poussé par le binaire posé sur le poste, sans relecture indépendante
+# côté serveur (contrairement à un actif SSH/WinRM, où le backend lit lui-même la machine).
+# La bascule auto reste identique dans les deux cas (décision explicite : garder la même
+# logique agent/compte de service) — seule la piste d'audit change, pour que NIS 2 reste
+# honnête sur le niveau de confiance réel de la donnée qui a déclenché la décision.
+AUTO_VALIDATED_BY = "Auto (patch check)"
+AUTO_VALIDATED_BY_AGENT = "Auto (patch check, agent-reported)"
+AUTO_VALIDATED_BY_LABELS = {AUTO_VALIDATED_BY, AUTO_VALIDATED_BY_AGENT}
+
+
+def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, session, agent_reported: bool = False) -> bool:
     """
     Enregistre le résultat du check sur la vuln, et applique la bascule
     automatique quand elle est permise.
@@ -1512,7 +1524,7 @@ def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, sessio
     #    action manuelle (comportement documenté de longue date).
     #    Toute autre requalification automatique (faux positif, remise en
     #    attente) écraserait un jugement humain et reste donc bloquée.
-    qualifiee_par_humain = bool(vuln.validated_by) and vuln.validated_by != "Auto (patch check)"
+    qualifiee_par_humain = bool(vuln.validated_by) and vuln.validated_by not in AUTO_VALIDATED_BY_LABELS
     if qualifiee_par_humain and check_result.get("patch_detected") is not True:
         return False
 
@@ -1520,13 +1532,15 @@ def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, sessio
         # Signalement seul : l'analyste tranche (règle non négociable).
         return False
 
+    auto_label = AUTO_VALIDATED_BY_AGENT if agent_reported else AUTO_VALIDATED_BY
+
     if check_result.get("patch_detected") is True:
-        record_status_change(session, vuln.id, vuln.status, "patched", validated_by="Auto (patch check)")
+        record_status_change(session, vuln.id, vuln.status, "patched", validated_by=auto_label)
         vuln.status = "patched"
         vuln.patched_at = datetime.now(timezone.utc)
         vuln.awaiting_fix_at = None
         vuln.false_positive_at = None
-        vuln.validated_by = "Auto (patch check)"
+        vuln.validated_by = auto_label
         return True
 
     if check_result.get("no_fix_available") is True:
@@ -1535,12 +1549,12 @@ def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, sessio
         # (contrairement à `false_positive`) — la vuln bascule seule en `patched`
         # dès que le correctif sort, sans action manuelle.
         notes = check_result.get("no_fix_reason") or "Aucun correctif publié par la distribution pour cette CVE."
-        record_status_change(session, vuln.id, vuln.status, "awaiting_fix", validated_by="Auto (patch check)", notes=notes)
+        record_status_change(session, vuln.id, vuln.status, "awaiting_fix", validated_by=auto_label, notes=notes)
         vuln.status = "awaiting_fix"
         vuln.awaiting_fix_at = datetime.now(timezone.utc)
         vuln.patched_at = None
         vuln.false_positive_at = None
-        vuln.validated_by = "Auto (patch check)"
+        vuln.validated_by = auto_label
         vuln.notes = notes
         return True
 
@@ -1552,23 +1566,23 @@ def apply_patch_result(vuln: Vulnerability, cve: CVE, check_result: dict, sessio
         # avec un statut dédié pour ne pas laisser croire que *tous* les
         # paquets visés sont concernés. Cf. CLAUDE.md.
         notes = check_result.get("partial_fix_reason") or "Correctif partiellement en attente : un paquet visé par cette CVE est absent, l'autre n'a pas encore de correctif Debian."
-        record_status_change(session, vuln.id, vuln.status, "awaiting_fix_partial", validated_by="Auto (patch check)", notes=notes)
+        record_status_change(session, vuln.id, vuln.status, "awaiting_fix_partial", validated_by=auto_label, notes=notes)
         vuln.status = "awaiting_fix_partial"
         vuln.awaiting_fix_at = datetime.now(timezone.utc)
         vuln.patched_at = None
         vuln.false_positive_at = None
-        vuln.validated_by = "Auto (patch check)"
+        vuln.validated_by = auto_label
         vuln.notes = notes
         return True
 
     if check_result.get("not_applicable") is True:
         notes = check_result.get("not_applicable_reason") or "Aucun des paquets visés par cette CVE n'est installé sur l'actif."
-        record_status_change(session, vuln.id, vuln.status, "false_positive", validated_by="Auto (patch check)", notes=notes)
+        record_status_change(session, vuln.id, vuln.status, "false_positive", validated_by=auto_label, notes=notes)
         vuln.status = "false_positive"
         vuln.false_positive_at = datetime.now(timezone.utc)
         vuln.patched_at = None
         vuln.awaiting_fix_at = None
-        vuln.validated_by = "Auto (patch check)"
+        vuln.validated_by = auto_label
         vuln.notes = notes
         return True
 
@@ -1657,7 +1671,9 @@ async def backfill_auto_patch(asset_ids: Optional[list] = None) -> dict:
                 cve = await session.get(CVE, vuln.cve_id)
                 if not cve:
                     continue
-                if apply_patch_result(vuln, cve, check_result, session):
+                asset = await session.get(Asset, vuln.asset_id)
+                agent_reported = bool(asset) and asset.collection_method == "agent"
+                if apply_patch_result(vuln, cve, check_result, session, agent_reported=agent_reported):
                     stats["reconciled"] += 1
 
             await session.commit()
@@ -1931,7 +1947,7 @@ async def run_startup_patch_checks(asset_ids: Optional[list] = None) -> dict:
                         logger.error(f"Erreur patch check démarrage {cve.cve_id}/{asset.name}: {e}")
                         check_result = {"patch_detected": None, "error": str(e)}
 
-                    auto_patched = apply_patch_result(vuln, cve, check_result, session)
+                    auto_patched = apply_patch_result(vuln, cve, check_result, session, agent_reported=asset.collection_method == "agent")
                     stats["checked"] += 1
                     asset_checked_count += 1
                     if asset_progress_entry:

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, recommend, script, patchCheck, criticalReviewCandidates, falsePositiveCandidates, bulkFalsePositive, awaitingFixCandidates, bulkAwaitingFix, bulkAcceptedRisk, getVulnStatusHistory, getVulnOtherInstances } from '../api/client.js'
+import { vulns as fetchVulns, assetNames as fetchAssetNames, updateVuln, analyzeIA, recommend, script, patchCheck, criticalReviewCandidates, falsePositiveCandidates, bulkFalsePositive, awaitingFixCandidates, bulkAwaitingFix, bulkAcceptedRisk, getVulnStatusHistory, getVulnOtherInstances } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import ExploitBadge from '../components/ExploitBadge.jsx'
@@ -154,7 +154,7 @@ export default function Vulnerabilities() {
 
   useEffect(() => {
     if (isAnonymous) return
-    fetchAssets().then(r => setAssetList(r.data || [])).catch(() => {})
+    fetchAssetNames().then(r => setAssetList(r.data || [])).catch(() => {})
   }, [isAnonymous])
 
   const loadBulkCandidates = useCallback(() => {

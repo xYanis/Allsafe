@@ -51,7 +51,8 @@ function Log($msg) {
 }
 
 try {
-    $latestVersion = (Invoke-RestMethod "$Server/api/agents/latest/version" -TimeoutSec 15).version
+    $versionInfo = Invoke-RestMethod "$Server/api/agents/latest/version" -TimeoutSec 15
+    $latestVersion = $versionInfo.version
 } catch {
     Log "Échec de récupération de la version côté serveur ($Server) : $_"
     exit 1
@@ -69,6 +70,23 @@ if ($installedVersion -ne $latestVersion) {
         Invoke-WebRequest "$Server/api/agents/latest/windows" -OutFile $tmp -TimeoutSec 120
     } catch {
         Log "Échec du téléchargement du .msi : $_"
+        exit 1
+    }
+
+    # Vérification d'intégrité (18/08/2026, cf. audit/AUDIT_SECURITE.md #13/#25 — même
+    # correctif que agent/src/install.rs::apply_update) : sans elle, ce script exécutait tout
+    # .msi reçu du serveur avec des droits admin déjà confirmés (élévation vérifiée plus haut)
+    # — un MITM réseau ou un backend compromis suffisait à en faire un vecteur RCE sur
+    # l'ensemble du parc via cette même tâche planifiée GPO.
+    if (-not $versionInfo.sha256_windows) {
+        Log "Le serveur ne publie pas l'empreinte SHA-256 attendue — installation refusée par sécurité (backend obsolète ou compromis)."
+        Remove-Item $tmp -ErrorAction SilentlyContinue
+        exit 1
+    }
+    $actualHash = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash
+    if ($actualHash.ToLower() -ne $versionInfo.sha256_windows.ToLower()) {
+        Log "Empreinte du .msi invalide (attendu $($versionInfo.sha256_windows), obtenu $actualHash) — installation refusée, le paquet a peut-être été altéré en transit."
+        Remove-Item $tmp -ErrorAction SilentlyContinue
         exit 1
     }
 

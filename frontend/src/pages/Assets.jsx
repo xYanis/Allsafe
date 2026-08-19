@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { assets as fetchAssets, createAsset, updateAsset, deleteAsset, scanAsset, getAssetPackages, findingsByAsset } from '../api/client.js'
 import { Link } from 'react-router-dom'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId, fakeScanResult } from '../utils/fakeData.js'
 import CriticiteBadge from '../components/CriticiteBadge.jsx'
 import NetworkStatusBadge, { NETWORK_STATUS_LABELS } from '../components/NetworkStatusBadge.jsx'
@@ -780,6 +781,12 @@ function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
 
 export default function Assets() {
   const { isAnonymous } = usePresentation()
+  // Écriture/scan réservés admin (18/08/2026, cf. audit/AUDIT_SECURITE.md #14) — le
+  // backend rejette déjà ces actions en 403 pour un compte analyst, ce garde-fou côté
+  // frontend évite juste l'aller-retour raté (masque/désactive plutôt que de laisser
+  // cliquer pour rien), même schéma que pages/Agents.jsx::isAdmin.
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [assetList, setAssetList] = useState(() => {
     if (assetsPageCache == null) return []
     return isAnonymous ? [...assetsPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : assetsPageCache
@@ -1110,15 +1117,17 @@ export default function Assets() {
             <option value="configured">Configurés uniquement</option>
             <option value="unconfigured">Non configurés uniquement</option>
           </select>
-          <button onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
-            style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}
-          >
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            Ajouter un actif
-          </button>
+          {isAdmin && (
+            <button onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg transition-colors flex-shrink-0"
+              style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              Ajouter un actif
+            </button>
+          )}
         </div>
       </PageHero>
 
@@ -1127,22 +1136,26 @@ export default function Assets() {
           <span className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>
             {selectedAssetIds.size} actif{selectedAssetIds.size !== 1 ? 's' : ''} sélectionné{selectedAssetIds.size !== 1 ? 's' : ''}
           </span>
-          <button
-            onClick={handleBulkScan}
-            disabled={!!bulkScanProgress}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg"
-            style={{ background: 'var(--accent-blue)', color: '#fff', opacity: bulkScanProgress ? 0.6 : 1, cursor: bulkScanProgress ? 'default' : 'pointer' }}
-          >
-            {bulkScanProgress || `🔍 Scanner la sélection (${selectedAssetIds.size})`}
-          </button>
-          <button
-            onClick={() => setBulkDeleteModal(true)}
-            disabled={!!bulkScanProgress}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-40"
-            style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}
-          >
-            🗑 Supprimer la sélection ({selectedAssetIds.size})
-          </button>
+          {isAdmin && (
+            <button
+              onClick={handleBulkScan}
+              disabled={!!bulkScanProgress}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg"
+              style={{ background: 'var(--accent-blue)', color: '#fff', opacity: bulkScanProgress ? 0.6 : 1, cursor: bulkScanProgress ? 'default' : 'pointer' }}
+            >
+              {bulkScanProgress || `🔍 Scanner la sélection (${selectedAssetIds.size})`}
+            </button>
+          )}
+          {isAdmin && (
+            <button
+              onClick={() => setBulkDeleteModal(true)}
+              disabled={!!bulkScanProgress}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-40"
+              style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}
+            >
+              🗑 Supprimer la sélection ({selectedAssetIds.size})
+            </button>
+          )}
           {!bulkScanProgress && (
             <button onClick={() => setSelectedAssetIds(new Set())} className="text-xs" style={{ color: 'var(--text-muted)' }}>
               Annuler la sélection
@@ -1281,11 +1294,12 @@ export default function Assets() {
                   <td className="px-4 py-3">
                     <div className="flex gap-1">
                       <button onClick={() => handleRowScanClick(a)}
-                        className="p-1.5 rounded-lg transition-colors"
+                        disabled={!a.last_scan && !isAdmin}
+                        className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         style={{ color: scanLoading[a.id] ? '#58a6ff' : 'var(--text-muted)' }}
                         onMouseEnter={e => { if (!scanLoading[a.id]) { e.currentTarget.style.background = 'rgba(88,166,255,0.1)'; e.currentTarget.style.color = '#58a6ff' } }}
                         onMouseLeave={e => { if (!scanLoading[a.id]) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' } }}
-                        title={a.last_scan ? "Voir le dernier scan (bouton “Relancer un scan” dans la fenêtre pour rescanner)" : "Scanner (vérifie la fiabilité des infos + liste les applications)"}
+                        title={a.last_scan ? "Voir le dernier scan (bouton “Relancer un scan” dans la fenêtre pour rescanner, réservé admin)" : !isAdmin ? "Scan réservé aux administrateurs" : "Scanner (vérifie la fiabilité des infos + liste les applications)"}
                       >
                         {scanLoading[a.id] ? (
                           <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
@@ -1295,25 +1309,25 @@ export default function Assets() {
                           </svg>
                         )}
                       </button>
-                      <button onClick={() => { if (!isFakeId(a.id)) setEditTarget(a) }}
-                        disabled={isFakeId(a.id)}
+                      <button onClick={() => { if (!isFakeId(a.id) && isAdmin) setEditTarget(a) }}
+                        disabled={isFakeId(a.id) || !isAdmin}
                         className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         style={{ color: 'var(--text-muted)' }}
                         onMouseEnter={e => { if (!isFakeId(a.id)) { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                        title={isFakeId(a.id) ? 'Actif de démonstration — non modifiable' : 'Modifier cet actif'}
+                        title={isFakeId(a.id) ? 'Actif de démonstration — non modifiable' : !isAdmin ? 'Modification réservée aux administrateurs' : 'Modifier cet actif'}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </button>
-                      <button onClick={() => { if (!isFakeId(a.id)) setDeleteTarget(a) }}
-                        disabled={isFakeId(a.id)}
+                      <button onClick={() => { if (!isFakeId(a.id) && isAdmin) setDeleteTarget(a) }}
+                        disabled={isFakeId(a.id) || !isAdmin}
                         className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         style={{ color: 'var(--text-muted)' }}
                         onMouseEnter={e => { if (!isFakeId(a.id)) { e.currentTarget.style.background = 'rgba(248,81,73,0.1)'; e.currentTarget.style.color = '#f85149' } }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                        title={isFakeId(a.id) ? 'Actif de démonstration — non supprimable' : 'Supprimer cet actif'}
+                        title={isFakeId(a.id) ? 'Actif de démonstration — non supprimable' : !isAdmin ? 'Suppression réservée aux administrateurs' : 'Supprimer cet actif'}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1347,7 +1361,7 @@ export default function Assets() {
       )}
       {scanModal && (
         <ScanResultModal asset={scanModal.asset} result={scanModal.result} onClose={() => setScanModal(null)}
-          onRescan={isFakeId(scanModal.asset.id) ? undefined : () => handleScan(scanModal.asset)}
+          onRescan={(isFakeId(scanModal.asset.id) || !isAdmin) ? undefined : () => handleScan(scanModal.asset)}
           rescanning={!!scanLoading[scanModal.asset.id]}
         />
       )}

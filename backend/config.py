@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DB_HOST: str = "db"
 
     # Plafond de requêtes HTTP autorisées à détenir une session DB simultanément
-    # (10/08/2026, cf. AUDIT_SECURITE.md — le fuzzing schemathesis a fait geler le
+    # (10/08/2026, cf. audit/AUDIT_SECURITE.md — le fuzzing schemathesis a fait geler le
     # backend entier >2min lors d'une rafale de requêtes concurrentes). Sémaphore
     # côté `database.py::get_session`, pas un pool SQLAlchemy classique : NullPool
     # reste nécessaire pour Celery (cf. commentaire sur `engine` dans database.py) —
@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     # Défaut False (StartTLS sur ldap:// existant, sans toucher port/URL) plutôt que
     # True (ldaps:// implicite, 636) — safe par défaut : on ne sait pas si le DC a
     # LDAPS activé, alors que StartTLS sur 389 est quasi universel sur AD. Passer à
-    # True + AD_SERVER=ldaps://...:636 si le DC le permet (cf. AUDIT_SECURITE.md #3).
+    # True + AD_SERVER=ldaps://...:636 si le DC le permet (cf. audit/AUDIT_SECURITE.md #3).
     AD_USE_TLS: bool = False
 
     # SSH Linux

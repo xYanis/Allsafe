@@ -40,6 +40,14 @@ def validate_note_image(content: bytes, filename: str) -> str:
         raise ValueError("Formats acceptés : PNG, JPEG, GIF, WebP.")
     if not content.startswith(magic):
         raise ValueError(f"Le contenu du fichier ne correspond pas à un {ext} valide.")
+    # WebP (18/08/2026, cf. audit/AUDIT_SECURITE.md #37) : "RIFF" seul est un préfixe de
+    # conteneur générique partagé avec WAV/AVI — sans vérifier la marque "WEBP" à l'offset 8,
+    # un .wav/.avi renommé .webp passait la validation (impact réel faible, `nosniff`
+    # empêche toute réinterprétation par le navigateur — juste une image cassée à
+    # l'affichage, pas un vecteur XSS — mais corrigé pour rester cohérent avec les autres
+    # formats de cette table, tous vérifiés sur leur signature complète).
+    if ext == ".webp" and content[8:12] != b"WEBP":
+        raise ValueError("Le contenu du fichier ne correspond pas à un webp valide.")
     return ext
 
 

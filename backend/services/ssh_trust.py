@@ -3,7 +3,7 @@ services/ssh_trust.py
 TOFU (trust-on-first-use) pour les connexions SSH sortantes (asyncssh),
 partagé par asset_scanner.py et patch_checker.py.
 
-cf. AUDIT_SECURITE.md #2 : `known_hosts=None` désactivait toute vérification
+cf. audit/AUDIT_SECURITE.md #2 : `known_hosts=None` désactivait toute vérification
 de l'identité du serveur SSH. Un attaquant en MITM sur le VLAN (ARP spoofing,
 VLAN partagé) pouvait se faire passer pour l'actif scanné : vol du mot de
 passe SSH si l'actif s'authentifie par mot de passe, ou injection de faux
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 
 def _known_hosts_path() -> str:
-    # /app/ssh-state (10/08/2026, cf. AUDIT_SECURITE.md § Docker) : volume nommé séparé de
+    # /app/ssh-state (10/08/2026, cf. audit/AUDIT_SECURITE.md § Docker) : volume nommé séparé de
     # /app/keys, monté :ro depuis ce correctif — known_hosts est le seul des deux fichiers
     # qui a besoin d'écriture (apprentissage TOFU), la clé privée id_ed25519, elle, n'a
     # jamais besoin que d'être lue.

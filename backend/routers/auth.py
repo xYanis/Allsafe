@@ -5,11 +5,13 @@ Login/logout/session courante — seul router de `/api/*` sans dependency d'auth
 individuellement via `Depends(require_auth)` sur la route, cf. main.py.
 """
 
+import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_deps import SESSION_COOKIE_NAME, require_auth
@@ -25,10 +27,17 @@ from services.auth import (
     delete_session,
     hash_password,
     is_locked_out,
+    is_password_reset_locked_out,
     record_audit,
     validate_password_strength,
     verify_password,
 )
+
+# UUID sentinel (18/08/2026, cf. audit/AUDIT_SECURITE.md #22) — utilisé à la place d'un
+# vrai user_id quand l'email de /forgot-password ne correspond à aucun compte actif, pour
+# que la requête de dédup ci-dessous s'exécute à l'identique (même plan, même coût) dans
+# les deux branches plutôt que d'être court-circuitée pour l'une des deux.
+_NIL_USER_ID = uuid.UUID(int=0)
 
 router = APIRouter()
 
@@ -52,7 +61,11 @@ class LoginPayload(BaseModel):
 
 class ForgotPasswordPayload(BaseModel):
     email: str
-    message: str | None = None
+    # max_length (18/08/2026, cf. audit/AUDIT_SECURITE.md #24) — sans lui, un payload de
+    # plusieurs Mo était accepté en 200 (0,31s) : la troncature à 2000 caractères s'appliquait
+    # déjà, mais APRÈS que tout le corps ait été bufferisé/parsé. `/login` a le même trou
+    # (hors scope ici, endpoint distinct) — l'une des deux seules routes entièrement publiques.
+    message: str | None = Field(default=None, max_length=2000)
 
 
 class ChangePasswordPayload(BaseModel):
@@ -125,29 +138,69 @@ async def login(payload: LoginPayload, request: Request, response: Response,
 # Message générique renvoyé quel que soit le cas (email inconnu, compte désactivé, ou
 # demande bien créée) — même principe anti-énumération que /login ci-dessus : le contenu de
 # la réponse ne doit jamais confirmer qu'une adresse existe dans la base.
+#
+# Durci le 18/08/2026 (cf. audit/AUDIT_SECURITE.md #19/#20/#22/#23/#24) — cette route
+# n'avait initialement ni rate-limit, ni traçabilité, ni protection anti-course, contrairement
+# à /login qui applique scrupuleusement ces trois principes :
+# - #20 : verrou anti-spam par IP (is_password_reset_locked_out, réutilise le mécanisme de
+#   /login) + journalisation dans auth_audit_logs de TOUTE tentative, y compris email
+#   inconnu/inactif (comme /login le fait déjà).
+# - #22 : le nombre d'opérations DB est désormais identique entre la branche "email inconnu"
+#   et la branche "compte actif existant" (même SELECT de dédup, sur un UUID sentinelle côté
+#   inconnu) — sans ça, un écart de ~30ms mesuré permettait de deviner qu'une adresse existe.
+# - #19 : la dédup elle-même n'est plus lire-puis-écrire (course possible, 2 lignes pending
+#   créées par 15 requêtes concurrentes en conditions réelles) mais protégée par l'index
+#   unique partiel `ux_password_reset_pending` (schema_patches.sql) — l'IntegrityError d'un
+#   INSERT perdant retombe proprement sur un UPDATE de la ligne déjà créée par le gagnant.
 @router.post("/forgot-password")
-async def forgot_password(payload: ForgotPasswordPayload, session: AsyncSession = Depends(get_session)):
+async def forgot_password(payload: ForgotPasswordPayload, request: Request, session: AsyncSession = Depends(get_session)):
     generic = {"sent": True, "message": "Si un compte existe avec cet email, une demande a été transmise à un administrateur."}
     email = payload.email.strip().lower()
+    ip = _client_ip(request)
+    user_agent = request.headers.get("User-Agent", "")[:512]
+
+    if await is_password_reset_locked_out(session, ip):
+        raise HTTPException(429, "Trop de demandes — réessayez dans quelques minutes.")
+
     if not email:
         return generic
-    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
-    if not user or not user.is_active:
-        return generic
 
-    # Une seule demande en attente par compte — un utilisateur qui reclique ne doit pas
-    # empiler des doublons dans la liste de l'admin, juste rafraîchir la plus récente.
+    user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+    valid_user = user if (user and user.is_active) else None
+
+    # Dédup (#19/#22) — même requête, même coût, que l'email corresponde ou non à un compte
+    # actif : évite un signal de timing exploitable pour deviner l'existence d'une adresse.
+    dedup_user_id = valid_user.id if valid_user else _NIL_USER_ID
     existing = (await session.execute(
         select(PasswordResetRequest).where(
-            PasswordResetRequest.user_id == user.id, PasswordResetRequest.status == "pending",
+            PasswordResetRequest.user_id == dedup_user_id, PasswordResetRequest.status == "pending",
         )
     )).scalar_one_or_none()
+
     message = (payload.message or "").strip()[:2000] or None
-    if existing:
-        existing.message = message
-        existing.requested_at = datetime.now(timezone.utc)
-    else:
-        session.add(PasswordResetRequest(user_id=user.id, message=message))
+    if valid_user:
+        if existing:
+            existing.message = message
+            existing.requested_at = datetime.now(timezone.utc)
+        else:
+            try:
+                async with session.begin_nested():
+                    session.add(PasswordResetRequest(user_id=valid_user.id, message=message))
+                    await session.flush()
+            except IntegrityError:
+                # Course perdue contre une requête concurrente (index unique partiel,
+                # cf. schema_patches.sql) — la ligne pending existe déjà, on la met à jour.
+                existing = (await session.execute(
+                    select(PasswordResetRequest).where(
+                        PasswordResetRequest.user_id == valid_user.id, PasswordResetRequest.status == "pending",
+                    )
+                )).scalar_one_or_none()
+                if existing:
+                    existing.message = message
+                    existing.requested_at = datetime.now(timezone.utc)
+
+    await record_audit(session, "PASSWORD_RESET_REQUESTED", user_id=valid_user.id if valid_user else None,
+                        email_attempt=email, ip_address=ip, user_agent=user_agent)
     await session.commit()
     return generic
 

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   watchItems, updateWatch, watchStats, syncWatch, watchSyncStatus, watchLeakSources,
-  watchSources, createWatchSource, deleteWatchSource, assets as fetchAssets,
+  watchSources, createWatchSource, deleteWatchSource, assetNames as fetchAssetNames,
 } from '../api/client.js'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import AddSourceModal from '../components/AddSourceModal.jsx'
@@ -385,7 +385,7 @@ export default function Watch() {
   // Parc chargé une fois : alimente le sélecteur "Actifs concernés" de la
   // modale de traitement (l'analyste rattache une alerte aux machines visées).
   useEffect(() => {
-    fetchAssets()
+    fetchAssetNames()
       .then(r => setAssetList([...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name))))
       .catch(() => {})
   }, [])

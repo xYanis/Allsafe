@@ -19,7 +19,7 @@ export default defineConfig({
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {
-            // Adresse socket réelle uniquement (10/08/2026, cf. AUDIT_SECURITE.md #9) —
+            // Adresse socket réelle uniquement (10/08/2026, cf. audit/AUDIT_SECURITE.md #9) —
             // ne JAMAIS faire confiance à un `x-forwarded-for` envoyé par le client
             // lui-même : ce serveur dev est le seul hop entre le client et le backend
             // (exposé sur 0.0.0.0:3000), donc rien à préserver d'une chaîne de proxy.

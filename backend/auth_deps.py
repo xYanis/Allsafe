@@ -27,7 +27,7 @@ AGENT_TOKEN_HEADER = "X-Agent-Token"
 
 # Routes jamais bloquées par le garde-fou must_change_password ci-dessous — sans elles,
 # un compte forcé à changer son mot de passe ne pourrait jamais appeler l'endpoint qui
-# le lui permet (10/08/2026, cf. AUDIT_SECURITE.md #10). `me`/`logout` inclus : la page
+# le lui permet (10/08/2026, cf. audit/AUDIT_SECURITE.md #10). `me`/`logout` inclus : la page
 # de changement forcé du frontend (ProtectedRoute.jsx) en a besoin pour afficher l'email
 # du compte et permettre de se déconnecter sans changer le mot de passe.
 _ALLOWED_WHILE_MUST_CHANGE_PASSWORD = {
@@ -48,7 +48,7 @@ async def require_auth(request: Request, session: AsyncSession = Depends(get_ses
         # l'écran tant que must_change_password est vrai — un appel direct à l'API (curl,
         # script) avec des identifiants provisoires (ex: BOOTSTRAP_ADMIN_PASSWORD, censé
         # être changé à la 1ère connexion) donnait un accès complet et permanent, flag
-        # ou pas. Cf. AUDIT_SECURITE.md #10.
+        # ou pas. Cf. audit/AUDIT_SECURITE.md #10.
         raise HTTPException(403, "Changement de mot de passe requis avant de continuer.")
     return user
 
@@ -94,7 +94,7 @@ def require_page_or_internal(*page_keys: str):
     hors de portée d'un `try/except` ici)."""
     async def _dep(request: Request, session: AsyncSession = Depends(get_session)) -> Optional[User]:
         token = request.headers.get(INTERNAL_TOKEN_HEADER)
-        # hmac.compare_digest (10/08/2026, cf. AUDIT_SECURITE.md #12) plutôt que `==` :
+        # hmac.compare_digest (10/08/2026, cf. audit/AUDIT_SECURITE.md #12) plutôt que `==` :
         # une comparaison de chaînes standard s'arrête au premier octet différent, ce qui
         # fuit un signal temporel exploitable en théorie pour deviner INTERNAL_API_TOKEN
         # octet par octet. Risque réel faible (jeton interne, jamais exposé au navigateur)

@@ -3,7 +3,7 @@ services/net_guard.py
 Garde-fou SSRF — partagé par les sources de veille (WatchSource) et tout futur
 appel HTTP sortant piloté par une URL saisie par l'utilisateur.
 
-cf. AUDIT_SECURITE.md #1 : sans auth sur l'API, un `url` non validé pointant
+cf. audit/AUDIT_SECURITE.md #1 : sans auth sur l'API, un `url` non validé pointant
 vers 127.0.0.1, le VLAN interne ou les métadonnées cloud est un SSRF exploitable
 par quiconque a accès au réseau.
 """

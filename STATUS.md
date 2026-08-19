@@ -3,12 +3,12 @@
 ## ⚠️ Échéance : passage en production ~24/08/2026
 
 Annoncé par l'utilisateur le 10/08/2026 ("d'ici 2 semaines on passera en prod"). Avant cette
-date : **refaire un tour de sécurité complet** (`AUDIT_SECURITE.md`), pas juste relire l'existant
+date : **refaire un tour de sécurité complet** (`audit/AUDIT_SECURITE.md`), pas juste relire l'existant
 — redémarrer une revue depuis zéro sur tout le périmètre, comme celle du 10/08/2026. L'utilisateur
 préfère être celui qui relance ce chantier plutôt qu'un rappel automatique programmé (demandé
 explicitement) — ne pas le déclencher de soi-même, mais le proposer si la date approche sans
 qu'il en ait reparlé. Peut aussi être l'occasion de statuer sur les points Docker encore ouverts
-(mode "prod" sans `--reload`/`vite dev`, cf. § Points ouverts de `AUDIT_SECURITE.md`) — un vrai
+(mode "prod" sans `--reload`/`vite dev`, cf. § Points ouverts de `audit/AUDIT_SECURITE.md`) — un vrai
 passage en prod est justement le moment où ces compromis "dev actif" cessent d'être valables.
 
 ## Lire au démarrage de chaque session, avec CLAUDE.md
@@ -16,6 +16,164 @@ passage en prod est justement le moment où ces compromis "dev actif" cessent d'
 Volontairement court : ce fichier est chargé à **chaque** session. Le déroulé chronologique des
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
+
+**Dernière session : 19/08/2026 (suite)** — Lenteur signalée sur la page Vulnérabilités +
+validation Docker/DB réelle des correctifs précédents (accès Docker devenu disponible en
+cours de session, absent au début).
+
+- **Filtre par actif lent à s'afficher** : `Vulnerabilities.jsx`/`Watch.jsx` appelaient
+  `GET /assets` (calcule 3 requêtes groupées sur toute la table `vulnerabilities` + un join
+  `NetworkStatus` pour les 440 actifs du parc) juste pour peupler un menu id/nom
+  (`AssetDropdown.jsx` n'utilise que `a.id`/`a.name`, vérifié). Nouveau `GET /assets/names`
+  (une requête `SELECT id, name`). **Mesuré en conditions réelles** (440 actifs) :
+  848ms → 107ms. `Reports.jsx` gardé sur l'endpoint lourd — il a réellement besoin de
+  `hostname`/`ip_address` pour `redactText` (mode Présentation).
+- **Page globalement lente** : trois causes mesurées en conditions réelles, pas supposées —
+  1. Tri par défaut (`status='open'`, score desc) sans index composite : `EXPLAIN ANALYZE`
+     confirmait un tri en mémoire sur ~119k lignes. Index `idx_vulnerabilities_status_risk_score`
+     ajouté — la requête de liste passe de "tri après scan" à "déjà trié par l'index"
+     (0,8-1,1ms mesuré après coup).
+  2. `awaiting-fix-candidates` (appelé au montage de la page, jamais mis en cache) :
+     **3,4s mesurés**. Cause : le pré-filtre SQL ne gardait que "patch check déjà passé"
+     (`patch_check_result IS NOT NULL`), la vérification finale (`no_fix_available`) restant
+     en Python après matérialisation ORM complète — correct quand ce filtre ne laissait
+     passer que 1 244 lignes (28/07/2026), plus du tout maintenant que le cycle de patch
+     check a tourné sur l'essentiel du parc élargi (77 075 lignes matérialisées pour ne
+     retenir, au final, que 0-2 candidats). Poussé entièrement en SQL (opérateur JSON
+     Postgres `->>'no_fix_available' = 'true'`) — même résultat exact vérifié par
+     comparaison directe, **3,4s → ~0,4-0,6s** mesuré après coup (5-8×).
+  3. `false-positive-candidates` (même appel au montage) : **~7,5s à froid** confirmé encore
+     valable aujourd'hui (mémoïsation 5 min déjà en place depuis le 08/08, mais chaque
+     premier appel après expiration reste plein tarif). Profilé en détail : la phase de
+     matching CPE elle-même est rapide (~530ms sur 15 320 évaluations CVE×profil) — le vrai
+     coût est la phase 2, qui matérialise ~17-27k lignes ORM en Python. Tentative de
+     réplication de l'optimisation ci-dessus **infirmée par la mesure** : sur un parc
+     hétérogène Windows/Linux à 8 profils distincts, la quasi-totalité des CVE candidates
+     (1915/1915 mesurées) sont "invalides pour au moins un profil" par construction (une CVE
+     Windows ne matche jamais un profil Debian) — le filtre `cve_id IN invalid_cve_ids`
+     n'exclut donc presque rien, contrairement à l'intuition. **Laissé tel quel** : corriger
+     nécessiterait vraiment de revoir la logique même de pré-filtrage (par profil de l'actif
+     réel de la ligne, pas "invalide pour N'IMPORTE LEQUEL des profils du parc"), un
+     changement plus risqué sur une fonction qui alimente une qualification NIS 2 — pas
+     tenté sans pouvoir le valider plus à fond.
+- **Validation Docker réelle** (accès retrouvé en cours de session) : `docker compose build
+  backend` (Dockerfile multi-stage, cf. #32) — `gcc` bien absent de l'image finale
+  (`which gcc` → introuvable), `ldap3`/tout le reste importent sans erreur avec les vraies
+  variables d'environnement. `schema_patches.sql` rejoué contre la vraie base (idempotent,
+  aucune erreur) — les deux nouveaux index (#19, perf ci-dessus) créés avec succès,
+  confirmés par `\d`. Suite de tests passée via le chemin CI exact
+  (`docker run ... pytest`) : 255/255. `backend`/`worker`/`beat` reconstruits et recréés
+  (leçon déjà connue du projet : les trois partagent la même image, `docker compose build
+  backend` seul ne suffit pas) — les 6 services confirmés `healthy`.
+- **Notes de version alimentées** (`release_notes`, table réelle, pas juste ce fichier) :
+  scope `allsafe` 1.2.0 (4 entrées : perf page Vulnérabilités, RBAC actifs admin-only,
+  suppression d'image de note, mot de passe oublié durci) et scope `agent` 0.1.5 (3
+  entrées : vérification avant mise à jour, identité vérifiée à l'enrôlement, ACL Windows).
+  `agent/Cargo.toml`/`Cargo.lock` bumpés à `0.1.5` en conséquence (source seulement — les
+  binaires distribués dans `agent/dist/` restent ceux d'avant cette session, pas
+  reconstruits/redistribués, cf. point ouvert plus bas).
+
+**Dernière session : 19/08/2026** — Correctifs des 3 nouveaux audits de sécurité du 18/08/2026
+(`audit/AUDIT_SECURITE.md`/`_3.md`/`_4.md`, #13 à #37) : les 26 findings numérotés traités
+(23 corrigés en code, #28 tranché "laisser ouvert" sans changement, #29/pytest bumpé en gardant
+le risque théorique documenté). `AUDIT_SECURITE.md` était déjà clos avant cette session.
+
+- **#13 CRITIQUE** (RCE, `.msi` de mise à jour agent non vérifié) : SHA-256 attendu publié par
+  `GET /latest/version` (`sha256_windows`/`sha256_linux`), vérifié avant `msiexec`/`dpkg -i` dans
+  `install.rs::apply_update` **et** les deux scripts de déploiement (`update-agent.ps1`/`.sh`,
+  toujours vivants et recommandés — pas supprimés comme un instant cru en session). `require_https`
+  volontairement laissé en **avertissement non bloquant** (`warn_if_not_https`) : le serveur de
+  prod tourne encore en HTTP aujourd'hui, bloquer aurait cassé la mise à jour réelle — décision
+  explicite, à repasser en blocage strict au déploiement du reverse-proxy TLS (cf. docs/AGENTS.md).
+- **#14 ÉLEVÉ** (`assets.py` sans RBAC) : `require_admin` sur create/update/delete/scan d'actif +
+  les 3 endpoints de durcissement réseau/switch/web (`delete_asset` aligné aussi, pas dans la
+  liste de l'audit mais même trou) ; SSRF corrigée (`validate_public_url` sur actif website +
+  revalidation par hop de redirection dans `web_hardening.py`) ; UI (Assets.jsx/Durcissement.jsx)
+  masque les actions désormais admin-only pour un compte analyst ; test anti-régression ajouté.
+- **#15/#16 ÉLEVÉ** (race jetons agent + hostname non vérifié) : `enroll_agent` en `UPDATE...
+  RETURNING` atomique ; mismatch hostname/actif rejeté **avant** de consommer le jeton (bug UX
+  attrapé avant livraison : rejeter après aurait grillé un jeton sur un simple typo).
+- **#18/#34/#35** (Lot 2, agent/check-in) : ACL Windows (`icacls`) sur `%ProgramData%\allsafe-
+  agent` ; bascule auto **gardée identique** agent/compte de service (décision explicite), mais
+  `validated_by="Auto (patch check, agent-reported)"` pour une piste NIS 2 honnête — bug connexe
+  trouvé et corrigé au passage : le filtre du bandeau "depuis votre dernière visite"
+  (`vulnerabilities.py::auto_bascule_summary`) ne cherchait que l'ancien libellé exact, les
+  bascules agent auraient disparu du rattrapage ; throttle 1 check-in/min + troncature `[:300]`.
+- **#19-#24** (Lot 3, mot de passe oublié) : index unique partiel `ux_password_reset_pending`
+  (`schema_patches.sql`, à rejouer côté DB) + `IntegrityError` catché ; verrou anti-spam par IP
+  + journalisation `PASSWORD_RESET_REQUESTED` (même tentatives sur email inconnu, comme /login) ;
+  sessions révoquées après remise à zéro d'un mot de passe ; nombre d'opérations DB égalisé entre
+  les deux branches (email inconnu vs compte existant) ; `with_for_update()` sur resolve/dismiss ;
+  `max_length=2000` sur le champ `message`.
+- **#25-#27** (Lot 4, CI) : `if: $CI_COMMIT_REF_PROTECTED` sur `build-agent` (+ rappel à vérifier
+  côté Settings GitLab : variables "Protected", restriction des déclenchements manuels) ; `set -e`
+  + vérification explicite du code de sortie sur les deux appels `osslsigncode sign`.
+- **#29/#32/#33** (Lot 5, Docker/deps) : `backend/Dockerfile` en multi-stage (`gcc`/`*-dev`
+  absents de l'image finale — `ldap3` est pur Python, aucun `.so` runtime à recopier) ; en-têtes
+  `X-Content-Type-Options`/`X-Frame-Options` sur `location /` de `frontend/nginx.conf` (scopés,
+  pas au niveau `server`, pour ne pas dupliquer les en-têtes déjà posés par le backend sur `/api/`) ;
+  `pytest` 8.3.3→9.0.3 + `pytest-asyncio` 0.24.0→1.4.0 (changement de version majeure des deux
+  côtés, `asyncio_mode = auto` déjà explicite dans `pytest.ini` donc pas affecté par le retrait du
+  mode "legacy" — **vérifié en conditions réelles dans la foulée, cf. § ci-dessous : 255/255 tests
+  verts avec ces deux versions**).
+- **#36/#37** (Lot 6, Notes) : `DELETE /notes/images/{id}` ajouté (n'existait pas, contrairement
+  aux 3 modules frères) + nettoyage disque dans `delete_subject` (le cascade DB n'efface jamais
+  les fichiers) ; signature WebP vérifiée à l'offset 8 (`WEBP`, pas juste le préfixe `RIFF`
+  générique partagé avec WAV/AVI).
+- **#28** — décision prise avec l'utilisateur : `GET /assets/lifecycle-since` reste ouvert à tout
+  compte connecté, cohérent avec la limite déjà assumée sur `/api/assets`/`/api/vulnerabilities`.
+- **Non traité, à vérifier séparément** : la note annexe d'`AUDIT_SECURITE.md` sur
+  `severity IS NULL` contournant la garde CRITICAL par égalité stricte — nécessite une requête SQL
+  sur la base réelle (`SELECT COUNT(*) FROM cves WHERE severity IS NULL`) pour savoir si des CVE
+  non notées participent réellement au cycle de patch check ; pas fait faute d'accès DB dans
+  l'environnement de cette session.
+
+## `cargo check` + `pytest` réellement exécutés après coup (19/08/2026)
+
+Le sandbox de la session de correctifs n'avait ni Docker ni `pip`/`cc` préinstallés — statut
+initial "rien n'a tourné, tout relu à la main". Sur demande explicite de l'utilisateur
+("lance cargo check et pytest de ton côté"), débloqué sans root :
+- **pip** amorcé via `get-pip.py --user --break-system-packages` (environnement Debian
+  "externally-managed", PEP 668 — override sûr : n'écrit que dans `~/.local`, jamais dans les
+  paquets système). `pip install --user` de `requirements.txt` : tout passe en wheel précompilé
+  sauf `asyncpg==0.29.0` (pas de wheel `cp313`, tentative de build depuis les sources faute de
+  `cc` — écarté, `asyncpg>=0.30` a un wheel `cp313` et suffit pour faire tourner les tests, qui
+  ne touchent jamais une vraie base). **`pytest` exécuté pour de vrai : 255/255 verts**
+  (`pytest==9.0.3`/`pytest-asyncio==1.4.0`, le bump du Lot 5 #29 — aucune régression).
+- **`cargo check --target x86_64-pc-windows-gnu` (agent/) — vert, 0 warning**, ~1m36. Bloqué
+  au premier essai par l'absence de `cc` natif (mingw-w64 système ne fournit qu'un compilateur
+  croisé, pas d'hôte) ; débloqué avec **Zig 0.16.0** (binaire portable téléchargé, `zig cc` en
+  wrapper `CC` pour les build scripts qui compilent pour l'hôte) + **`x86_64-w64-mingw32-gcc`**
+  (déjà présent, réglé en `CC_x86_64_pc_windows_gnu` pour le code natif réellement compilé pour
+  la cible Windows, ex. `ring`'s `curve25519.c`) — aucune modification du dépôt, juste de
+  l'outillage local à cette machine.
+
+**Un vrai bug trouvé en faisant tourner la suite pour de vrai, pas en la relisant** : FastAPI
+0.140.0 (bumpé le 27/07/2026, cf. `AUDIT_SECURITE.md`) a changé la structure interne de
+`app.routes` — les routes des routers inclus (`app.include_router(...)`) ne sont plus aplaties,
+elles vivent derrière des objets `_IncludedRouter`. `TestAllApiRoutesAreProtected`
+(`test_auth_guardrails.py`), le filet de sécurité anti-régression sur le RBAC de **toute** l'API,
+marchait sur `app.routes` à l'ancienne — résultat : **0 route trouvée depuis le bump FastAPI,
+donc chaque assertion passait par vacuité**, y compris en CI (`test-backend`), sans jamais rien
+vérifier. Invisible sans un test qui compare un ensemble *trouvé* à un ensemble *attendu*
+(`test_assets_write_and_scan_routes_require_admin_read_stays_open`, ajouté cette session pour
+#14, a été le premier à le faire échouer au lieu de passer dans le vide). Corrigé : les helpers
+marchent maintenant sur `_IncludedRouter.original_router.routes` + `include_context` (prefix et
+dependencies de routeur), avec `fastapi.dependencies.utils.get_dependant` pour résoudre
+correctement les fabriques de dépendance (`require_page(...)`/`require_page_or_internal(...)`,
+qui renvoient une nouvelle closure à chaque appel). Au passage, plusieurs vraies lacunes de
+couverture révélées et corrigées dans le test lui-même (pas dans l'app — comportement déjà
+correct, juste jamais vérifié) : `GET /api/agents/latest/*` (public, oublié de la liste),
+`POST /api/auth/forgot-password` (public, nouveau ce jour), `require_admin_or_internal`/
+`require_page_or_internal` pas reconnus comme formes valides de protection.
+
+**Reste non vérifié** (pas de Docker/DB dans ce sandbox même après déblocage pip/cc) :
+`docker compose up --build` (le Dockerfile backend multi-stage n'a jamais buildé — `ldap3` étant
+pur Python le risque théorique de `.so` runtime manquant est jugé nul, mais pas confirmé en
+conditions réelles) ; `backend/db/schema_patches.sql` (nouvel index `ux_password_reset_pending`,
+pas rejoué contre une vraie base) ; `frontend` (Assets.jsx/Durcissement.jsx, boutons masqués pour
+un compte non-admin — pas testé au navigateur) ; le point `severity IS NULL` d'`AUDIT_SECURITE.md`
+ci-dessus (nécessite une requête SQL réelle).
 
 **Dernière session : 17/08/2026** — Tests unitaires pour la logique ajoutée plus tôt dans la
 journée (`os_eol.py`/`cvss_bte.py`/`web_hardening.py`, jusque-là sans le moindre test malgré le
@@ -745,7 +903,7 @@ tous vérifiés en lisant le code exact avant correction :
   4749, son vrai total. `vulnCounts`/le second appel `fetchVulns` retirés d'Assets.jsx (imports
   `fetchVulns`/`anonymizeVuln`/`FAKE_VULNERABILITIES` devenus morts, supprimés).
 - **[Sécurité] Injection de formule CSV non fermée sur le nom d'actif** : `csv_safe()` (déjà posée
-  après `AUDIT_SECURITE.md #7`) protégeait `notes`/`validated_by`/`title`/`reported_by` dans les
+  après `audit/AUDIT_SECURITE.md #7`) protégeait `notes`/`validated_by`/`title`/`reported_by` dans les
   exports CSV Rapports/Incidents mais pas `Asset.name`/`os`/`os_version`/`asset_type` — modifiables
   par tout compte `analyst` via `PUT /api/assets`. Corrigé dans `routers/reports.py` (export backlog)
   et `routers/incidents.py` (export auditeur, colonne "Actifs concernés").
@@ -816,7 +974,7 @@ qui nomment explicitement le produit (`AdministrationSecurity.jsx` § déception
 pour "CyberVuln" (cf. CLAUDE.md § Rebranding) appliqué à "CBR" lui-même : identifiants internes
 (`cybervuln` superuser DB, `cbr_app` rôle applicatif, `CbrMark.jsx`/`CbrLogoTile`, variables CSS
 `--brand-*`), commentaires de code et **narration historique déjà écrite** (`docs/HISTORIQUE.md`,
-entrées passées de ce fichier, `AUDIT_SECURITE.md`, le titre littéral de l'audit déjà saisi en base
+entrées passées de ce fichier, `audit/AUDIT_SECURITE.md`, le titre littéral de l'audit déjà saisi en base
 « Application CBR ») **non retouchés rétroactivement** — "CBR" y reste exact pour la période qu'ils
 décrivent. CLAUDE.md/README.md/docs/ARCHITECTURE.md/AUDITS.md/FRONTEND.md/INCIDENTS.md/VEILLE.md/
 ROADMAP_RNCP42335.md mis à jour intégralement (remplacement complet demandé explicitement par
@@ -1433,7 +1591,7 @@ repérer avant de tout relire) :
   assets/vulnerabilities (cross-référencés par trop de pages pour être gatés sans casser)
 - *Module Audits* (03/08/2026) : construction complète (backend + frontend + intégrations),
   garde-fou d'autorisation bloquante, bug réel `useState` détecté par le test E2E, premier audit
-  réel saisi (6 findings d'`AUDIT_SECURITE.md`)
+  réel saisi (6 findings d'`audit/AUDIT_SECURITE.md`)
 - *Tour applicatif complet + série de correctifs* (03/08/2026, même jour, l'après-midi) : port 8000,
   bugs Dashboard réels, injection CSV + suppressions admin-only, N+1, code mort, doublon
   `ConnectionLog`, retry `AnalystContext`, erreurs réseau silencieuses câblées, contraste mode clair,
@@ -1811,7 +1969,7 @@ aucun écart de conception.
 - **Premier jeu de données — audit réel, pas un scénario de test nettoyé** (§9 de la spec) : « Audit
   de code — Application CBR », autorisé par Nicolas Szebesta (RSSI, registre Rôles) via un **mandat
   PDF de régularisation rétroactive** généré et soumis à relecture avant d'être joint (l'audit
-  `AUDIT_SECURITE.md` avait été conduit le 24/07/2026, avant que le garde-fou d'autorisation
+  `audit/AUDIT_SECURITE.md` avait été conduit le 24/07/2026, avant que le garde-fou d'autorisation
   n'existe). Les 6 findings originaux saisis avec leur statut réel : 5 corrigés et retestés
   (27/07/2026) — SSRF veille (HIGH), SSH TOFU (MEDIUM), LDAP clair (MEDIUM), XML non durci (MEDIUM),
   secrets `changeme` (LOW) — et 1 resté `ouvert` (absence de `.gitignore`, toujours vrai). Audit
@@ -1850,7 +2008,7 @@ chaque usage**. Le parcours navigateur a tourné dans le conteneur `mcr.microsof
 
 ### Sécurité — 3 findings du re-audit, tous corrigés
 
-Re-audit ciblé sur le code écrit après le précédent audit du 24/07 (`AUDIT_SECURITE.md`) — modules
+Re-audit ciblé sur le code écrit après le précédent audit du 24/07 (`audit/AUDIT_SECURITE.md`) — modules
 Incidents/Crises/Documentation/Audits/WithSecure, RBAC `allowed_pages`. Les 6 correctifs du 24/07
 vérifiés intacts (pas de régression). Trois findings nouveaux, tous corrigés le jour même :
 
@@ -2771,7 +2929,7 @@ session à l'autre — cf. principe déjà énoncé pour l'audit de cohérence, 
 
 **Dette identifiée** :
 - ~~**Correctifs de sécurité — 5 des 6 faits, le dernier volontairement différé**~~ **les 6 faits** :
-  audit défensif du 24/07 dans `AUDIT_SECURITE.md` (racine). #1 SSRF, #2 clé d'hôte SSH, #3 TLS LDAP,
+  audit défensif du 24/07 dans `audit/AUDIT_SECURITE.md` (racine). #1 SSRF, #2 clé d'hôte SSH, #3 TLS LDAP,
   #4 `defusedxml`, #6 secrets par défaut → corrigés et testés en conditions réelles le 27/07/2026.
   #5 (`.gitignore` avant tout `git init`) différé tant qu'il n'y avait pas de repo git — **fait**
   depuis (`git init` posé le 14/08/2026, `.gitignore` en place). `pip-audit`/`npm audit` passés le
@@ -2850,7 +3008,7 @@ décimale. Remplacé par `free -b` + conversion Python arrondie (`services/asset
 
 ### Audit de sécurité — 5 des 6 correctifs implémentés et testés en conditions réelles
 
-Suite de l'audit défensif du 24/07 (`AUDIT_SECURITE.md`). Contrairement à la session précédente
+Suite de l'audit défensif du 24/07 (`audit/AUDIT_SECURITE.md`). Contrairement à la session précédente
 (revue en lecture seule uniquement), chaque correctif a été **appliqué et vérifié contre l'infra
 réelle** (pas seulement relu) :
 - **#1 SSRF** — nouveau `backend/services/net_guard.py` (`validate_public_url`, rejette IP privées/

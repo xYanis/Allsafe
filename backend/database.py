@@ -35,7 +35,7 @@ async def init_db():
 
 
 # Limite les requêtes HTTP à DB_MAX_CONCURRENT_SESSIONS sessions simultanées (10/08/2026,
-# cf. AUDIT_SECURITE.md et config.py). Ne couvre que `get_session` — utilisé par les 162
+# cf. audit/AUDIT_SECURITE.md et config.py). Ne couvre que `get_session` — utilisé par les 162
 # routes de l'API (cf. routers/), le vrai chemin qu'emprunte une rafale de requêtes HTTP
 # externes. Les `SessionLocal()` ouverts directement dans services/ (tâches de fond,
 # Celery) restent hors de ce plafond, volontairement : ce ne sont jamais des dizaines de

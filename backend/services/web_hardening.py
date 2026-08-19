@@ -19,7 +19,7 @@ import socket
 import ssl
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from sqlalchemy import select
@@ -27,11 +27,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import SessionLocal
 from models import Asset
+from services.net_guard import validate_public_url
 
 logger = logging.getLogger(__name__)
 
 REQUEST_TIMEOUT = 8.0
 MAX_CONCURRENT_ASSETS = 20
+# Redirections suivies manuellement (18/08/2026, cf. audit/AUDIT_SECURITE.md #14-A) —
+# httpx.AsyncClient(follow_redirects=True) ne revalide jamais net_guard.validate_public_url
+# sur les URL intermédiaires : un site public dont la redirection pointe vers 127.0.0.1/le
+# VLAN interne échapperait au garde-fou posé sur la création d'actif (rebinding DNS/redirect
+# malveillant). Chaque hop est donc revalidé avant d'être suivi.
+MAX_REDIRECTS = 5
 
 # Protocoles TLS dépréciés — même esprit que ssh_weak_algos (services/asset_scanner.py),
 # côté négociation TLS plutôt que SSH.
@@ -104,19 +111,42 @@ async def check_website(url: str) -> dict:
     """{"checks": [...], "checked_at": iso} pour une URL — un GET HTTP normal + une
     négociation TLS standard, rien de plus."""
     now = datetime.now(timezone.utc).isoformat()
-    parsed = urlparse(url if "://" in url else f"https://{url}")
+    current_url = url if "://" in url else f"https://{url}"
+    parsed = urlparse(current_url)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         return {"checks": [{"id": "web_reachable", "label": "URL", "status": "unknown",
                              "detail": "URL invalide (http:// ou https:// attendu)"}], "checked_at": now}
 
+    try:
+        validate_public_url(current_url)
+    except ValueError as exc:
+        return {"checks": [{"id": "web_reachable", "label": "Accessibilité", "status": "unknown",
+                             "detail": f"URL refusée : {exc}"}], "checked_at": now}
+
     checks: list[dict] = []
     try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, follow_redirects=True) as client:
-            response = await client.get(url if "://" in url else f"https://{url}")
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT, follow_redirects=False) as client:
+            for _ in range(MAX_REDIRECTS + 1):
+                response = await client.get(current_url)
+                if not response.is_redirect:
+                    break
+                location = response.headers.get("location")
+                if not location:
+                    break
+                current_url = urljoin(current_url, location)
+                try:
+                    validate_public_url(current_url)
+                except ValueError as exc:
+                    return {"checks": [{"id": "web_reachable", "label": "Accessibilité", "status": "unknown",
+                                         "detail": f"Redirection refusée : {exc}"}], "checked_at": now}
+            else:
+                return {"checks": [{"id": "web_reachable", "label": "Accessibilité", "status": "unknown",
+                                     "detail": f"Trop de redirections (> {MAX_REDIRECTS})"}], "checked_at": now}
     except httpx.HTTPError as exc:
         return {"checks": [{"id": "web_reachable", "label": "Accessibilité", "status": "unknown",
                              "detail": f"Site injoignable : {exc}"}], "checked_at": now}
 
+    parsed = urlparse(current_url)
     if parsed.scheme == "https" or response.url.scheme == "https":
         port = parsed.port or 443
         checks.append(_check_tls(response.url.host or parsed.hostname, port))

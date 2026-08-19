@@ -1,7 +1,7 @@
 """
 tests/test_csv_safety_fuzz.py
 Fuzzing par propriétés (hypothesis) de services/csv_safety.py — neutralisation de
-l'injection de formule CSV/Excel (cf. AUDIT_SECURITE.md #7).
+l'injection de formule CSV/Excel (cf. audit/AUDIT_SECURITE.md #7).
 """
 from hypothesis import given, settings, strategies as st
 

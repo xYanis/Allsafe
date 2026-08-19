@@ -33,10 +33,12 @@ LOG=/var/log/allsafe-agent-update.log
 # manuel/interactif, un échec resté uniquement dans le fichier de log est invisible.
 log() { local msg="$(date -Is)  $1"; echo "$msg" >> "$LOG"; echo "$msg"; }
 
-latest_version=$(curl -sf "$SERVER/api/agents/latest/version" | grep -oP '"version"\s*:\s*"\K[^"]+') || {
+version_json=$(curl -sf "$SERVER/api/agents/latest/version") || {
     log "Échec de récupération de la version côté serveur ($SERVER)"
     exit 1
 }
+latest_version=$(echo "$version_json" | grep -oP '"version"\s*:\s*"\K[^"]+')
+expected_sha256=$(echo "$version_json" | grep -oP '"sha256_linux"\s*:\s*"\K[^"]+' || true)
 
 installed_version=""
 [ -x "$BIN" ] && installed_version=$("$BIN" --version | awk '{print $2}')
@@ -49,6 +51,24 @@ if [ "$installed_version" != "$latest_version" ]; then
         rm -f "$tmp"
         exit 1
     fi
+
+    # Vérification d'intégrité (18/08/2026, cf. audit/AUDIT_SECURITE.md #13/#25 — même
+    # correctif que agent/src/install.rs::apply_update et le script Windows équivalent) :
+    # sans elle, ce script installait tout .deb reçu du serveur en root (élévation déjà
+    # vérifiée plus haut) — un MITM réseau ou un backend compromis suffisait à en faire un
+    # vecteur RCE sur l'ensemble du parc via ce même script de déploiement.
+    if [ -z "$expected_sha256" ]; then
+        log "Le serveur ne publie pas l'empreinte SHA-256 attendue — installation refusée par sécurité (backend obsolète ou compromis)."
+        rm -f "$tmp"
+        exit 1
+    fi
+    actual_sha256=$(sha256sum "$tmp" | awk '{print $1}')
+    if [ "$actual_sha256" != "$expected_sha256" ]; then
+        log "Empreinte du .deb invalide (attendu $expected_sha256, obtenu $actual_sha256) — installation refusée, le paquet a peut-être été altéré en transit."
+        rm -f "$tmp"
+        exit 1
+    fi
+
     if ! dpkg -i "$tmp" 2>&1 | tee -a "$LOG"; then
         rm -f "$tmp"
         log "Échec de l'installation dpkg — voir ci-dessus / $LOG (dépendances manquantes ? essayer 'apt-get install -f')"

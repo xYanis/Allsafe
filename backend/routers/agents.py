@@ -35,7 +35,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_deps import require_admin, require_agent, require_page
@@ -229,15 +229,57 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
         raise HTTPException(400, "os doit être 'windows' ou 'linux'.")
 
     token_hash = _hash(data.token)
-    token = (await session.execute(
+    now = datetime.now(timezone.utc)
+
+    # Pré-vérification hostname (18/08/2026, cf. audit/AUDIT_SECURITE.md #16) — lecture
+    # seule, AVANT toute consommation d'utilisation du jeton (cf. UPDATE...RETURNING
+    # ci-dessous) : un jeton lié à un `asset_id` précis engage l'identité de CET actif, un
+    # hostname déclaré différent est rejeté. Faite en amont plutôt qu'après l'incrément
+    # atomique — sinon un hostname mal renseigné (typo, poste mal identifié) épuiserait le
+    # jeton sur un essai raté, forçant l'admin à en regénérer un, sans lien avec la sécurité
+    # recherchée par ce garde-fou (cf. sa justification complète plus bas, à l'usage réel du
+    # résultat de l'UPDATE).
+    preview = (await session.execute(
         select(AgentEnrollmentToken).where(AgentEnrollmentToken.token_hash == token_hash)
     )).scalar_one_or_none()
-    if not token:
-        raise HTTPException(401, "Jeton d'enrôlement invalide.")
-    if token.use_count >= token.max_uses:
+    if preview and preview.asset_id:
+        bound_asset = await session.get(Asset, preview.asset_id)
+        if bound_asset and bound_asset.hostname and bound_asset.hostname.strip().lower() != data.hostname.strip().lower():
+            raise HTTPException(
+                403,
+                f"Ce jeton est lié à l'actif '{bound_asset.hostname}' — hostname déclaré "
+                f"('{data.hostname}') différent, enrôlement refusé.",
+            )
+
+    # UPDATE...RETURNING atomique (18/08/2026, cf. audit/AUDIT_SECURITE.md #15) — remplace
+    # le lire-puis-écrire précédent (`token.use_count += 1` différé au commit), qui laissait
+    # une fenêtre de course : N requêtes concurrentes sur le même jeton `max_uses=1` liraient
+    # toutes `use_count=0` avant qu'aucune ne commite, créant N identités agent valides pour
+    # un jeton censé n'en autoriser qu'une (reproduit en conditions réelles, 15/15 acceptées).
+    # La clause WHERE re-vérifiée par Postgres sous verrou de ligne sérialise les requêtes
+    # concurrentes : une seule peut voir `use_count < max_uses` rester vrai à la fois.
+    result = await session.execute(
+        update(AgentEnrollmentToken)
+        .where(
+            AgentEnrollmentToken.token_hash == token_hash,
+            AgentEnrollmentToken.use_count < AgentEnrollmentToken.max_uses,
+            AgentEnrollmentToken.expires_at >= now,
+        )
+        .values(use_count=AgentEnrollmentToken.use_count + 1)
+        .returning(AgentEnrollmentToken)
+    )
+    token = result.scalar_one_or_none()
+    if token is None:
+        # Retombe sur une simple lecture pour distinguer invalide/épuisé/expiré dans le
+        # message d'erreur — ne réécrit jamais la ligne, uniquement pour le diagnostic.
+        existing = (await session.execute(
+            select(AgentEnrollmentToken).where(AgentEnrollmentToken.token_hash == token_hash)
+        )).scalar_one_or_none()
+        if not existing:
+            raise HTTPException(401, "Jeton d'enrôlement invalide.")
+        if existing.expires_at < now:
+            raise HTTPException(410, "Ce jeton a expiré — demandez-en un nouveau à un administrateur.")
         raise HTTPException(409, "Ce jeton a déjà atteint son nombre maximal d'utilisations.")
-    if token.expires_at < datetime.now(timezone.utc):
-        raise HTTPException(410, "Ce jeton a expiré — demandez-en un nouveau à un administrateur.")
 
     asset_id = token.asset_id
     if not asset_id:
@@ -268,6 +310,13 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
             await session.flush()
             asset_id = asset.id
     else:
+        # Hostname déjà validé par la pré-vérification tout en haut de la fonction (#16) —
+        # combiné à une fuite du jeton (interception réseau, ou la race #15 avant correctif),
+        # sans elle un tiers aurait pu se faire délivrer un credential pour cet actif précis
+        # en lui faisant porter n'importe quel hostname. La garantie "les données auto-
+        # déclarées par l'agent restent fiables" doit tenir dès l'enrôlement, pas seulement au
+        # check-in (cf. #34, décision de garder la bascule auto sur les CVE HIGH/MEDIUM/LOW
+        # détectées par agent : elle ne vaut que si l'identité agent↔actif est fiable).
         asset = await session.get(Asset, asset_id)
         asset.collection_method = "agent"
 
@@ -279,8 +328,6 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
     session.add(agent)
     await session.flush()
 
-    token.use_count += 1
-
     await session.commit()
     await session.refresh(agent)
     # Le credential en clair n'est renvoyé qu'ici, une seule fois — l'agent doit le
@@ -291,12 +338,46 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
 
 # ─── Distribution des paquets (déploiement centralisé) ─────────────────────────
 
+def _sha256_of(path: str) -> Optional[str]:
+    """Empreinte SHA-256 d'un fichier, calculée à la volée (fichiers de quelques Mo, coût
+    négligeable face à la fréquence d'appel de `/latest/version` — pas de cache), ou `None`
+    si le fichier n'existe pas (rien à hacher)."""
+    if not os.path.isfile(path):
+        return None
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _latest_deb_path() -> Optional[str]:
+    # Le nom du .deb porte la version (`cargo-deb`, ex. allsafe-agent_0.2.0-1_amd64.deb) —
+    # pas de nom fixe à maintenir en plus de CURRENT_AGENT_VERSION, on sert simplement le
+    # plus récemment construit dans AGENT_DIST_DIR.
+    candidates = sorted(glob.glob(os.path.join(AGENT_DIST_DIR, "*.deb")), key=os.path.getmtime, reverse=True)
+    return candidates[0] if candidates else None
+
+
 @router.get("/latest/version")
 async def latest_agent_version():
     """Interrogée par `agent/deploy/update-agent.ps1`/`.sh` avant de télécharger quoi que
     ce soit — évite de retélécharger le paquet à chaque exécution planifiée si le poste
-    est déjà à jour."""
-    return {"version": CURRENT_AGENT_VERSION}
+    est déjà à jour.
+
+    `sha256_windows`/`sha256_linux` (18/08/2026, cf. audit/AUDIT_SECURITE.md #13) :
+    empreinte du `.msi`/`.deb` actuellement publié. Consommées par
+    `agent/src/install.rs::apply_update` (Rust, Windows uniquement) et
+    `update-agent.ps1`/`.sh` (déploiement de parc, les deux OS) pour refuser d'exécuter un
+    paquet dont l'empreinte ne correspond pas — seule protection posée avant qu'une vraie
+    signature Authenticode vérifiable (certificat GPO) ne soit en place côté Windows, cf.
+    docstring `apply_update`. `None` si aucun paquet n'est disponible côté serveur pour cet
+    OS (rien à hacher)."""
+    return {
+        "version": CURRENT_AGENT_VERSION,
+        "sha256_windows": _sha256_of(os.path.join(AGENT_DIST_DIR, "allsafe-agent.msi")),
+        "sha256_linux": _sha256_of(_latest_deb_path()) if _latest_deb_path() else None,
+    }
 
 
 @router.get("/latest/windows")
@@ -309,13 +390,9 @@ async def latest_agent_windows():
 
 @router.get("/latest/linux")
 async def latest_agent_linux():
-    # Le nom du .deb porte la version (`cargo-deb`, ex. allsafe-agent_0.2.0-1_amd64.deb) —
-    # pas de nom fixe à maintenir en plus de CURRENT_AGENT_VERSION, on sert simplement le
-    # plus récemment construit dans AGENT_DIST_DIR.
-    candidates = sorted(glob.glob(os.path.join(AGENT_DIST_DIR, "*.deb")), key=os.path.getmtime, reverse=True)
-    if not candidates:
+    path = _latest_deb_path()
+    if not path:
         raise HTTPException(404, "Paquet Linux non disponible côté serveur.")
-    path = candidates[0]
     return FileResponse(path, media_type="application/vnd.debian.binary-package", filename=os.path.basename(path))
 
 
@@ -366,6 +443,19 @@ async def request_scan(agent_id: str, session: AsyncSession = Depends(get_sessio
 
 # ─── Check-in (agent déjà enrôlé) ───────────────────────────────────────────────
 
+# Throttle (18/08/2026, cf. audit/AUDIT_SECURITE.md #35) — un agent compromis/buggé
+# pouvait spammer /checkin sans aucune limite : chaque appel déclenche une tâche Celery +
+# un cycle de patch check complet. La cadence normale (planifiée, `agent/src/daemon.rs::
+# CHECKIN_INTERVAL`) est largement au-dessus de la minute — ne gêne ni le cycle horaire ni
+# un scan à la demande (ramassé au prochain sondage `/pending`, ≤60s, jamais deux check-ins
+# à quelques secondes d'écart en usage normal).
+CHECKIN_MIN_INTERVAL_SECONDS = 60
+# Même plafond que services/asset_scanner.py (`[:300]`) — l'agent n'a pas cette limite
+# aujourd'hui, contrairement au scan pull SSH/WinRM, ce qui autorise un payload démesuré
+# stocké tel quel dans des colonnes JSON (cf. #35).
+CHECKIN_MAX_ITEMS = 300
+
+
 @router.post("/checkin")
 async def checkin(
     payload: AgentCheckinPayload,
@@ -377,6 +467,20 @@ async def checkin(
     asset = await session.get(Asset, agent.asset_id)
     if not asset:
         raise HTTPException(404, "Actif introuvable — l'agent est orphelin, contactez un administrateur.")
+
+    last_checkin_at = (await session.execute(
+        select(AgentCheckinLog.checked_in_at)
+        .where(AgentCheckinLog.agent_id == agent.id)
+        .order_by(AgentCheckinLog.checked_in_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if last_checkin_at and (now - last_checkin_at).total_seconds() < CHECKIN_MIN_INTERVAL_SECONDS:
+        raise HTTPException(429, f"Check-in trop fréquent — au plus un toutes les {CHECKIN_MIN_INTERVAL_SECONDS}s.")
+
+    payload.packages = payload.packages[:CHECKIN_MAX_ITEMS]
+    if isinstance(payload.compliance.get("checks"), list):
+        payload.compliance["checks"] = payload.compliance["checks"][:CHECKIN_MAX_ITEMS]
 
     if payload.agent_version:
         agent.agent_version = payload.agent_version

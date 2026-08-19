@@ -155,7 +155,7 @@ app.add_middleware(
 
 @app.middleware("http")
 async def security_headers(request, call_next):
-    """En-têtes de réponse (10/08/2026, cf. audit/AUDIT_SECURITE_1.md #11) — les pièces jointes
+    """En-têtes de réponse (10/08/2026, cf. audit/AUDIT_SECURITE.md #11) — les pièces jointes
     (Documentation/Incidents/Audits) ne valident que la signature magique des premiers
     octets, pas le contenu entier ; servies en Content-Disposition: inline pour PDF/images,
     `nosniff` empêche un navigateur de re-deviner un type MIME différent du `Content-Type`
@@ -170,7 +170,7 @@ async def security_headers(request, call_next):
 @app.exception_handler(DBAPIError)
 async def handle_malformed_id_param(request: Request, exc: DBAPIError):
     """404 propre plutôt qu'un 500 (10/08/2026, trouvé par fuzzing schemathesis en amont
-    du passage en prod, cf. audit/AUDIT_SECURITE_1.md) : un ID de chemin qui n'est pas un UUID
+    du passage en prod, cf. audit/AUDIT_SECURITE.md) : un ID de chemin qui n'est pas un UUID
     syntaxiquement valide (ex. `/api/documents/0/download`) fait planter `session.get(...)`
     avec une exception asyncpg non interceptée — 79 usages de ce genre dans les routers,
     un handler global plutôt que patcher chaque route une par une (cf. principe "penser

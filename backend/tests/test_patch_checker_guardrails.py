@@ -116,6 +116,36 @@ class TestHumanQualifiedNonTerminalGuard:
         assert vuln.status == "false_positive"
 
 
+class TestAgentReportedLabel:
+    """agent_reported=True (18/08/2026, cf. audit/AUDIT_SECURITE.md #34) — la bascule auto
+    reste identique à un actif service_account (décision explicite), seule la piste d'audit
+    change (validated_by), pour que NIS 2 reste honnête sur la provenance de la donnée."""
+
+    def test_agent_reported_uses_distinct_label(self):
+        vuln = _vuln(status="open")
+        cve = _cve(severity="HIGH")
+        changed = apply_patch_result(vuln, cve, {"patch_detected": True}, MagicMock(), agent_reported=True)
+        assert changed is True
+        assert vuln.validated_by == "Auto (patch check, agent-reported)"
+
+    def test_non_agent_keeps_original_label(self):
+        vuln = _vuln(status="open")
+        cve = _cve(severity="HIGH")
+        changed = apply_patch_result(vuln, cve, {"patch_detected": True}, MagicMock(), agent_reported=False)
+        assert changed is True
+        assert vuln.validated_by == "Auto (patch check)"
+
+    def test_agent_reported_label_still_counts_as_non_human_for_reevaluation(self):
+        # Une vuln déjà auto-qualifiée via le libellé agent doit continuer à se
+        # réévaluer au cycle suivant, exactement comme le libellé historique
+        # (cf. test_auto_qualified_awaiting_fix_keeps_reevaluating ci-dessus).
+        vuln = _vuln(status="awaiting_fix", validated_by="Auto (patch check, agent-reported)")
+        cve = _cve(severity="HIGH")
+        changed = apply_patch_result(vuln, cve, {"not_applicable": True}, MagicMock(), agent_reported=True)
+        assert changed is True
+        assert vuln.status == "false_positive"
+
+
 class TestPartialFixStatus:
     """`awaiting_fix_partial` (27/07/2026) — cas mixte, même règle de sévérité que les trois autres."""
 

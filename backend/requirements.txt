@@ -13,8 +13,16 @@ python-multipart==0.0.32
 pywinrm==0.4.3
 requests-credssp==2.0.0
 defusedxml==0.7.1
-pytest==8.3.3
-pytest-asyncio==0.24.0
+# pytest 9.0.3 (18/08/2026, cf. audit/AUDIT_SECURITE.md #29) — corrige PYSEC-2026-1845/
+# CVE-2025-71176 (répertoires temporaires prévisibles /tmp/pytest-of-{user}, DoS/élévation
+# locale sur une machine multi-utilisateurs). Impact réel nul en prod (pytest n'est jamais
+# importé/exécuté par l'app en fonctionnement, seulement par `test-backend` en CI) — bump
+# fait quand même, coût nul. pytest-asyncio suit en 1.4.0 (compatibilité pytest 9, `auto`
+# mode déjà explicite dans pytest.ini — pas affecté par le retrait du mode "legacy").
+# ⚠️ Changement de version majeure des deux côtés : à revérifier via `test-backend` (CI)
+# avant de considérer ce bump acquis.
+pytest==9.0.3
+pytest-asyncio==1.4.0
 hypothesis==6.165.2
 cryptography==50.0.0
 reportlab==4.2.5

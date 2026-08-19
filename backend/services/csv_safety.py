@@ -1,6 +1,6 @@
 """
 services/csv_safety.py
-Neutralise l'injection de formule CSV/Excel (AUDIT_SECURITE.md #7) : un champ
+Neutralise l'injection de formule CSV/Excel (audit/AUDIT_SECURITE.md #7) : un champ
 texte issu d'une source externe (flux de veille, y compris les sources
 personnalisées ajoutables sans code) peut commencer par =/+/-/@ et être
 interprété comme une formule (DDE compris) à l'ouverture du CSV dans

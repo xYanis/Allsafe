@@ -10,7 +10,7 @@ COPY package*.json ./
 RUN npm install
 COPY . .
 EXPOSE 3000
-# Non-root (10/08/2026, cf. AUDIT_SECURITE.md) : `node` déjà présent dans l'image
+# Non-root (10/08/2026, cf. audit/AUDIT_SECURITE.md) : `node` déjà présent dans l'image
 # officielle (UID 1000, cohérent avec la propriété des bind mounts ./frontend, 1000:1000
 # côté hôte WSL2/drvfs). `npm install` reste avant, en root — mais `node_modules` est un
 # volume anonyme (docker-compose.yml), recréé root:root à chaque recréation du conteneur
@@ -41,7 +41,7 @@ FROM nginx:1.27-alpine AS prod
 RUN apk update && apk upgrade --no-cache
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
-# Non-root (10/08/2026, cf. AUDIT_SECURITE.md) : utilisateur `nginx` déjà présent dans
+# Non-root (10/08/2026, cf. audit/AUDIT_SECURITE.md) : utilisateur `nginx` déjà présent dans
 # l'image officielle. Master process non-root => la directive `user nginx;` du
 # nginx.conf de base est ignorée (simple warning au démarrage, pas fatal — elle ne sert
 # qu'à faire tomber les privilèges d'un master root vers les workers, inutile si le

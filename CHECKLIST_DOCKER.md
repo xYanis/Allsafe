@@ -99,7 +99,7 @@
       Docker).
 - [ ] **Docker rootless / daemon durci** → **bloqué sur le serveur cible** (config du daemon Docker
       hôte, pas quelque chose que le repo peut poser).
-- [x] **Alignement avec `AUDIT_SECURITE.md`** (13/08/2026) — `git init` + `.gitignore` couvrant
+- [x] **Alignement avec `audit/AUDIT_SECURITE.md`** (13/08/2026) — `git init` + `.gitignore` couvrant
       `.env`/`keys/id_ed25519`/`cookies.txt` (secrets réels trouvés et exclus avant le premier
       commit), cohérent avec les exclusions `.dockerignore` ci-dessus.
 

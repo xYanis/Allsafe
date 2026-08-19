@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 TRACKER_URL = "https://security-tracker.debian.org/tracker/data/json"
 # Cache disque éphémère dans le conteneur — retéléchargé après restart, acceptable
 # pour un fichier de 11 Mo compressé qui change plusieurs fois par jour.
-# Sous /app/cache (pas /tmp, cf. AUDIT_SECURITE.md bandit B108) : /tmp est un
+# Sous /app/cache (pas /tmp, cf. audit/AUDIT_SECURITE.md bandit B108) : /tmp est un
 # répertoire partagé où un chemin fixe est sujet aux attaques par symlink
 # (write_bytes suit un lien existant) ; /app/cache n'appartient qu'à cette appli.
 CACHE_PATH = Path("/app/cache/debian_security_tracker.json.gz")

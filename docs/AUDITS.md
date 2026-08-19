@@ -6,7 +6,7 @@
 > frontend `frontend/src/pages/Audits.jsx`/`AuditDetail.jsx`, `components/AuditFormModal.jsx`/
 > `AuditFindingModal.jsx`). Détail de session : `STATUS.md` (03/08/2026). Premier jeu de données
 > saisi : audit « Audit de code — Application CBR » (nom du produit au moment de la saisie, cf.
-> CLAUDE.md § Rebranding), 6 findings d'`AUDIT_SECURITE.md` (§9).
+> CLAUDE.md § Rebranding), 6 findings d'`audit/AUDIT_SECURITE.md` (§9).
 >
 > Contexte : ce module est le chantier prioritaire de `ROADMAP_RNCP42335.md` (Bloc 3 du titre visé —
 > audits techniques et simulations d'intrusion).
@@ -250,7 +250,7 @@ Composants réutilisés tels quels : `SeverityBadge.jsx`, `ConfirmModal.jsx`, `P
 
 ## 9. Premier jeu de données
 
-`AUDIT_SECURITE.md` (racine, 24/07/2026) contient déjà 6 findings priorisés sur Allsafe lui-même, rédigés
+`audit/AUDIT_SECURITE.md` (racine, 24/07/2026) contient déjà 6 findings priorisés sur Allsafe lui-même, rédigés
 à la main. Ils constituent le premier audit à saisir : type `code`, périmètre « application CBR »
 (nom du produit au moment de la saisie),
 conduit par l'analyste, avec le statut de remédiation réel de chacun (5 des 6 ont été implémentés le

@@ -80,7 +80,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
-      # :ro (10/08/2026, cf. AUDIT_SECURITE.md § Docker) : la clé privée id_ed25519 n'a
+      # :ro (10/08/2026, cf. audit/AUDIT_SECURITE.md § Docker) : la clé privée id_ed25519 n'a
       # besoin que d'être lue — known_hosts (seul fichier qui a besoin d'écriture, TOFU
       # SSH, cf. ssh_trust.py) vit désormais sur son propre volume nommé ci-dessous,
       # séparé de la clé privée.

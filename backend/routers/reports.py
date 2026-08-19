@@ -51,7 +51,7 @@ async def export_csv(asset_id: str | None = None, session: AsyncSession = Depend
         writer.writerow([
             c.cve_id, c.severity, c.cvss_score,
             # `a.name`/`os`/`os_version`/`asset_type` passés par csv_safe (11/08/2026,
-            # bug réel corrigé — cf. AUDIT_SECURITE.md #7/STATUS.md) : ce sont des champs
+            # bug réel corrigé — cf. audit/AUDIT_SECURITE.md #7/STATUS.md) : ce sont des champs
             # texte libre modifiables par tout compte `analyst` via PUT /api/assets, pas
             # seulement admin — la protection anti-injection de formule était déjà posée
             # sur validated_by/notes plus bas mais oubliée sur le nom/l'OS de l'actif.

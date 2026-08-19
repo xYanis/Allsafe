@@ -264,7 +264,7 @@ async def check_patch_for_vuln(
     result = await check_patch(asset, cve, windows_mappings=windows_mappings)
     result["cached"] = False
 
-    auto_patched = apply_patch_result(vuln, cve, result, session)
+    auto_patched = apply_patch_result(vuln, cve, result, session, agent_reported=asset.collection_method == "agent")
     await session.commit()
 
     if auto_patched and result.get("not_applicable") is True:

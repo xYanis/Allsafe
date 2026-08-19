@@ -44,7 +44,7 @@ Bloqués : tout tag contenant `ip-`, `hostname`, `fqdn`, `asset-id`
 - Droits : lecture seule sur l'OU Servers
 - Attributs lus : cn, dNSHostName, operatingSystem, operatingSystemVersion, lastLogonTimestamp
 - Aucune modification possible avec ce compte
-- **Connexion chiffrée** (`AD_USE_TLS`, session 27/07/2026 — audit `AUDIT_SECURITE.md` #3) :
+- **Connexion chiffrée** (`AD_USE_TLS`, session 27/07/2026 — audit `audit/AUDIT_SECURITE.md` #3) :
   `services/asset_importer.py` n'ouvrait auparavant aucune session TLS, le bind SIMPLE envoyait le
   mot de passe du compte de service **en clair** à chaque import. Défaut `AD_USE_TLS=False` = StartTLS
   sur le `ldap://` déjà configuré (port 389, aucun changement d'URL nécessaire) — choix délibérément

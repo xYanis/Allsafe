@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { assets as fetchAssets, runWebHardeningCheck, scanPolicies } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { useAuth } from '../contexts/AuthContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
 import { assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import PageLoader from '../components/PageLoader.jsx'
@@ -114,6 +115,10 @@ let durcissementPageCache = null
 
 export default function Durcissement() {
   const { isAnonymous } = usePresentation()
+  // POST /assets/web-hardening/run réservé admin (18/08/2026, cf. audit/AUDIT_SECURITE.md
+  // #14) — même schéma que pages/Assets.jsx::isAdmin.
+  const { user } = useAuth()
+  const isAdmin = user?.role === 'admin'
   const [assetList, setAssetList] = useState(() => {
     if (durcissementPageCache == null) return []
     return isAnonymous ? [...durcissementPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : durcissementPageCache
@@ -303,12 +308,14 @@ export default function Durcissement() {
           style={configuredOnly ? activeFilterStyle : filterSelectStyle}>
           Actifs configurés uniquement
         </button>
-        <button onClick={handleWebScan} disabled={scanningWeb}
-          title="Checks passifs (en-têtes HTTP, protocole TLS) sur tous les actifs Site web"
-          className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-60"
-          style={filterSelectStyle}>
-          {scanningWeb ? 'Scan en cours…' : 'Lancer le scan web'}
-        </button>
+        {isAdmin && (
+          <button onClick={handleWebScan} disabled={scanningWeb}
+            title="Checks passifs (en-têtes HTTP, protocole TLS) sur tous les actifs Site web"
+            className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-60"
+            style={filterSelectStyle}>
+            {scanningWeb ? 'Scan en cours…' : 'Lancer le scan web'}
+          </button>
+        )}
         {webScanMsg && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{webScanMsg}</span>}
       </div>
 

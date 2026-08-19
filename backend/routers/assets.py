@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete as sa_delete
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
+from auth_deps import require_admin
 from database import get_session
 from models import Asset, Vulnerability, NetworkStatus, CVE, Agent, AssetDeletionLog
 from services.asset_scanner import scan_asset, apply_scan_result
@@ -12,6 +13,7 @@ from services.asset_importer import _build_cpe
 from services.crypto import encrypt_password, decrypt_password
 from services.scoring import recalculate_scores_for_asset
 from services.cpe_matcher import get_installed_package_vulnerabilities
+from services.net_guard import validate_public_url
 from services.network_protocol_check import check_all_network_assets
 from services.switch_hardening import run_switch_hardening_checks
 from services.web_hardening import run_all_website_checks
@@ -73,6 +75,22 @@ class ScanCredentials(BaseModel):
     password: Optional[str] = None
 
 
+@router.get("/names")
+async def list_asset_names(session: AsyncSession = Depends(get_session)):
+    """Id + nom seulement, triés — pour les filtres/dropdowns qui n'ont besoin que de ça
+    (`AssetDropdown.jsx`, utilisé par Vulnerabilities/Reports/Watch.jsx). `GET /assets`
+    calcule 3 requêtes groupées sur TOUTE la table `vulnerabilities` (compteurs de vulns,
+    mises à jour en attente) + un join `NetworkStatus`, pour chaque actif du parc, à
+    chaque appel — coûteux et sans rapport avec un simple sélecteur id/nom (19/08/2026,
+    retour utilisateur : lenteur perçue sur Vulnerabilities.jsx, dont le filtre par actif
+    n'affichait ses options qu'une fois ce calcul complet terminé). Déclaré ici, bien avant
+    `/{asset_id}` (tout en fin de fichier, cf. get_asset) — comme `/lifecycle-since`,
+    un chemin statique à un seul segment DOIT être enregistré avant lui sous peine de se
+    faire voler la requête (résolution Starlette par ordre d'enregistrement)."""
+    rows = (await session.execute(select(Asset.id, Asset.name).order_by(Asset.name))).all()
+    return [{"id": str(id_), "name": name} for id_, name in rows]
+
+
 @router.get("")
 async def list_assets(session: AsyncSession = Depends(get_session)):
     assets = (await session.execute(select(Asset).order_by(Asset.name))).scalars().all()
@@ -123,7 +141,20 @@ async def list_assets(session: AsyncSession = Depends(get_session)):
     ]
 
 
-@router.post("/network-protocol-check/run")
+def _validate_asset_url(data: AssetCreate) -> None:
+    """SSRF (18/08/2026, cf. audit/AUDIT_SECURITE.md #14-A) : un actif website créé/modifié
+    avec une URL pointant vers 127.0.0.1/le VLAN interne/une IP de métadonnées cloud transforme
+    `POST /assets/web-hardening/run` (services/web_hardening.py::check_website) en sonde SSRF
+    aveugle — même garde-fou que services/net_guard.py déjà écrit pour les sources de veille
+    (audit/AUDIT_SECURITE.md #1), jamais rappelé ici jusqu'à présent."""
+    if data.asset_type == "website" and data.url:
+        try:
+            validate_public_url(data.url)
+        except ValueError as exc:
+            raise HTTPException(400, f"URL de l'actif refusée : {exc}")
+
+
+@router.post("/network-protocol-check/run", dependencies=[Depends(require_admin)])
 async def trigger_network_protocol_check():
     """Lance le test TCP passif (Telnet/HTTP) sur tous les actifs `asset_type=
     "network"` actifs (switches/pare-feux PRTG/Meraki) — cf.
@@ -133,7 +164,7 @@ async def trigger_network_protocol_check():
     return await check_all_network_assets()
 
 
-@router.post("/switch-hardening/run")
+@router.post("/switch-hardening/run", dependencies=[Depends(require_admin)])
 async def trigger_switch_hardening_check():
     """Durcissement Cisco IOS/IOS-XE (SSH credentialed, lecture seule — cf.
     services/switch_hardening.py) sur les actifs `asset_type="network"` avec
@@ -144,7 +175,7 @@ async def trigger_switch_hardening_check():
     return await run_switch_hardening_checks()
 
 
-@router.post("/web-hardening/run")
+@router.post("/web-hardening/run", dependencies=[Depends(require_admin)])
 async def trigger_web_hardening_check():
     """Checks de durcissement web passifs (en-têtes HTTP, protocole TLS — cf.
     services/web_hardening.py) sur tous les actifs `asset_type="website"`. Écrit
@@ -207,10 +238,11 @@ async def asset_pending_updates(asset_id: str, session: AsyncSession = Depends(g
     return result
 
 
-@router.post("", status_code=201)
+@router.post("", status_code=201, dependencies=[Depends(require_admin)])
 async def create_asset(data: AssetCreate, session: AsyncSession = Depends(get_session)):
     # Cet endpoint sert uniquement à l'ajout manuel depuis l'interface — l'import AD/SSH
     # construit ses propres Asset() directement dans asset_importer.py.
+    _validate_asset_url(data)
     payload = data.model_dump(exclude={"scan_password"})
     asset = Asset(**payload, source="manual")
     if data.scan_password:
@@ -232,11 +264,12 @@ async def create_asset(data: AssetCreate, session: AsyncSession = Depends(get_se
     return _asset_dict(asset)
 
 
-@router.put("/{asset_id}")
+@router.put("/{asset_id}", dependencies=[Depends(require_admin)])
 async def update_asset(asset_id: str, data: AssetCreate, session: AsyncSession = Depends(get_session)):
     asset = await session.get(Asset, asset_id)
     if not asset:
         raise HTTPException(404, "Actif introuvable")
+    _validate_asset_url(data)
     updates = data.model_dump(exclude_unset=True, exclude={"scan_password"})
     for k, v in updates.items():
         setattr(asset, k, v)
@@ -260,7 +293,7 @@ async def update_asset(asset_id: str, data: AssetCreate, session: AsyncSession =
     return _asset_dict(asset)
 
 
-@router.post("/{asset_id}/scan")
+@router.post("/{asset_id}/scan", dependencies=[Depends(require_admin)])
 async def scan_asset_endpoint(
     asset_id: str,
     creds: ScanCredentials = ScanCredentials(),
@@ -351,7 +384,7 @@ async def get_asset_packages(asset_id: str, session: AsyncSession = Depends(get_
     }
 
 
-@router.delete("/{asset_id}", status_code=204)
+@router.delete("/{asset_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_asset(asset_id: str, session: AsyncSession = Depends(get_session)):
     asset = await session.get(Asset, asset_id)
     if not asset:

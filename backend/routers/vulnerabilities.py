@@ -12,6 +12,7 @@ from database import get_session
 from models import Vulnerability, CVE, Asset, VulnerabilityStatusHistory
 from services.vuln_history import record_status_change
 from services.stats import get_configured_asset_ids
+from services.patch_checker import AUTO_VALIDATED_BY_LABELS
 
 router = APIRouter()
 
@@ -587,20 +588,24 @@ async def awaiting_fix_candidates(
     **Ne modifie rien.**
     """
     items = []
-    # `no_fix_available` vient du rapport de patch check : une vuln jamais
-    # contrôlée (`patch_check_result IS NULL`) ne peut structurellement pas être
-    # candidate. Ce pré-filtre SQL ne change donc aucun résultat, mais il évite de
-    # parcourir en Python l'écrasante majorité des lignes — 263 715 des 264 959
-    # vulns ouvertes n'ont jamais été contrôlées (le cycle de patch check n'a pas
-    # encore tourné sur le parc élargi, cf. STATUS.md), soit ~99,5% de scan pur
-    # gaspillage à chaque appel.
+    # `no_fix_available` vient du rapport de patch check (19/08/2026, cf.
+    # STATUS.md — mesuré à 3,4s en conditions réelles avant ce correctif) : le
+    # filtre ne poussait jusqu'ici que "déjà contrôlée" en SQL
+    # (`patch_check_result IS NOT NULL`), la vérification de `no_fix_available`
+    # lui-même restant en Python après coup. Correct tant que peu de lignes
+    # avaient déjà un rapport (1 244 sur 264 959 le 28/07/2026, cf. commentaire
+    # d'origine) — plus vrai aujourd'hui : le cycle de patch check a depuis
+    # tourné sur l'essentiel du parc élargi (77 075 lignes avec
+    # `patch_check_result IS NOT NULL` mesuré ce jour), toutes matérialisées en
+    # objets ORM et parcourues une à une pour ne retenir, in fine, qu'une poignée
+    # de lignes. Poussé entièrement en SQL (`->>'no_fix_available'`, opérateur
+    # JSON Postgres) — vérifié en conditions réelles : même résultat (0 ligne)
+    # que l'ancien filtre Python, sur ce jeu de données.
     conditions = _candidate_conditions(
         ["open", "in_progress"], asset_id,
-        Vulnerability.patch_check_result.isnot(None),
+        Vulnerability.patch_check_result.op("->>")("no_fix_available") == "true",
     )
     async for v, c, a in _iter_candidate_rows(session, *conditions):
-        if (v.patch_check_result or {}).get("no_fix_available") is not True:
-            continue
         items.append({
             **_vuln_dict(v, c, a),
             "raison": "aucun_correctif",
@@ -1000,8 +1005,10 @@ async def auto_bascule_summary(
     session: AsyncSession = Depends(get_session),
 ):
     """
-    Rattrapage — vulnérabilités basculées **automatiquement** (`validated_by =
-    "Auto (patch check)"`) en `patched` ou `false_positive` depuis `since`.
+    Rattrapage — vulnérabilités basculées **automatiquement** (`validated_by` dans
+    `patch_checker.AUTO_VALIDATED_BY_LABELS` — `"Auto (patch check)"` ou, pour un actif
+    `collection_method="agent"`, `"Auto (patch check, agent-reported)"`, cf.
+    audit/AUDIT_SECURITE.md #34) en `patched` ou `false_positive` depuis `since`.
 
     Deux usages du même endpoint, distingués par `limit` :
     - **Bandeau "depuis votre dernière visite"** (Dashboard, `limit` par défaut
@@ -1027,7 +1034,7 @@ async def auto_bascule_summary(
         .join(CVE, Vulnerability.cve_id == CVE.id)
         .join(Asset, Vulnerability.asset_id == Asset.id)
         .where(
-            Vulnerability.validated_by == "Auto (patch check)",
+            Vulnerability.validated_by.in_(AUTO_VALIDATED_BY_LABELS),
             Vulnerability.status.in_(["patched", "false_positive"]),
             or_(Vulnerability.patched_at >= since, Vulnerability.false_positive_at >= since),
         )

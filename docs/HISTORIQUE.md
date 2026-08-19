@@ -1994,9 +1994,9 @@ supprimé (`services/`/`tasks/` à la racine) ; skills animation installés.
 
 ### Session du 24/07/2026 — bilan complet (déplacé de STATUS.md le 27/07/2026)
 
-#### Audit de sécurité défensif — `AUDIT_SECURITE.md` (racine)
+#### Audit de sécurité défensif — `audit/AUDIT_SECURITE.md` (racine)
 
-Revue complète du code en lecture seule (demandée par l'utilisateur). Livrable : `AUDIT_SECURITE.md`
+Revue complète du code en lecture seule (demandée par l'utilisateur). Livrable : `audit/AUDIT_SECURITE.md`
 avec 6 correctifs priorisés, code prêt à coller, à implémenter **plus tard**. Priorité : #1 SSRF
 (sources de veille `WatchSource.url`, seul exploitable à distance sans auth) → #2 clé d'hôte SSH
 désactivée (`known_hosts=None`) → #5 `.gitignore` avant tout `git init` → #3 LDAP en clair → #4
@@ -2054,7 +2054,7 @@ trouve pas ; (b) le filtre « CVE > 2 ans » l'exclut ailleurs. **Elle n'est app
   avec l'IP source ; cybervuln passe. Console : onglet Base de données (type « DDL bloquée »). Détail et
   nuance déploiement-à-neuf : `docs/ARCHITECTURE.md § Verrou DDL`.
 
-Non retenus par l'utilisateur (restent dans `AUDIT_SECURITE.md`) : durcir `pg_hba` (trust→scram local,
+Non retenus par l'utilisateur (restent dans `audit/AUDIT_SECURITE.md`) : durcir `pg_hba` (trust→scram local,
 restreindre au sous-réseau), roter `SECRET_KEY` (casserait 1 mdp SSH chiffré).
 
 #### Polish UI / motion (skill emil-design-eng)

@@ -1,7 +1,7 @@
 """
 tests/test_net_guard_fuzz.py
 Fuzzing par propriétés (hypothesis) de services/net_guard.py — garde-fou SSRF des
-sources de veille (cf. AUDIT_SECURITE.md #1). Deux propriétés distinctes :
+sources de veille (cf. audit/AUDIT_SECURITE.md #1). Deux propriétés distinctes :
   1. Aucune entrée arbitraire ne doit faire planter la fonction autrement qu'avec
      ValueError — DNS mocké pour ne jamais toucher le réseau pendant le fuzzing (un
      texte qui ressemble à un hostname valide déclencherait sinon une vraie

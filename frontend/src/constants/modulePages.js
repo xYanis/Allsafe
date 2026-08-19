@@ -32,7 +32,7 @@ export const MODULE_PAGE_TREE = [
     { to: '/audits', label: 'Audits' },
     { to: '/bastion', label: 'Bastion' },
   ]},
-  { key: 'documentation', label: 'Documentation', color: MODULES.documentation.color, pages: [
+  { key: 'documentation', label: 'Gouvernance', color: MODULES.documentation.color, pages: [
     { to: '/documentation', label: 'Documentation Entreprise' },
     { to: '/notes', label: 'Notes' },
   ]},

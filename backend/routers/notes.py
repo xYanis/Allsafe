@@ -206,6 +206,19 @@ async def delete_subject(subject_id: str, session: AsyncSession = Depends(get_se
     subject = await session.get(NoteSubject, subject_id)
     if not subject:
         raise HTTPException(404, "Sujet introuvable.")
+    # Nettoyage disque (18/08/2026, cf. audit/AUDIT_SECURITE.md #36) — `NoteImage.
+    # subject_id` a `ondelete="CASCADE"` : supprimer un sujet efface les lignes en base,
+    # mais jamais les fichiers sur disque (le cascade DB ne touche pas au volume Docker
+    # `note_images`). Fait ici AVANT `session.delete(subject)`, pas après : une fois le
+    # cascade DB exécuté, les lignes NoteImage de ce sujet n'existent plus pour lister
+    # quels fichiers effacer.
+    images = (await session.execute(
+        select(NoteImage).where(NoteImage.subject_id == subject_id)
+    )).scalars().all()
+    for image in images:
+        path = os.path.join(NOTE_IMAGES_ROOT, image.stored_filename)
+        if os.path.isfile(path):
+            os.remove(path)
     await session.delete(subject)
     await session.commit()
 
@@ -254,3 +267,20 @@ async def get_image_file(image_id: str, session: AsyncSession = Depends(get_sess
         raise HTTPException(404, "Fichier introuvable sur le disque")
     ext = os.path.splitext(image.stored_filename)[1]
     return FileResponse(path, media_type=CONTENT_TYPES.get(ext, "application/octet-stream"), content_disposition_type="inline")
+
+
+@router.delete("/images/{image_id}", status_code=204)
+async def delete_note_image(image_id: str, session: AsyncSession = Depends(get_session)):
+    """18/08/2026, cf. audit/AUDIT_SECURITE.md #36 — n'existait pas jusqu'ici, contrairement
+    aux trois modules frères (documents.py, incidents.py, audits.py, qui font tous ce même
+    os.remove + session.delete) : tout compte avec accès /notes pouvait uploader des images
+    (5 Mo chacune, sans limite de nombre) sans jamais pouvoir en récupérer une seule —
+    accumulation illimitée dans le volume note_images, sans mécanisme de purge."""
+    image = await session.get(NoteImage, image_id)
+    if not image:
+        raise HTTPException(404, "Image introuvable.")
+    path = os.path.join(NOTE_IMAGES_ROOT, image.stored_filename)
+    if os.path.isfile(path):
+        os.remove(path)
+    await session.delete(image)
+    await session.commit()

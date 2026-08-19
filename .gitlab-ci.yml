@@ -62,7 +62,16 @@ build-agent:
     # Coûteux (install mingw-w64/wixl/msitools/cargo-deb à chaque run, pas de cache) et sans
     # rapport avec le reste du dépôt — ne tourne que si l'agent Rust a changé, pas à chaque
     # commit backend/frontend.
-    - changes:
+    #
+    # CI_COMMIT_REF_PROTECTED (18/08/2026, cf. audit/AUDIT_SECURITE.md #25) — sans cette
+    # condition, n'importe qui avec un accès push pouvait créer une branche non protégée,
+    # modifier ce fichier (ex. exfiltrer AGENT_SIGNING_PASSWORD/le contenu du .pfx via une
+    # commande détournée) et déclencher un pipeline touchant agent/**. Le job tournait alors
+    # avec les secrets de signature disponibles SI ces variables ne sont pas elles-mêmes
+    # marquées "Protected" côté GitLab (Settings > CI/CD > Variables) — condition à vérifier
+    # séparément, non garantie par ce fichier seul, cf. docs/AGENTS.md § Signature.
+    - if: '$CI_COMMIT_REF_PROTECTED == "true"'
+      changes:
         - agent/**/*
   script:
     # msitools (paquet séparé de wixl, fournit `msiinfo`) : nécessaire seulement pour les
@@ -100,6 +109,12 @@ build-agent:
     # Settings > CI/CD > Variables) :
     #   AGENT_SIGNING_PFX      — variable de type "File", le .pfx (clé privée + certificat)
     #   AGENT_SIGNING_PASSWORD — variable masquée, mot de passe du .pfx
+    # ⚠️ À VÉRIFIER CÔTÉ SETTINGS GITLAB (pas dans ce fichier, cf. audit/AUDIT_SECURITE.md
+    # #25/#27) : AGENT_SIGNING_PFX/AGENT_SIGNING_PASSWORD cochées "Protect variable" (sinon
+    # `if: $CI_COMMIT_REF_PROTECTED` ci-dessus ne suffit pas) ; restreindre qui peut déclencher
+    # un pipeline manuel avec variables custom sur ce job — un CI_DEBUG_TRACE=true manuel rend
+    # le masquage des variables GitLab moins fiable (aucune occurrence dans ce fichier
+    # aujourd'hui, mais rien ne l'interdit sur un déclenchement manuel).
     # Mécanisme vérifié en conditions réelles (conteneur, certificat de test jetable, timestamp
     # DigiCert réel, 18/08/2026) : `osslsigncode sign` réussit, le Subject du certificat est
     # bien lu dans le binaire signé (`osslsigncode verify` le confirme, y compris le horodatage).
@@ -107,21 +122,35 @@ build-agent:
     # avec un certificat auto-signé, `verify` échoue TOUJOURS en CI ("self-signed certificate",
     # constaté) puisque rien n'a de raison de faire confiance au certificat Allsafe dans ce
     # conteneur jetable — la confiance se construit sur le parc via GPO, pas en CI. Un `grep
-    # Succeeded` sur `verify` ferait donc échouer le job à tort ; on se fie au code de sortie de
-    # `sign` lui-même (défaut `set -e` de GitLab CI). Le `.pfx` doit être généré et distribué en
-    # confiance (Éditeurs de confiance + Autorités racines de confiance si auto-signé) côté
-    # AD/GPO — étape humaine, hors CI, cf. docs/AGENTS.md § Signature.
+    # Succeeded` sur `verify` ferait donc échouer le job à tort. Le `.pfx` doit être généré et
+    # distribué en confiance (Éditeurs de confiance + Autorités racines de confiance si
+    # auto-signé) côté AD/GPO — étape humaine, hors CI, cf. docs/AGENTS.md § Signature.
+    #
+    # `set -e` explicite (18/08/2026, cf. audit/AUDIT_SECURITE.md #26 — corrige un
+    # commentaire erroné : GitLab CI ne fait du fail-fast qu'ENTRE items de la liste `script:`,
+    # jamais À L'INTÉRIEUR d'un seul bloc `- |` multi-lignes). Sans lui, un échec de `sign` à
+    # mi-chemin (mauvais mot de passe, .pfx corrompu) pouvait laisser le `mv` suivant remplacer
+    # le binaire valide par un fichier corrompu/vide, publié tel quel en artifact avec un job
+    # final vert. Vérification explicite en plus de `set -e` : plus lisible sur ce qui a échoué,
+    # et robuste même si un `osslsigncode` futur ne respectait pas les codes de sortie standards.
     - |
       if [ -n "$AGENT_SIGNING_PFX" ]; then
+        set -e
         echo "Signature Authenticode du .exe et du .msi..."
-        osslsigncode sign -pkcs12 "$AGENT_SIGNING_PFX" -pass "$AGENT_SIGNING_PASSWORD" \
+        if ! osslsigncode sign -pkcs12 "$AGENT_SIGNING_PFX" -pass "$AGENT_SIGNING_PASSWORD" \
           -n "Allsafe Agent" -t http://timestamp.digicert.com \
           -in target/x86_64-pc-windows-gnu/release/allsafe-agent.exe \
-          -out target/x86_64-pc-windows-gnu/release/allsafe-agent-signed.exe
+          -out target/x86_64-pc-windows-gnu/release/allsafe-agent-signed.exe; then
+          echo "Échec de la signature Authenticode (.exe)" >&2
+          exit 1
+        fi
         mv target/x86_64-pc-windows-gnu/release/allsafe-agent-signed.exe target/x86_64-pc-windows-gnu/release/allsafe-agent.exe
-        osslsigncode sign -pkcs12 "$AGENT_SIGNING_PFX" -pass "$AGENT_SIGNING_PASSWORD" \
+        if ! osslsigncode sign -pkcs12 "$AGENT_SIGNING_PFX" -pass "$AGENT_SIGNING_PASSWORD" \
           -n "Allsafe Agent" -t http://timestamp.digicert.com \
-          -in allsafe-agent.msi -out allsafe-agent-signed.msi
+          -in allsafe-agent.msi -out allsafe-agent-signed.msi; then
+          echo "Échec de la signature Authenticode (.msi)" >&2
+          exit 1
+        fi
         mv allsafe-agent-signed.msi allsafe-agent.msi
       else
         echo "AGENT_SIGNING_PFX non configuré — .exe/.msi non signés (cf. docs/AGENTS.md § Signature)."
@@ -144,7 +173,7 @@ test-backend:
   needs: ["build-backend"]
   script:
     # SECRET_KEY/DB_PASSWORD : config.py refuse de démarrer avec la valeur par défaut "changeme"
-    # (garde-fou anti-.env-oublié, cf. audit/AUDIT_SECURITE_1.md) — valeurs factices, jamais utilisées
+    # (garde-fou anti-.env-oublié, cf. audit/AUDIT_SECURITE.md) — valeurs factices, jamais utilisées
     # pour une vraie connexion (les 13 tests sont des fonctions pures ou une AsyncSession mockée,
     # aucune vraie base n'est nécessaire, cf. backend/tests/).
     - docker run --rm -e SECRET_KEY=ci-not-a-real-secret -e DB_PASSWORD=ci-not-a-real-password $BACKEND_IMAGE pytest

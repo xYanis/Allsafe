@@ -133,7 +133,7 @@ class ADImporter:
         self.server = ldap3.Server(
             settings.AD_SERVER,
             get_info=ldap3.ALL,
-            # AUDIT_SECURITE.md #3 : ni use_ssl ni start_tls() → le mot de
+            # audit/AUDIT_SECURITE.md #3 : ni use_ssl ni start_tls() → le mot de
             # passe du compte de service AD (bind SIMPLE) transitait en clair
             # à chaque import. AD_USE_TLS=False (défaut) → StartTLS sur le
             # ldap:// existant (389, sans changer l'URL/le port) ; True →

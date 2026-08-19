@@ -5,6 +5,30 @@
 use crate::model::{CheckinPayload, EnrollRequest, EnrollResponse, PendingResponse};
 use anyhow::{bail, Context, Result};
 
+/// Avertissement HTTPS (18/08/2026, cf. audit/AUDIT_SECURITE.md #17) — appelé sur le
+/// chemin de mise à jour (`install::check_update`/`apply_update`), le plus critique : c'est
+/// là que transite le `.msi` exécuté ensuite avec des droits admin (#13). Un MITM réseau
+/// local (ARP spoofing/VLAN partagé, même classe que le SSH déjà corrigé) suffirait sinon à
+/// substituer le paquet. **Non bloquant pour l'instant** (décision explicite, 18/08/2026) :
+/// le serveur de prod tourne encore en HTTP aujourd'hui (`COOKIE_SECURE=false`, aucun
+/// reverse-proxy TLS en place, cf. CHECKLIST_DOCKER.md) — bloquer casserait la mise à jour
+/// en conditions réelles. Combiné au check SHA-256 (#13), cette combinaison ne protège pas
+/// contre un MITM actif tant que ce n'est qu'un avertissement (rien n'empêche de réécrire le
+/// hash publié ET le .msi dans la même requête HTTP) — **à repasser en blocage strict au
+/// moment du déploiement du reverse-proxy TLS**, cf. le reste des points HTTPS de
+/// CHECKLIST_DOCKER.md. Le reste des appels (`enroll`/`pending`/`checkin`) n'est même pas
+/// averti pour l'instant, même raisonnement.
+pub fn warn_if_not_https(server: &str) {
+    if !server.starts_with("https://") {
+        eprintln!(
+            "⚠️  Serveur Allsafe joint en HTTP ({server}) — la vérification d'intégrité du \
+             paquet de mise à jour (SHA-256) ne protège pas contre une interception active \
+             tant que ce canal n'est pas en HTTPS. À corriger avant un déploiement de parc \
+             (cf. CHECKLIST_DOCKER.md § reverse-proxy TLS)."
+        );
+    }
+}
+
 fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

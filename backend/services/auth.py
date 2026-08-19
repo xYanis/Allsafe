@@ -145,12 +145,18 @@ async def record_audit(session, event_type: str, user_id=None, email_attempt: st
     ))
 
 
-async def count_recent_failures(session, *, email: str | None = None, ip_address: str | None = None) -> int:
-    """Nombre de LOGIN_FAILED dans la fenêtre glissante, par email tenté ou par IP —
-    utilisé pour le verrou anti-bruteforce (cf. LOCKOUT_MAX_PER_EMAIL/IP ci-dessus)."""
+async def count_recent_failures(
+    session, *, email: str | None = None, ip_address: str | None = None, event_type: str = "LOGIN_FAILED",
+) -> int:
+    """Nombre d'évènements `event_type` dans la fenêtre glissante, par email tenté ou par
+    IP — utilisé pour le verrou anti-bruteforce de `/login` (cf. LOCKOUT_MAX_PER_EMAIL/IP
+    ci-dessus). `event_type` généralisé (18/08/2026, cf. audit/AUDIT_SECURITE.md #20) pour
+    être réutilisé par `/forgot-password` (`PASSWORD_RESET_REQUESTED`), qui n'avait jusqu'ici
+    aucun verrou ni trace — contrairement à `/login`, qui journalise même une tentative sur
+    un email inexistant."""
     since = datetime.now(timezone.utc) - LOCKOUT_WINDOW
     stmt = select(func.count()).select_from(AuthAuditLog).where(
-        AuthAuditLog.event_type == "LOGIN_FAILED",
+        AuthAuditLog.event_type == event_type,
         AuthAuditLog.created_at >= since,
     )
     if email is not None:
@@ -166,3 +172,15 @@ async def is_locked_out(session, email: str, ip_address: str | None) -> bool:
     if ip_address and await count_recent_failures(session, ip_address=ip_address) >= LOCKOUT_MAX_PER_IP:
         return True
     return False
+
+
+async def is_password_reset_locked_out(session, ip_address: str | None) -> bool:
+    """Verrou anti-spam pour `/forgot-password` (18/08/2026, cf. audit/AUDIT_SECURITE.md
+    #20) — par IP uniquement, pas par email : contrairement à `/login`, un mauvais acteur ici
+    ne "devine" rien par email tenté (aucune boucle de mots de passe), le risque est le
+    flood du panneau admin / le canal de timing (#22), les deux proportionnels au volume de
+    requêtes émises depuis une même source. Mêmes seuils que `/login` (réutilisés tels
+    quels, pas de nouveau réglage à maintenir)."""
+    return bool(ip_address) and await count_recent_failures(
+        session, ip_address=ip_address, event_type="PASSWORD_RESET_REQUESTED",
+    ) >= LOCKOUT_MAX_PER_IP

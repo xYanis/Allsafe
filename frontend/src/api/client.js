@@ -20,6 +20,10 @@ api.interceptors.response.use(
 export const stats      = (params) => api.get('/stats', { params })
 export const cves       = (params) => api.get('/cves', { params })
 export const assets     = () => api.get('/assets')
+// Id + nom seulement (19/08/2026) — pour les filtres/dropdowns (AssetDropdown.jsx) qui
+// n'ont pas besoin des compteurs de vulns/mises à jour/état réseau que assets() calcule
+// pour tout le parc à chaque appel. Cf. routers/assets.py::list_asset_names.
+export const assetNames  = () => api.get('/assets/names')
 export const getAsset    = (id) => api.get(`/assets/${id}`)
 export const createAsset = (data) => api.post('/assets', data)
 export const updateAsset = (id, data) => api.put(`/assets/${id}`, data)

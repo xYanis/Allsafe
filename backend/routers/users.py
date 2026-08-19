@@ -221,8 +221,24 @@ async def resolve_password_reset_request(
     création d'un compte, cf. UserFormModal.jsx) — communiqué à l'utilisateur hors
     application (oral, chat interne...). `must_change_password` forcé dans la foulée :
     l'utilisateur choisit son propre mot de passe définitif à sa prochaine connexion,
-    via l'écran de changement forcé déjà existant (ProtectedRoute.jsx)."""
-    req = await session.get(PasswordResetRequest, request_id)
+    via l'écran de changement forcé déjà existant (ProtectedRoute.jsx).
+
+    `with_for_update()` (18/08/2026, cf. audit/AUDIT_SECURITE.md #23) : sans verrou de
+    ligne, deux admins traitant la même demande à la même seconde passent tous deux le
+    contrôle `status != "pending"` avant que l'un des deux ne commite — le second mot de
+    passe écrase le premier sans erreur pour aucun des deux (impact faible, 5 comptes max,
+    mais réel). Le verrou sérialise : le second admin voit `status="resolved"` à jour une
+    fois son tour venu, et reçoit le 404 attendu au lieu d'écraser silencieusement.
+
+    Sessions révoquées après remise à zéro (#21) : sans ça, un cookie de session volé pour
+    ce compte restait valide après la remise à zéro (juste restreint aux 3 routes autorisées
+    tant que `must_change_password` est vrai) et redevenait pleinement valide dès que
+    l'utilisateur légitime changeait son mot de passe — exactement le scénario que ce flow
+    est censé couvrir (perte d'appareil, session compromise). `revoke_sessions` ci-dessus
+    fait déjà ce même DELETE pour l'action admin équivalente."""
+    req = (await session.execute(
+        select(PasswordResetRequest).where(PasswordResetRequest.id == request_id).with_for_update()
+    )).scalar_one_or_none()
     if not req or req.status != "pending":
         raise HTTPException(404, "Demande introuvable ou déjà traitée.")
     user = await session.get(User, req.user_id)
@@ -232,6 +248,7 @@ async def resolve_password_reset_request(
     user.password_hash = hash_password(data.new_password)
     user.must_change_password = True
     user.updated_at = datetime.now(timezone.utc)
+    await session.execute(delete(UserSession).where(UserSession.user_id == user.id))
     req.status = "resolved"
     req.resolved_at = datetime.now(timezone.utc)
     req.resolved_by = admin.full_name
@@ -244,8 +261,12 @@ async def dismiss_password_reset_request(
     request_id: str, admin: User = Depends(require_admin), session: AsyncSession = Depends(get_session),
 ):
     """Rejette une demande sans toucher au mot de passe (doublon, erreur, demande non
-    fondée...) — reste consultable en base (status=dismissed) plutôt que supprimée."""
-    req = await session.get(PasswordResetRequest, request_id)
+    fondée...) — reste consultable en base (status=dismissed) plutôt que supprimée.
+    `with_for_update()` : même garde-fou de course que `resolve_password_reset_request`
+    ci-dessus (#23), moins critique ici (aucune donnée écrasée) mais même cohérence."""
+    req = (await session.execute(
+        select(PasswordResetRequest).where(PasswordResetRequest.id == request_id).with_for_update()
+    )).scalar_one_or_none()
     if not req or req.status != "pending":
         raise HTTPException(404, "Demande introuvable ou déjà traitée.")
     req.status = "dismissed"

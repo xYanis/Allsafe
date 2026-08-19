@@ -547,7 +547,7 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS network_compliance JSON;
 ALTER TABLE sync_state ADD COLUMN IF NOT EXISTS status VARCHAR;
 
 -- Anti-doublon (asset_id, cve_id) sur vulnerabilities (11/08/2026, incident réel : 6 paires
--- dupliquées trouvées en base, cf. audit/AUDIT_SECURITE_1.md/STATUS.md). Le check "exists" applicatif
+-- dupliquées trouvées en base, cf. audit/AUDIT_SECURITE.md/STATUS.md). Le check "exists" applicatif
 -- dans run_cpe_matching (services/cpe_matcher.py) n'est pas atomique : deux passes de matching
 -- concurrentes (bouton manuel + cycle automatique, ou deux clics rapprochés) peuvent toutes les
 -- deux constater "pas encore là" et insérer chacune leur ligne. La contrainte fait respecter
@@ -833,3 +833,26 @@ CREATE TABLE IF NOT EXISTS release_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_release_notes_scope ON release_notes(scope, created_at DESC);
 GRANT SELECT, INSERT, UPDATE, DELETE ON release_notes TO cbr_app;
+
+-- Dédup atomique des demandes "mot de passe oublié" (18/08/2026, cf. audit/AUDIT_SECURITE.md
+-- #19) — le lire-puis-écrire de routers/auth.py::forgot_password (SELECT pending existante,
+-- puis INSERT/UPDATE) laissait une fenêtre de course : reproduit en conditions réelles, 15
+-- requêtes concurrentes sur le même compte -> 2 lignes `pending` au lieu d'1. Index unique
+-- PARTIEL (un compte ne peut avoir qu'UNE seule demande `pending` à la fois, mais peut en
+-- avoir plusieurs `resolved`/`dismissed` dans son historique) : la contrainte fait ce que le
+-- code seul ne pouvait pas garantir sous concurrence, l'INSERT concurrent perdant lève une
+-- IntegrityError attrapée côté Python (repli sur un UPDATE de la ligne déjà créée par l'autre).
+CREATE UNIQUE INDEX IF NOT EXISTS ux_password_reset_pending ON password_reset_requests(user_id) WHERE status = 'pending';
+
+-- Lenteur perçue sur la page Vulnérabilités (19/08/2026, retour utilisateur) — le tri par
+-- défaut (GET /vulnerabilities, sort_by=score) fait `WHERE status = 'open' ORDER BY
+-- risk_score DESC` : `idx_vulnerabilities_status` (ci-dessus) filtre bien sur le statut,
+-- mais laisse Postgres trier le résultat en mémoire (ou sur disque au-delà de work_mem) à
+-- chaque page, y compris pour le simple `COUNT(*)` du total qui scanne le même ensemble.
+-- Index composite : la clause WHERE la plus fréquente (`status`) en tête, suivie de la
+-- colonne de tri par défaut — permet un Index Scan déjà ordonné, sans étape de tri séparée,
+-- pour le cas le plus courant (page d'accueil de la liste, aucun autre filtre appliqué).
+-- Purement additif (n'accélère ni ne casse rien d'autre) — à confirmer par `EXPLAIN ANALYZE`
+-- sur la vraie base, pas mesuré depuis l'environnement où cet index a été écrit (pas d'accès
+-- DB, cf. STATUS.md).
+CREATE INDEX IF NOT EXISTS idx_vulnerabilities_status_risk_score ON vulnerabilities(status, risk_score DESC);

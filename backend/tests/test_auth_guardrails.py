@@ -57,6 +57,25 @@ class TestBruteForceLockout:
             assert await auth_module.is_locked_out(MagicMock(), "a@b.c", "1.2.3.4")
 
 
+class TestPasswordResetLockout:
+    """`/forgot-password` (18/08/2026, cf. audit/AUDIT_SECURITE.md #20) — n'avait
+    initialement aucun verrou ni traçabilité, contrairement à /login. Verrou par IP
+    uniquement (pas par email, cf. docstring `is_password_reset_locked_out`)."""
+
+    async def test_not_locked_below_threshold(self):
+        with patch.object(auth_module, "count_recent_failures", AsyncMock(return_value=LOCKOUT_MAX_PER_IP - 1)):
+            assert not await auth_module.is_password_reset_locked_out(MagicMock(), "1.2.3.4")
+
+    async def test_locked_at_ip_threshold(self):
+        with patch.object(auth_module, "count_recent_failures", AsyncMock(return_value=LOCKOUT_MAX_PER_IP)):
+            assert await auth_module.is_password_reset_locked_out(MagicMock(), "1.2.3.4")
+
+    async def test_no_ip_never_locked(self):
+        # Pas d'IP résolue (cas extrême) : rien à limiter, court-circuité avant tout
+        # appel à count_recent_failures (pas d'exception sur ip_address=None).
+        assert not await auth_module.is_password_reset_locked_out(MagicMock(), None)
+
+
 class TestConcurrentSessionLimit:
     """Plafond de connexions simultanées (12/08/2026, demande utilisateur) — le login
     (routers/auth.py) refuse une nouvelle session dès que count_active_sessions() atteint
@@ -140,15 +159,42 @@ class TestAllApiRoutesAreProtected:
     PUBLIC_ROUTES = {
         ("GET", "/api/health"), ("POST", "/api/auth/login"), ("POST", "/api/connections"),
         ("POST", "/api/agents/enroll"),
+        # /forgot-password (18/08/2026) : public comme /login (utilisateur pas encore
+        # authentifié) — protégé par son propre verrou anti-spam par IP et sa journalisation
+        # (is_password_reset_locked_out/record_audit), pas par un Depends() d'auth, cf.
+        # routers/auth.py.
+        ("POST", "/api/auth/forgot-password"),
+        # Distribution des paquets agent (13/08/2026, cf. routers/agents.py docstring) —
+        # interrogées par des scripts tournant sur les postes eux-mêmes (tâche planifiée/GPO),
+        # sans session utilisateur possible : intentionnellement публic, même raisonnement que
+        # /enroll. Manquaient de cette liste depuis leur création — invisible tant que cette
+        # classe de tests était vide (cf. `_api_routes`), découvert en la faisant tourner pour
+        # de vrai.
+        ("GET", "/api/agents/latest/version"), ("GET", "/api/agents/latest/windows"),
+        ("GET", "/api/agents/latest/linux"), ("GET", "/api/agents/latest/windows-exe"),
     }
 
     @staticmethod
     def _resolved_dependency_calls(route) -> set:
-        # route.dependant.dependencies fusionne déjà les dependencies= du router (main.py)
-        # et les Depends() déclarés sur la fonction elle-même (ex: routers/auth.py::logout,
-        # routers/security.py::list_events).
+        # `route.dependant.dependencies` (18/08/2026, cf. audit/AUDIT_SECURITE.md — trouvé
+        # en faisant tourner cette suite pour de vrai, pas en la relisant) : sur FastAPI
+        # 0.140.0, ne contient QUE les dépendances déclarées sur la route elle-même (Depends()
+        # explicite, ou `dependencies=[...]` posé directement sur le décorateur @router.xxx).
+        # Les `dependencies=` passées à `app.include_router(...)` (main.py) — la façon dont la
+        # quasi-totalité des routers de ce projet posent require_auth/require_admin/
+        # require_page(...) — ne sont PLUS fusionnées ici (changement de comportement interne
+        # vs. versions FastAPI plus anciennes, où route.dependant.dependencies contenait déjà
+        # tout). Sans le repli `_router_level_dependants` posé par `_api_routes` ci-dessous,
+        # TOUTE cette classe de tests devenait silencieusement vide (`app.routes` ne contient
+        # plus les routes /api/* aplaties non plus, cf. `_api_routes`) — 0 route inspectée,
+        # donc chaque assertion passait par vacuité sans jamais rien vérifier. Détecté
+        # uniquement en exécutant la suite en conditions réelles : un test qui compare un
+        # ensemble trouvé à un ensemble attendu
+        # (`test_assets_write_and_scan_routes_require_admin_read_stays_open`) est ce qui a fait
+        # remonter le problème — les tests "pour chaque route protégée, vérifier X" restent
+        # vacuously true sur un ensemble vide, invisibles sans ce genre de comparaison.
         seen = set()
-        stack = list(route.dependant.dependencies)
+        stack = list(route.dependant.dependencies) + list(getattr(route, "_router_level_dependants", ()))
         while stack:
             dep = stack.pop()
             if dep.call in seen:
@@ -158,15 +204,47 @@ class TestAllApiRoutesAreProtected:
         return seen
 
     def _api_routes(self, app):
-        for route in app.routes:
-            path = getattr(route, "path", "")
-            if not hasattr(route, "dependant") or not path.startswith("/api/"):
+        # `get_dependant` (fonction interne FastAPI, celle qu'il utilise lui-même pour
+        # résoudre les dépendances d'une route) reconstruit un `Dependant` complet pour chaque
+        # dépendance de routeur — nécessaire pour `require_page(...)`, une factory qui renvoie
+        # une closure `_dep` dont le PROPRE paramètre par défaut est `Depends(require_auth)` :
+        # sans ce niveau de résolution supplémentaire, seule la closure elle-même apparaîtrait
+        # dans `calls`, jamais `require_auth` qu'elle encapsule.
+        from fastapi.dependencies.utils import get_dependant
+
+        for included in app.routes:
+            if type(included).__name__ != "_IncludedRouter":
+                # Routes posées directement sur `app` (docs/openapi, pas de router inclus) —
+                # aucune de ce projet n'est sous /api/*, ignorées comme avant.
                 continue
-            for method in route.methods - {"HEAD", "OPTIONS"}:
-                yield route, method, path
+            ctx = included.include_context
+            prefix = ctx.prefix or ""
+            router_level_dependants = [
+                get_dependant(path=prefix, call=d.dependency) for d in ctx.dependencies
+            ]
+            for route in included.original_router.routes:
+                path = prefix + getattr(route, "path", "")
+                if not hasattr(route, "dependant") or not path.startswith("/api/"):
+                    continue
+                route._router_level_dependants = router_level_dependants
+                for method in route.methods - {"HEAD", "OPTIONS"}:
+                    yield route, method, path
+
+    @staticmethod
+    def _is_protected(calls: set) -> bool:
+        from auth_deps import require_admin, require_admin_or_internal, require_agent, require_auth
+
+        if calls & {require_auth, require_admin, require_agent, require_admin_or_internal}:
+            return True
+        # require_page_or_internal(...) (17/08/2026) — factory qui renvoie une NOUVELLE
+        # closure `_dep` à chaque appel (comme require_page), impossible à comparer par
+        # identité à une référence unique. Contrairement à require_page, sa propre logique
+        # d'auth est réimplémentée en ligne (pas de Depends(require_auth) en paramètre,
+        # cf. sa docstring "Corps dupliqué plutôt que composé") : `get_dependant` ne peut
+        # rien y trouver de plus à résoudre, la closure elle-même doit être reconnue par nom.
+        return any(getattr(c, "__qualname__", "").startswith("require_page_or_internal.<locals>") for c in calls)
 
     def test_every_api_route_requires_auth_or_admin(self):
-        from auth_deps import require_admin, require_agent, require_auth
         from main import app
 
         unprotected = []
@@ -174,12 +252,10 @@ class TestAllApiRoutesAreProtected:
             if (method, path) in self.PUBLIC_ROUTES:
                 continue
             calls = self._resolved_dependency_calls(route)
-            # require_agent (12/08/2026) : identité non-humaine distincte de require_auth/
-            # require_admin, mais tout aussi réelle — cf. routers/agents.py::checkin.
-            if require_auth not in calls and require_admin not in calls and require_agent not in calls:
+            if not self._is_protected(calls):
                 unprotected.append(f"{method} {path}")
 
-        assert not unprotected, f"Routes /api/* sans require_auth/require_admin/require_agent : {unprotected}"
+        assert not unprotected, f"Routes /api/* sans protection reconnue : {unprotected}"
 
     def test_agents_checkin_requires_agent_auth(self):
         # /checkin doit porter spécifiquement require_agent (pas seulement "une auth
@@ -194,19 +270,33 @@ class TestAllApiRoutesAreProtected:
                     f"{method} {path} doit porter require_agent"
 
     def test_agents_management_routes_require_admin_except_list(self):
-        # Gestion des jetons + révocation : admin uniquement. GET /agents (liste, lecture
-        # seule) reste ouvert à tout compte ayant accès à la page Sécurité > Agents
-        # (require_page), pas réservé admin — cf. routers/agents.py.
+        # Gestion des jetons + révocation/suppression : admin uniquement. GET /agents,
+        # GET /{agent_id} et GET /{agent_id}/checkins (lecture) restent ouverts à tout
+        # compte ayant accès à la page Sécurité > Agents (require_page), pas réservés
+        # admin — cf. routers/agents.py. GET /pending et POST /checkin portent une
+        # identité agent (require_agent), pas humaine — couverts séparément
+        # (test_agents_checkin_requires_agent_auth ci-dessous pour /checkin). POST /enroll
+        # et GET /latest/* sont publics (cf. PUBLIC_ROUTES) — élargi le 18/08/2026 après
+        # avoir fait tourner cette suite pour de vrai : /latest/* en manquait, invisible
+        # tant que cette classe de tests était silencieusement vide.
         from auth_deps import require_admin
         from main import app
+
+        page_only_paths = {
+            ("GET", "/api/agents"), ("GET", "/api/agents/{agent_id}"),
+            ("GET", "/api/agents/{agent_id}/checkins"),
+        }
+        non_admin_agent_paths = {
+            ("POST", "/api/agents/enroll"), ("POST", "/api/agents/checkin"), ("GET", "/api/agents/pending"),
+        }
 
         for route, method, path in self._api_routes(app):
             if not path.startswith("/api/agents"):
                 continue
-            if path in ("/api/agents/enroll", "/api/agents/checkin"):
+            if (method, path) in self.PUBLIC_ROUTES or (method, path) in non_admin_agent_paths:
                 continue
             calls = self._resolved_dependency_calls(route)
-            if (method, path) == ("GET", "/api/agents"):
+            if (method, path) in page_only_paths:
                 assert require_admin not in calls, f"{method} {path} ne devrait pas exiger admin (lecture partagée)"
             else:
                 assert require_admin in calls, f"{method} {path} doit être réservé au rôle admin"
@@ -243,3 +333,38 @@ class TestAllApiRoutesAreProtected:
                 assert require_admin not in calls, f"{method} {path} ne devrait pas exiger admin (lecture partagée)"
             else:
                 assert require_admin in calls, f"{method} {path} doit être réservé au rôle admin"
+
+    def test_assets_write_and_scan_routes_require_admin_read_stays_open(self):
+        # 18/08/2026, cf. audit/AUDIT_SECURITE.md #14 — assets.router n'avait jusqu'ici
+        # aucune restriction de rôle au-delà de require_auth : n'importe quel compte connecté
+        # pouvait créer/modifier/supprimer un actif, déclencher un scan SSH/WinRM/agent, ou
+        # les checks réseau/switch/web (SSRF via Asset.url non validé, sonde SSH via
+        # ip_address+identifiants libres, déclenchement de scan agent contournant
+        # POST /agents/{id}/request-scan déjà réservé admin). Les GET restent ouverts à tout
+        # compte connecté (décision actée, cf. CLAUDE.md § limite assumée — lus en cross-
+        # référence par Dashboard/Incidents/Rapports/Veille).
+        from auth_deps import require_admin
+        from main import app
+
+        write_and_scan_paths = {
+            ("POST", "/api/assets"),
+            ("PUT", "/api/assets/{asset_id}"),
+            ("DELETE", "/api/assets/{asset_id}"),
+            ("POST", "/api/assets/{asset_id}/scan"),
+            ("POST", "/api/assets/network-protocol-check/run"),
+            ("POST", "/api/assets/switch-hardening/run"),
+            ("POST", "/api/assets/web-hardening/run"),
+        }
+
+        found = set()
+        for route, method, path in self._api_routes(app):
+            if not path.startswith("/api/assets"):
+                continue
+            calls = self._resolved_dependency_calls(route)
+            if (method, path) in write_and_scan_paths:
+                found.add((method, path))
+                assert require_admin in calls, f"{method} {path} doit être réservé au rôle admin"
+            elif method == "GET":
+                assert require_admin not in calls, f"{method} {path} ne devrait pas exiger admin (lecture partagée)"
+
+        assert found == write_and_scan_paths, f"Routes attendues non trouvées : {write_and_scan_paths - found}"

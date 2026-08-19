@@ -233,10 +233,23 @@ pub fn known_server() -> Option<String> {
 /// (`GET /latest/version`, même route que `agent/deploy/update-agent.*`). `Ok(Some(v))`
 /// si une version différente est disponible, `Ok(None)` si déjà à jour.
 pub async fn check_update(server: &str) -> Result<Option<String>> {
-    #[derive(serde::Deserialize)]
-    struct VersionResponse {
-        version: String,
-    }
+    crate::api::warn_if_not_https(server);
+    let VersionResponse { version: latest, .. } = fetch_version_info(server).await?;
+    let current = env!("CARGO_PKG_VERSION");
+    Ok((latest != current).then_some(latest))
+}
+
+#[derive(serde::Deserialize)]
+struct VersionResponse {
+    version: String,
+    /// SHA-256 hexadécimal du `.msi` actuellement publié (18/08/2026, cf.
+    /// audit/AUDIT_SECURITE.md #13) — `None` si le serveur ne l'expose pas encore
+    /// (rétrocompatibilité avec un backend pas encore mis à jour : `apply_update` refuse
+    /// alors l'installation plutôt que de l'exécuter sans vérification, cf. plus bas).
+    sha256_windows: Option<String>,
+}
+
+async fn fetch_version_info(server: &str) -> Result<VersionResponse> {
     let url = format!("{}/api/agents/latest/version", server.trim_end_matches('/'));
     let resp = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -249,9 +262,7 @@ pub async fn check_update(server: &str) -> Result<Option<String>> {
     if !resp.status().is_success() {
         anyhow::bail!("réponse inattendue du serveur ({})", resp.status());
     }
-    let latest = resp.json::<VersionResponse>().await.context("réponse de version invalide")?.version;
-    let current = env!("CARGO_PKG_VERSION");
-    Ok((latest != current).then_some(latest))
+    resp.json::<VersionResponse>().await.context("réponse de version invalide")
 }
 
 /// Télécharge le `.msi` publié (`GET /latest/windows`) et l'exécute silencieusement
@@ -262,8 +273,32 @@ pub async fn check_update(server: &str) -> Result<Option<String>> {
 /// `Program Files\Allsafe Agent`, pas un `.exe` fraîchement téléchargé), `msiexec` peut ne
 /// pas réussir à remplacer un fichier verrouillé par son propre process — cas non géré
 /// ici, limite assumée (cf. `Program Files` vs poste de téléchargement, docs/AGENTS.md).
+///
+/// **Vérification d'intégrité avant exécution** (18/08/2026, cf. audit/AUDIT_SECURITE.md
+/// #13) : avant ce correctif, le `.msi` téléchargé était lancé en `/qn` **sans aucune**
+/// vérification de signature ni d'empreinte, avec `require_elevated()` déjà confirmé — un
+/// MITM réseau local ou une compromission du backend suffisait à exécuter du code arbitraire
+/// en admin sur tout le parc via ce chemin. Le SHA-256 attendu (`GET /latest/version`,
+/// `sha256_windows`) est comparé au SHA-256 réel du fichier téléchargé avant tout
+/// `msiexec /i` — ne protège pas contre une compromission totale du backend (qui pourrait
+/// aussi falsifier le hash publié), mais bloque le MITM réseau ciblé sur ce téléchargement
+/// précis, le scénario principal décrit par l'audit — tant que `warn_if_not_https` (#17)
+/// n'est qu'un avertissement (HTTP encore toléré, décision explicite le temps du reverse-
+/// proxy TLS), un MITM actif peut réécrire hash et .msi ensemble, cf. sa docstring. Une
+/// vraie signature Authenticode (WinVerifyTrust) resterait la
+/// protection la plus robuste contre un backend compromis, mais suppose un certificat de
+/// confiance distribué par GPO sur le parc — le certificat de signature CI est aujourd'hui
+/// auto-signé (cf. audit/AUDIT_SECURITE.md § CI signature), non vérifiable par une chaîne
+/// de confiance standard tant que ce déploiement n'existe pas.
 pub async fn apply_update(server: &str) -> Result<()> {
     require_elevated()?;
+    crate::api::warn_if_not_https(server);
+
+    let version_info = fetch_version_info(server).await?;
+    let expected_sha256 = version_info.sha256_windows.context(
+        "le serveur ne publie pas l'empreinte SHA-256 attendue du .msi — mise à jour refusée \
+         par sécurité (backend obsolète ou compromis)",
+    )?;
 
     let url = format!("{}/api/agents/latest/windows", server.trim_end_matches('/'));
     let bytes = reqwest::Client::builder()
@@ -277,6 +312,21 @@ pub async fn apply_update(server: &str) -> Result<()> {
         .bytes()
         .await
         .context("téléchargement du .msi")?;
+
+    let actual_sha256 = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        format!("{:x}", hasher.finalize())
+    };
+    if !actual_sha256.eq_ignore_ascii_case(&expected_sha256) {
+        anyhow::bail!(
+            "empreinte du .msi téléchargé invalide (attendu {}, obtenu {}) — installation \
+             refusée, le paquet a peut-être été altéré en transit",
+            expected_sha256,
+            actual_sha256
+        );
+    }
 
     let tmp = std::env::temp_dir().join("allsafe-agent-update.msi");
     std::fs::write(&tmp, &bytes).with_context(|| format!("écriture de {}", tmp.display()))?;

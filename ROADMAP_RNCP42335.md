@@ -58,7 +58,7 @@ n'existe que pour alimenter ces six livrables.
 
 | # | Compétence | Nature | État | Artefact |
 |---|---|---|---|---|
-| 1.1 | Gouvernance / PSSI | 📄 | 🟡 | Module Documentation (31/07/2026) héberge PSSI/chartes/organigramme avec historique de versions — **l'outil existe, la PSSI elle-même reste à rédiger** (l'un ne prouve pas l'autre, cf. principe ci-dessus) |
+| 1.1 | Gouvernance / PSSI | 📄 | 🟡 | Module Gouvernance (31/07/2026, renommé depuis « Documentation » le 18/08/2026) héberge PSSI/chartes/organigramme avec historique de versions — **l'outil existe, la PSSI elle-même reste à rédiger** (l'un ne prouve pas l'autre, cf. principe ci-dessus) |
 | 1.2 | Gestion des risques | 🔧📄 | 🟡 | `services/scoring.py` (risque technique). Manque un registre de risques métier |
 | 1.3 | Conformité RGPD / NIS 2 / CRA / DORA | 🔧 | ✅ NIS 2 | Module Incidents (Art. 23), Veille (registre auditable), mode Présentation (RGPD). CRA/DORA hors contexte |
 | 1.4 | PCA / PRA + tests | 🔧📄 | 🟡 | `services/backup.py`. Manque : document PCA + **traçabilité d'un test de restauration réel** 🎯 |
@@ -84,7 +84,7 @@ n'existe que pour alimenter ces six livrables.
 |---|---|---|---|---|
 | 3.1 | Audit d'architecture | 🎯📄 | ⬜ | À conduire sur Allsafe lui-même — l'architecture est documentée (`docs/ARCHITECTURE.md`), le module pour l'héberger existe désormais |
 | 3.2 | Audit de configuration | 🔧 | ✅ | `services/asset_scanner.py` — durcissement CIS-like (mdp, SSH root, RDP-NLA, SMBv1, pare-feu), lecture seule. Preuve directe |
-| 3.3 | Audit de code source | 🎯 | ✅ | `AUDIT_SECURITE.md` (6 findings, 24/07/2026) **formalisé** dans le module Audits (03/08/2026) : audit autorisé, findings saisis avec statut réel (5 corrigés+retestés, 1 ouvert) |
+| 3.3 | Audit de code source | 🎯 | ✅ | `audit/AUDIT_SECURITE.md` (6 findings, 24/07/2026) **formalisé** dans le module Audits (03/08/2026) : audit autorisé, findings saisis avec statut réel (5 corrigés+retestés, 1 ouvert) |
 | 3.4 | Audit sécurité IA/ML | 🎯 | ⬜ | **Hors Allsafe** (aucun modèle à auditer — l'« Analyser IA » est du mot-clé local). Labo |
 | 3.5 | Test d'intrusion | 🎯 | ⬜ | À conduire — le module Audits pour l'héberger existe désormais |
 | 3.6 | Red Team | 🎯 | ⬜ | Idem, avec axe narratif (TTPs, chemin d'attaque) — `mitre_techniques` déjà au modèle |
@@ -128,7 +128,7 @@ dur est le gel.
 
 - ✅ **Module Audits** (`docs/AUDITS.md`) — construit le 03/08/2026. Couvre 3.8 en structurel,
   héberge 3.1/3.5/3.6 à venir (actes encore à conduire — un jury n'évalue pas l'outil).
-- ✅ Audit d'Allsafe (`AUDIT_SECURITE.md`) saisi comme premier jeu de données → 3.3 formalisé.
+- ✅ Audit d'Allsafe (`audit/AUDIT_SECURITE.md`) saisi comme premier jeu de données → 3.3 formalisé.
 - **Démarrer la matrice ci-dessus dès maintenant**, tenue en continu.
 
 ### S1 2027 — renseignement et détection

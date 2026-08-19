@@ -466,7 +466,7 @@ async def _fetch_feed(feed: dict) -> list[dict]:
 
         async with httpx.AsyncClient(
             timeout=30,
-            # SSRF (AUDIT_SECURITE.md #1) : follow_redirects=True suivait
+            # SSRF (audit/AUDIT_SECURITE.md #1) : follow_redirects=True suivait
             # aveuglément une redirection vers l'interne (127.0.0.1, VLAN
             # privé...) même si l'URL d'origine était publique. Chaque hop est
             # maintenant re-validé à la main ci-dessous.

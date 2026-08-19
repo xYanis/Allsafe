@@ -99,6 +99,11 @@ bascule globale. Décision actée avec l'utilisateur (cf. `STATUS.md`) :
   module Sécurité séparé couvrira ce terrain, avec ses propres garde-fous d'autorisation (comme
   Audits — autorisation écrite bloquante avant tout finding saisissable).
 
+> **Détection d'évènements sensibles côté poste** (⏳ spécifié le 19/08/2026, pas encore implémenté) :
+> extension à venir de cet agent — lecture des journaux d'audit natifs de l'OS + diff d'état pour
+> signaler compte créé / élévation de privilèges / process suspect (nmap) / altération de l'audit.
+> Reste **lecture seule** (détection, jamais exécution). Conception figée dans `docs/AGENT_DETECTION.md`.
+
 ## Modèle de données
 
 `Asset.collection_method` — `String`, défaut `"service_account"`, valeurs `service_account` |
@@ -473,6 +478,24 @@ Mécanisme vérifié en conditions réelles (conteneur, certificat de test jetab
 réel, 18/08/2026) : signature réussie sur `.exe` et `.msi`, Subject du certificat bien lu dans le
 binaire signé (`osslsigncode verify`). Pas de certificat réel généré ni distribué — ça reste à faire
 côté infrastructure Allsafe.
+
+⚠️ **Cette signature n'est aujourd'hui vérifiée par personne** (audit/AUDIT_SECURITE.md #13,
+18/08/2026) : elle évite juste le bandeau UAC "Éditeur inconnu", `agent/src/install.rs::apply_update`
+ne la contrôlait pas avant d'exécuter le `.msi` téléchargé — RCE en admin via un MITM réseau ou un
+backend compromis. Correctif posé le même jour, **en attendant** l'étape 2 ci-dessus (distribution
+GPO du `.cer`, jamais faite) qui seule permettrait une vraie vérification Authenticode :
+`GET /latest/version` publie désormais `sha256_windows` (empreinte du `.msi` actuellement publié,
+`routers/agents.py::latest_agent_version`), comparée par `apply_update()` au SHA-256 du fichier
+téléchargé avant tout `msiexec /i` — refuse l'installation si absent ou différent. Protège contre un
+MITM qui altère le `.msi` sans contrôler aussi la réponse `/latest/version` (transport HTTPS) ; ne
+protège **pas** contre un backend totalement compromis (qui publierait un hash correspondant à son
+propre `.msi` malveillant) — seule une vraie signature vérifiée le ferait. `require_https` a été
+volontairement laissé en **avertissement non bloquant** (`warn_if_not_https`, pas un `bail!`) : le
+serveur de prod tourne encore en HTTP aujourd'hui (`COOKIE_SECURE=false`, aucun reverse-proxy TLS en
+place, cf. CHECKLIST_DOCKER.md) — bloquer aurait cassé la mise à jour en conditions réelles. **À
+repasser en blocage strict dès que le reverse-proxy TLS est déployé** — tant que ce n'est qu'un
+avertissement, un MITM actif peut réécrire le hash publié et le `.msi` dans la même requête HTTP,
+ce qui vide le check SHA-256 de sa valeur contre ce scénario précis.
 
 ## Frontend
 

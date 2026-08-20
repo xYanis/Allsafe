@@ -610,7 +610,8 @@ crédits.
 
 ## 9quater. Vérification email/domaine en direct — XposedOrNot + GitHub (session 28/07/2026)
 
-Extension demandée à partir d'un brouillon (`docs/SURVEILLANCE_ID.md`, fourni par l'utilisateur) qui
+Extension demandée à partir d'un brouillon fourni par l'utilisateur (`docs/SURVEILLANCE_ID.md`,
+supprimé depuis — brouillon de conception absorbé par cette section, cf. CLAUDE.md § docs) qui
 listait 11 sources OSINT (HIBP, IntelX, Hunter.io, Shodan, Censys, SecurityTrails, crt.sh, GitHub,
 Reddit, Wayback Machine, XposedOrNot). Neuf écartées : payantes (HIBP, Hunter.io, Shodan, Censys,
 SecurityTrails), déjà rejetée pour la même raison (IntelX, cf. § 9bis), ou hors-sujet pour ce module —

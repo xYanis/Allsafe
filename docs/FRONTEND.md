@@ -224,8 +224,8 @@ précédent. `favicon.svg` régénéré à l'identique.
 
 ⚠️ Silhouette "capuche/masque" à connotation *hacker/attaquant* plutôt que *défense* — signalé à
 l'utilisateur en le livrant, pas un problème bloquant en soi (imagerie très courante dans le
-secteur cyber, cf. `docs/SONDE.md` § BAS/Red Team pour le volet offensif déjà dans la roadmap du
-produit) mais à garder en tête si la question revient plus tard.
+secteur cyber, cf. `idees/SONDE.md` — brouillon d'un 2e outil séparé, BAS/Red Team, hors périmètre
+d'Allsafe, déplacé de `docs/` le 20/08/2026) mais à garder en tête si la question revient plus tard.
 
 **Wordmark** : "Allsafe" passe en `--font-mono`, en dégradé de marque (`background-clip: text`,
 `var(--brand-text-grad)`) sur Home/Login (trop petit pour rester lisible en dégradé dans la sidebar —
@@ -489,6 +489,28 @@ plus utilisés, pas d'audit systématique des 19 autres) :
 - `AnnotationModal.jsx` : le `<select>` "Validé par" se pré-remplit avec le nom préféré, **seulement**
   quand `initialValidator` est vide (nouvelle annotation) — sur une ré-édition (seul appelant :
   `Dashboard.jsx`), `initialValidator` porte déjà le nom réellement enregistré, jamais écrasé.
+
+---
+
+## Guide d'aide contextuel (19/08/2026)
+
+Demande explicite : un guide pas à pas sur chaque page, "aussi détaillé que celui des Agents"
+(l'ancien `Agents.jsx` avait déjà un rendu "paquets" par OS pour l'enrôlement, jamais généralisé
+ailleurs). Trois pièces, même répartition que le reste de l'app (composant / data / préférence) :
+
+- **`constants/pageGuides.js`** — `PAGE_GUIDES`, un objet route → `{ title, subtitle, steps: [{
+  title, body, packages? }] }`, contenu rédigé à partir du code réel de chaque page (pas générique).
+  `packages` (optionnel, réservé à `/agents`) reprend le rendu logo OS + bloc de commandes copiable
+  de l'ancien guide dédié. `guideForPath(pathname)` résout l'entrée — étendre un guide n'exige
+  d'éditer que ce fichier, aucun composant (principe scalable, CLAUDE.md).
+- **`components/PageGuide.jsx`** — bouton flottant bas-droite (`z-40`, sous les modales `z-50`),
+  teinté avec la couleur du module courant (`constants/modules.js::moduleForPath`). Monté **une
+  seule fois** dans `Layout.jsx` (pas par page) : il se referme lui-même à chaque changement de
+  route (`useLocation`) et rend `null` sans rien monter si la route n'a pas d'entrée dans
+  `PAGE_GUIDES`, ou si la préférence ci-dessous est active.
+- **`contexts/GuidePreferenceContext.jsx`** — "masquer les guides d'aide sur toutes les pages"
+  (Paramètres > Apparence), préférence 100% client (`localStorage`), même patron exact que
+  `ThemeContext.jsx`/`AnalystPreferenceContext.jsx`.
 
 ---
 
@@ -1399,17 +1421,54 @@ frontend/
     │   │                             d'attribution — indépendant de l'authentification ci-dessous
     │   ├── AnalystPreferenceContext.jsx → (14/08/2026) "nom d'analyste par défaut" — préférence 100%
     │   │                             client (`localStorage`), même patron que ThemeContext/PresentationContext
-    │   └── AuthContext.jsx         → (30/07/2026) session utilisateur — `me()` au montage, `user`,
-    │                                 `loading`, `login()`, `logout()`, `refresh()`. `refresh()` doit
-    │                                 être rappelé après qu'un admin modifie SON PROPRE compte (email/
-    │                                 nom) via UserFormModal, sinon l'UI garde les infos périmées
-    │                                 jusqu'au prochain rechargement de page (cf. AdministrationSecurity.jsx)
+    │   ├── AuthContext.jsx         → (30/07/2026) session utilisateur — `me()` au montage, `user`,
+    │   │                             `loading`, `login()`, `logout()`, `refresh()`. `refresh()` doit
+    │   │                             être rappelé après qu'un admin modifie SON PROPRE compte (email/
+    │   │                             nom) via UserFormModal, sinon l'UI garde les infos périmées
+    │   │                             jusqu'au prochain rechargement de page (cf. AdministrationSecurity.jsx)
+    │   └── GuidePreferenceContext.jsx → (19/08/2026) "masquer les guides d'aide" — même patron 100%
+    │                                 client (`localStorage`) que les deux ci-dessus. Consommé par
+    │                                 `components/PageGuide.jsx`, cf. section dédiée plus bas
     ├── utils/
     │   ├── fakeData.js          → pools d'actifs/vulns/analystes fictifs + helpers d'anonymisation
     │   │                           (mode Présentation, cf. section dédiée plus haut)
     │   ├── countries.js         → `COUNTRIES`/`COUNTRY_LABELS`, ~40 pays — filtre pays Fuite de données
     │   │                           + formulaire d'ajout de source (Watch.jsx + FuiteDeDonnees.jsx)
     │   └── color.js             → `hexToRgba(hex, alpha)` — dérive une teinte transparente depuis un hex
+    ├── constants/                  → configs data-driven pures (aucun composant, aucun appel API) —
+    │   │                             principe scalable : étendre l'app = éditer une entrée ici, pas
+    │   │                             dupliquer une logique dans plusieurs pages
+    │   ├── modules.js           → `MODULES` — source de vérité unique des modules Allsafe (label,
+    │   │                           couleur, `dark` pour le texte sur CTA rempli, routes couvertes),
+    │   │                           reprise par Layout.jsx (nav), Home.jsx (tuiles) et PageLoader.jsx.
+    │   │                           `moduleColorForPath`/`moduleForPath` résolvent le module depuis le
+    │   │                           pathname courant (plus long préfixe qui matche)
+    │   ├── modulePages.js       → `MODULE_PAGE_TREE` — miroir de `Layout.jsx::NAV_GROUPS`, pour le
+    │   │                           picker de droits d'accès par page (Administration > Utilisateurs,
+    │   │                           `User.allowed_pages`) et le filtrage de nav/routes. Dupliqué (pas
+    │   │                           importé) depuis `backend/services/access_control.py::MODULE_PAGES`
+    │   │                           — à resynchroniser à la main si une page est ajoutée/renommée/
+    │   │                           déplacée. `/settings` volontairement absent (jamais restreignable)
+    │   ├── criticite.js         → `CRITICITE_LABELS` (critique/haute/moyenne/faible) — partagé par
+    │   │                           Actifs.jsx et Dashboard.jsx pour ne pas dupliquer le mapping.
+    │   │                           "critique" ajoutée le 17/08/2026 pour la politique de scan planifié
+    │   │                           (seule valeur en scan quotidien, le reste hebdomadaire)
+    │   ├── serviceColors.js     → `SERVICE_COLOR_PALETTE` (8 teintes) — sélecteur de couleur d'un
+    │   │                           Service (Administration > Services) + couleur de repli des cartes
+    │   │                           du registre Rôles quand un poste n'est rattaché à aucun service
+    │   ├── incidentPlaybooks.js → `NATIVE_CONTACTS` (annuaire ANSSI/CERT-FR/CNIL/police-gendarmerie,
+    │   │                           coordonnées vérifiées le 29/07/2026, filtrables par `categories`)
+    │   │                           — organismes réglementaires externes pour la roadmap Incidents.
+    │   │                           Les contacts personnalisés (assureur, avocat...) sont ajoutables
+    │   │                           sans code côté backend (`IncidentNotificationContact`), pas ici
+    │   ├── crisisPlaybook.js    → `NATIVE_CRISIS_CONTACTS` (mobilisation interne : Direction/RSSI/
+    │   │                           DPO/Communication/Juridique/Assureur/RH) + `CRISIS_STEPS` (plan
+    │   │                           d'action générique, sans branchement par catégorie contrairement à
+    │   │                           `incidentPlaybooks.js` — une crise n'a pas de notion de catégorie)
+    │   └── pageGuides.js        → (19/08/2026) `PAGE_GUIDES`, contenu des guides pas à pas par route
+    │                                 (`{ title, subtitle, steps: [{ title, body, packages? }] }`) —
+    │                                 étendre un guide = éditer une entrée ici, aucun composant à
+    │                                 toucher. Rendu par `components/PageGuide.jsx`, cf. section dédiée
     ├── pages/
     │   ├── Login.jsx              → route "/login" (30/07/2026) — seule route publique, formulaire
     │   │                            email/mot de passe, style visuel repris de Home.jsx
@@ -1424,6 +1483,14 @@ frontend/
     │   │                          l'entreprise : gère les identités surveillées (nom/domaine, éditables)
     │   │                          + cards des fuites matchées (cf. docs/VEILLE.md § 9bis)
     │   ├── Inventaire.jsx        → Inventaire (route /inventaire) — specs matérielles + apps installées
+    │   ├── Agents.jsx            → Inventaire (route /agents, 12/08/2026) — agent Rust `allsafe-agent` :
+    │   │                            jetons d'enrôlement, liste des agents, téléchargement des paquets
+    │   │                            (.exe/.msi/.deb), sélecteur d'actif avec recherche (13/08/2026)
+    │   ├── AgentHistory.jsx      → Inventaire (route /agents/:id/historique) — frise de check-ins
+    │   │                            d'UN poste (complémentaire à AgentsGlobalHistory.jsx ci-dessous)
+    │   ├── AgentsGlobalHistory.jsx → Inventaire (route /agents/historique, 19/08/2026) — vue de parc :
+    │   │                            état de TOUS les agents ayant existé (vivants ∪ révoqués ∪
+    │   │                            supprimés via `AgentDeletionLog`), pas la frise d'un seul poste
     │   ├── Audits.jsx            → Sécurité (route /audits, ex-Pentest.jsx) — placeholder, mais
     │   │                            module spécifié : cf. docs/AUDITS.md (chantier prioritaire)
     │   ├── Bastion.jsx           → Sécurité (route /bastion, 30/07/2026) — placeholder, futur jump host
@@ -1455,6 +1522,13 @@ frontend/
     │   ├── PageHero.jsx         → (14/08/2026) en-tête compact coloré par module, extrait dès le 2e
     │   │                          usage — déployé sur la quasi-totalité des pages de contenu, cf. section
     │   │                          dédiée plus haut pour le détail complet
+    │   ├── PageGuide.jsx        → (19/08/2026) guide pas à pas flottant, monté UNE seule fois dans
+    │   │                          Layout.jsx — résout son contenu selon la route courante
+    │   │                          (`constants/pageGuides.js::guideForPath`), se thème avec la couleur
+    │   │                          du module (`constants/modules.js`), masquable globalement
+    │   │                          (`GuidePreferenceContext`, Paramètres > Apparence). Généralise
+    │   │                          l'ancien rendu « paquets » (logo OS + commandes copiables), toujours
+    │   │                          disponible pour l'entrée /agents
     │   ├── ProtectedRoute.jsx   → (30/07/2026) garde de route : redirige vers /login si pas de session,
     │   │                          prop `role="admin"` optionnelle (redirige vers "/" sinon), affiche un
     │   │                          écran de changement de mot de passe bloquant si `must_change_password`

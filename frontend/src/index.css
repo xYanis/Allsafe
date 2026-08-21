@@ -364,6 +364,50 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   .route-fade { animation: none; }
 }
 
+/* ─── Pages d'erreur (404, 403, 500 / ErrorBoundary) ─── */
+@keyframes error-code-in {
+  from { opacity: 0; transform: scale(0.84) translateY(18px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes error-item-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes error-glow {
+  0%, 100% { opacity: 0.80; }
+  50%       { opacity: 1; }
+}
+@keyframes error-bg-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.error-code {
+  animation: error-code-in 520ms var(--ease-out) both,
+             error-glow 5s ease-in-out 560ms infinite;
+}
+.error-item {
+  opacity: 0;
+  animation: error-item-in 380ms var(--ease-out) both;
+}
+.error-bg {
+  animation: error-bg-in 550ms ease both;
+}
+.error-btn {
+  cursor: pointer;
+  transition: transform 90ms ease, background 120ms ease, border-color 120ms ease;
+}
+.error-btn:hover  { transform: scale(1.03); }
+.error-btn:active { transform: scale(0.96); }
+
+@media (prefers-reduced-motion: reduce) {
+  .error-code { animation: error-item-in 180ms ease both; }
+  .error-item { animation: error-item-in 180ms ease both; }
+  .error-bg   { animation: none; opacity: 1; }
+  .error-btn  { transition: none; }
+  .error-btn:hover, .error-btn:active { transform: none; }
+}
+
 /* ─── Barre "Analyse en cours" du dashboard (patch check) — rayures diagonales
    animées sur le remplissage, pour distinguer une barre qui avance réellement
    d'une barre simplement large et statique. */

@@ -23,6 +23,7 @@ import AuditDetail from './pages/AuditDetail.jsx'
 import Bastion from './pages/Bastion.jsx'
 import Agents from './pages/Agents.jsx'
 import AgentHistory from './pages/AgentHistory.jsx'
+import AgentsGlobalHistory from './pages/AgentsGlobalHistory.jsx'
 import AgentReleaseNotes from './pages/AgentReleaseNotes.jsx'
 import SurveillanceIdentites from './pages/SurveillanceIdentites.jsx'
 import FuiteDeDonnees from './pages/FuiteDeDonnees.jsx'
@@ -31,11 +32,13 @@ import RapportSurveillance from './pages/RapportSurveillance.jsx'
 import Incidents from './pages/Incidents.jsx'
 import Crises from './pages/Crises.jsx'
 import RapportIncidents from './pages/RapportIncidents.jsx'
+import ErrorPage from './pages/ErrorPage.jsx'
 import { logConnection } from './api/client.js'
 import { ThemeProvider } from './contexts/ThemeContext.jsx'
 import { PresentationProvider } from './contexts/PresentationContext.jsx'
 import { AnalystProvider } from './contexts/AnalystContext.jsx'
 import { AnalystPreferenceProvider } from './contexts/AnalystPreferenceContext.jsx'
+import { GuidePreferenceProvider } from './contexts/GuidePreferenceContext.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 
 function ConnectionTracker() {
@@ -60,6 +63,7 @@ export default function App() {
     <PresentationProvider>
     <AnalystProvider>
     <AnalystPreferenceProvider>
+    <GuidePreferenceProvider>
     <ThemeProvider>
       <BrowserRouter>
         <ConnectionTracker />
@@ -91,6 +95,7 @@ export default function App() {
             <Route path="agents" element={<ProtectedRoute page="/agents"><Agents /></ProtectedRoute>} />
             <Route path="agents/:id" element={<ProtectedRoute page="/agents"><AgentHistory /></ProtectedRoute>} />
             <Route path="agents/notes-de-version" element={<ProtectedRoute page="/agents"><AgentReleaseNotes /></ProtectedRoute>} />
+            <Route path="agents/historique" element={<ProtectedRoute page="/agents"><AgentsGlobalHistory /></ProtectedRoute>} />
             <Route path="reports" element={<ProtectedRoute page="/reports"><Reports /></ProtectedRoute>} />
             <Route path="documentation" element={<ProtectedRoute page="/documentation"><Documentation /></ProtectedRoute>} />
             <Route path="notes" element={<ProtectedRoute page="/notes"><Notes /></ProtectedRoute>} />
@@ -109,11 +114,12 @@ export default function App() {
             {/* Réservé au rôle admin — le serveur applique déjà la même restriction sur
                 /api/connections et /api/security/* (cf. main.py, require_admin) */}
             <Route path="settings/administration" element={<ProtectedRoute role="admin"><AdministrationSecurity /></ProtectedRoute>} />
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<ErrorPage code={404} />} />
           </Route>
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
+    </GuidePreferenceProvider>
     </AnalystPreferenceProvider>
     </AnalystProvider>
     </PresentationProvider>

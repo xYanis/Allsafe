@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Navigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { changePassword } from '../api/client.js'
+import ErrorPage from '../pages/ErrorPage.jsx'
 import { canAccessPage } from '../utils/pageAccess.js'
 import PasswordInput from './PasswordInput.jsx'
 import PasswordStrengthHint, { passwordMeetsPolicy } from './PasswordStrengthHint.jsx'
@@ -72,8 +73,8 @@ export default function ProtectedRoute({ children, role, page }) {
   if (loading) return null
   if (!user) return <Navigate to="/login" replace />
   if (user.must_change_password) return <ForcedPasswordChange />
-  if (role && user.role !== role) return <Navigate to="/" replace />
-  if (page && !canAccessPage(user, page)) return <Navigate to="/" replace />
+  if (role && user.role !== role) return <ErrorPage code={403} />
+  if (page && !canAccessPage(user, page)) return <ErrorPage code={403} />
 
   return children
 }

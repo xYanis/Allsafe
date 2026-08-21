@@ -25,7 +25,25 @@ function resolvedDate(e) {
   return e.patched_at || e.false_positive_at || e.awaiting_fix_at || null
 }
 
-export default function OtherInstancesModal({ cveId, entries, loading, onClose, onReuse }) {
+// Corrige le préfixe `[NOM_ACTIF]` d'une justification générée automatiquement
+// (19/08/2026, retour utilisateur — "réutiliser une justification garde le nom de
+// l'actif d'où elle vient") : `bulk-false-positive`/`bulk-validate`
+// (routers/vulnerabilities.py) préfixent la justification qu'ils génèrent par
+// `[{asset_label}]` — nécessaire là-bas pour distinguer plusieurs lignes d'un même
+// lot, mais devient trompeur une fois copiée sur un AUTRE actif via "Réutiliser
+// cette justification" : le texte réutilisé continuait à afficher/enregistrer le
+// nom de l'actif source, jamais celui visé par l'action en cours. Substitution
+// ciblée sur ce seul préfixe (jamais de remplacement en plein texte, qui risquerait
+// de modifier une mention légitime du nom source ailleurs dans une annotation
+// manuelle) — no-op silencieux si le texte ne commence pas exactement par
+// `[nomSourceActif]` (notes manuscrites sans ce motif, ou nom source inconnu).
+function withCorrectedAssetPrefix(text, sourceAssetName, targetAssetName) {
+  if (!text || !sourceAssetName || !targetAssetName || sourceAssetName === targetAssetName) return text
+  const prefix = `[${sourceAssetName}]`
+  return text.startsWith(prefix) ? `[${targetAssetName}]${text.slice(prefix.length)}` : text
+}
+
+export default function OtherInstancesModal({ cveId, entries, loading, onClose, onReuse, targetAssetName }) {
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 p-4 modal-backdrop animate-backdrop-in" onClick={onClose}>
       <div className="max-w-2xl w-full max-h-[80vh] rounded-2xl flex flex-col animate-modal-in" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }} onClick={e => e.stopPropagation()}>
@@ -66,7 +84,7 @@ export default function OtherInstancesModal({ cveId, entries, loading, onClose, 
                   )}
                   {RESOLVED.includes(e.status) && justification && onReuse && (
                     <button
-                      onClick={() => onReuse(justification)}
+                      onClick={() => onReuse(withCorrectedAssetPrefix(justification, e.asset_name, targetAssetName))}
                       className="mt-2 text-xs px-2.5 py-1 rounded-lg font-medium"
                       style={{ background: 'rgba(88,166,255,0.1)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.25)' }}
                     >↩ Réutiliser cette justification</button>

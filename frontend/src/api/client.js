@@ -181,6 +181,9 @@ export const requestAgentScan      = (id) => api.post(`/agents/${id}/request-sca
 // Historique des contacts (18/08/2026) — page dédiée par agent.
 export const getAgent              = (id) => api.get(`/agents/${id}`)
 export const agentCheckins         = (id, limit) => api.get(`/agents/${id}/checkins`, { params: { limit } })
+// Historique complet des agents (parc global, y compris supprimés) — badge compteur + liste
+// de la page Sécurité > Agents (cf. routers/agents.py::agents_history).
+export const agentsHistory         = () => api.get('/agents/history')
 
 // Analystes (cf. backend/routers/analysts.py) — remplace la liste ANALYSTS codée en dur,
 // alimente les menus déroulants d'attribution (validé par, déclaré par...). Registre

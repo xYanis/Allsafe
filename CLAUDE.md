@@ -30,48 +30,43 @@ correspondante (état actif **et** icône au repos) :
 | Module | Couleur | Pages |
 |---|---|---|
 | **CyberVuln** | `#f85149` rouge | Dashboard, Vulnérabilités, Actifs, CVE — le seul module de fond pleinement implémenté |
-| **CyberVeille** | `#58a6ff` bleu | Veille technologique (registre auditable NIS 2), Fuite de données (informatif, sources fuites/ransomware), Surveillance Identités (croise des identités surveillées — nom, domaine, IP/plage IP, email — avec les fuites déjà collectées ; nom/domaine sans source externe propre, IP et email vérifiés en direct contre des sources tierces 100% gratuites — `services/ip_watch.py`, `services/leak_lookup.py` — cf. docs/VEILLE.md) |
-| **Inventaire** | `#39c5cf` cyan | Inventaire Complet — patrimoine IT (CPU/RAM/disques/apps par actif) ; pointe vers les **mêmes actifs** que CyberVuln > Actifs sans s'y confondre : Actifs = vue *sécurité* (vulns/patch), Inventaire = vue *patrimoine*. Export PDF global (28/07/2026, `services/inventory_export.py`) : tableau récapitulatif + détail des apps par actif. **Agents** (12/08/2026, `docs/AGENTS.md` — implémenté, pas un placeholder ; rattaché à Inventaire depuis le même jour, pas Sécurité — plus cohérent : méthode de collecte du patrimoine, pas une fonction de sécurité offensive/opérationnelle) : agent Rust `allsafe-agent` posé sur un poste Windows/Linux, alternative de collecte au compte de service SSH/WinRM centralisé pour les postes qu'il atteint mal (éteints, hors réseau, VPN) — jamais un remplacement des serveurs. Lecture seule strictement (mêmes règles de non-intervention que le reste d'Allsafe) ; par actif, l'utilisateur choisit la méthode de collecte (`Asset.collection_method`, page Actifs). Jeton d'enrôlement à usage unique (48h, admin), identité par poste (TOFU-like, même idiome que `services/ssh_trust.py`). Test actif/offensif explicitement hors scope — futur module séparé, ses propres garde-fous d'autorisation à concevoir (comme Audits). **Durcissement** (12/08/2026, même jour) : checks de conformité CIS-like de tout le parc (compte de service **et** agent), extrait de la modale « Résultat du scan » d'Actifs (qui pointe désormais vers cette page) pour devenir une vue dédiée — tableau d'actifs avec résumé ok/warn/indéterminé, détail au clic ; aucun nouvel endpoint, `GET /assets` portait déjà `last_scan_result.compliance`/`network_compliance` en entier. **Politiques de scan planifié** (17/08/2026, `models.py::ScanPolicy`, page de réglage Paramètres > Intégrations) : scan automatique par groupe de criticité (nouvelle valeur `critique`, au-dessus de haute/moyenne/faible) — quotidien pour `critique`, hebdomadaire pour le reste, éditable sans coder ; toujours doublé de la possibilité de lancer manuellement (par actif comme avant, ou par groupe depuis la page de réglage). Périmètre : serveurs `service_account` + sites web (durcissement web) ; réseau (Meraki/PRTG) reste manuel, agents ont un simple signal de fraîcheur (cf. docs/ARCHITECTURE.md § Politiques de scan planifié). **GUI Tauri en thème sombre** (18/08/2026, remplace `native-windows-gui`) : assistant graphique installation/réparation/mise à jour/désinstallation de l'`.exe` autonome, identité visuelle Allsafe reprise à l'identique (cf. `docs/AGENTS.md` § Interface graphique). **Téléchargement des paquets** (même jour, page Agents) : `.exe` autonome (zippé avec `WebView2Loader.dll`, indispensable à côté de lui), `.msi` (GPO/déploiement de parc), `.deb` — mêmes routes publiques `GET /agents/latest/*` déjà utilisées par les scripts de mise à jour planifiée. **Historique global des agents** (19/08/2026, `/agents/historique`, `AgentsGlobalHistory.jsx`) : vue de parc complémentaire à l'historique par poste — tous les agents ayant existé (vivants ∪ révoqués ∪ supprimés via `AgentDeletionLog`), lien depuis la page Agents. **Détection d'évènements sensibles côté poste** (19/08/2026, ⏳ partiellement implémenté, cf. `docs/AGENT_DETECTION.md`) : extension de l'agent lisant les journaux natifs (Event Log Security/auditd) + diff d'état (comptes/admin/persistance) pour repérer compte créé/privesc/process suspect/altération d'audit — lecture seule stricte. Fondations backend + socle diff agent (Linux/Windows) livrés et vérifiés en conditions réelles ; enrichissement journal natif et frontend (page dédiée, badge, bandeau Dashboard) restent à faire |
-| **Sécurité** | `#3fb950` vert | **Audits** (ex-« Pentest », renommé le 30/07/2026, **implémenté le 03/08/2026** : cf. `docs/AUDITS.md`) : un seul modèle couvre les 5 types d'audit (architecture, configuration, code, pentest, Red Team) plutôt qu'un module pentest-only. Principe posé : Allsafe **héberge et trace** l'audit, n'exécute jamais rien d'offensif — les outils tournent en labo, seuls les résultats rédigés à la main entrent. Garde-fou structurel : autorisation écrite bloquante (aucun finding saisissable avant), immuable une fois posée. Premier audit réel saisi : « Audit de code — Application CBR » (nom du produit au moment de la saisie, cf. § rebranding), 6 findings issus d'`audit/AUDIT_SECURITE.md`. **Bastion** (30/07/2026, placeholder) : futur accès jump host vers les serveurs critiques, sans rapport avec l'ancien module « Bastion » retiré la même session (cf. encadré ci-dessous) — celui-là entrerait, lui, en conflit frontal avec la règle de non-intervention, à trancher avant implémentation |
-| **Rapports** | `#a371f7` violet | Rapport exécutif CVE, Rapport Veille, Rapport Surveillance — les trois avec des **rapports hebdomadaires figés** (`S30/2026`, générés le lundi 7h, export CSV) ; le rapport CVE se décline en plus par actif. Rapport Incidents à part (29/07/2026) : **par incident**, généré à la demande, jamais figé — un incident est rare, jamais plusieurs la même semaine (cf. docs/INCIDENTS.md § 7). ⚠️ "export PDF" n'existe pas côté serveur pour ces rapports — seul CSV est généré en backend (le seul export PDF serveur du projet est celui d'Inventaire, `reportlab`) ; le bouton "Exporter PDF" des 4 rapports (dont Incidents) est une impression navigateur côté client (`ReportMarkdown.jsx::exportPdf`), pas un fichier généré côté serveur |
-| **Incidents** | `#b5793a` marron | Registre incidents (29/07/2026, complet) — déclaration, qualification NIS 2 (`requires_notification`, **toujours manuelle**, jamais automatique) et suivi des 3 échéances légales (Art. 23 : alerte précoce 24h, notification 72h, rapport final 1 mois calendaire). L'app ne notifie **jamais** elle-même l'ANSSI — elle trace qui a déclaré/qualifié/envoyé quoi et quand (`services/nis2_deadlines.py`). Préremplissage (jamais création auto) depuis Sécurité/Vulnérabilités/Veille via `DeclareIncidentButton.jsx`. Roadmap par catégorie (plan d'action chronologique interne/externe, `RESPONSE_STEPS` — remplace l'ancienne checklist "bonnes pratiques" séparée, fusionnée dedans le 29/07/2026 pour éliminer la redondance ; chaque étape cochée porte qui l'a réalisée et quand, `completed_response_steps` — + annuaire ANSSI/CERT-FR/CNIL/police-gendarmerie, coordonnées vérifiées le 29/07/2026, contacts perso ajoutables sans code — `IncidentRoadmap.jsx`). Jalons envoyés consultables (contenu/date/auteur, bouton "Consulter"). Rapport final : pièces jointes PDF (5 Mo max, disque + métadonnées, `IncidentAttachment`). **Gestion de crise** (31/07/2026, page séparée `/crises`) : escalade d'un ou plusieurs incidents en crise (`Crisis`, `Incident.crisis_id`) — cellule de crise (rôles nommés), journal de décisions/communications interne-externe (`CrisisTimelineEntry`), jamais d'envoi réel. Cf. docs/INCIDENTS.md § 5ter |
-| **Gouvernance** (ex-« Documentation », renommé le 18/08/2026 — demande utilisateur, plus cohérent avec son contenu) | `#e3b341` or | Documents de gouvernance nécessaires à la conformité NIS 2 (31/07/2026) : PSSI, Charte Administrateur, Charte Utilisateur, Organigramme en seed — registre de types ouvert (`DocumentType`), ajoutable sans code, spécifique à ce module (pas géré dans Administration, contrairement à Services/Rôles qui sont consommés par plusieurs modules). Formats acceptés : PDF/Word/Excel/PNG/JPEG (validation par signature de fichier, 10 Mo max, `services/document_storage.py`). **Historique des versions conservé** : chaque upload crée une nouvelle ligne (`Document`), rien n'est supprimé automatiquement — pas de table de versions séparée, la liste triée par date EST l'historique. **Prévisualisation** (PDF/images affichés nativement par le navigateur, `Content-Disposition: inline` — Word/Excel restent en téléchargement, aucune API web ne peut ouvrir l'appli native depuis une page) + **glisser-déposer** (modale d'upload et directement sur la carte d'un type) |
-| **Paramètres** | `#8b949e` gris | Transverse — nav à deux volets sans tuile (14/08/2026, même schéma que Notes : icônes à gauche, panneau à droite) : Présentation (mode démo), Apparence (thème), **Compte** (nom/email/déconnexion + changer son email/mot de passe avec indice de force, gérer ses sessions actives, nom d'analyste par défaut), **Intégrations** (statut configuré/non configuré + dernière synchro de NVD/GitHub/AD/SSH/WithSecure/Meraki/PRTG/GLPI/vSphere, lecture seule), **Sécurité** (ligne → Administration, réservée admin, nav elle-même réductible en icônes seules). Le registre « Analystes » (noms pour les dropdowns `validated_by`...) a déménagé dans Administration (30/07/2026, cf. ci-dessous), plus dans Paramètres directement. Onglet « Services » (RH/DSI/Juridique/Direction en seed, liste ouverte, code couleur) puis onglet « Rôles » juste après (31/07/2026) : organigramme poste → personne → email (`OrganizationRole`, ex. RSSI → Michel Lacroix), poste optionnellement rattaché à un service (couleur de la carte), consommé par Incidents et Gestion de crise pour savoir à qui se référer selon le poste — noms réels, anonymisés en mode Présentation |
-| **Notes de version** | `#f778ba` rose | Détaché de Paramètres (18/08/2026, demande explicite) — module à part entière, lien simple juste en dessous de Paramètres dans la nav (pas d'en-tête de groupe, même schéma). Changelog produit (`models.py::ReleaseNote`, table unique `scope='allsafe'`/`'agent'`) : nouveautés/correctifs groupés par version, résumé replié par défaut, détail au clic (`ReleaseNotesPanel.jsx`, composant partagé). Versionné rétroactivement le même jour (1er vrai numéro de version du produit, 1.0.0, en lisant STATUS.md/HISTORIQUE.md sur le mois précédent) — alimenté en fin de session par l'assistant, relu/validé par l'utilisateur directement sur la page. Le scope `agent` reste sur sa propre page sous Inventaire > Agents (`/agents/notes-de-version`), pas ici — seul `allsafe` vit dans ce module |
+| **CyberVeille** | `#58a6ff` bleu | Veille technologique (registre auditable NIS 2), Fuite de données (informatif, sources fuites/ransomware), Surveillance Identités (croise identités surveillées — nom/domaine/IP/plage IP/email — avec les fuites collectées ; IP et email vérifiés en direct contre des sources tierces gratuites, `services/ip_watch.py`/`leak_lookup.py`) — cf. docs/VEILLE.md |
+| **Inventaire** | `#39c5cf` cyan | Inventaire Complet — patrimoine IT (CPU/RAM/disques/apps par actif) ; pointe vers les **mêmes actifs** que CyberVuln > Actifs sans s'y confondre : Actifs = vue *sécurité*, Inventaire = vue *patrimoine*. Export PDF global (`services/inventory_export.py`). **Agents** (`docs/AGENTS.md` — implémenté) : agent Rust `allsafe-agent` posé sur un poste Windows/Linux, alternative de collecte au compte de service SSH/WinRM pour les postes qu'il atteint mal — jamais un remplacement des serveurs, lecture seule stricte, choix par actif (`Asset.collection_method`). Test actif/offensif hors scope. **Durcissement** : vue dédiée des checks de conformité CIS-like de tout le parc (cf. `docs/ARCHITECTURE.md` § Durcissement). **Politiques de scan planifié** (`models.py::ScanPolicy`, Paramètres > Intégrations) : scan automatique par groupe de criticité, éditable sans coder, doublé du lancement manuel (cf. `docs/ARCHITECTURE.md` § Politiques de scan planifié). GUI Tauri, téléchargement des paquets et historique global des agents : cf. `docs/AGENTS.md`. **Détection d'évènements sensibles côté poste** (⏳ partiel, cf. `docs/AGENT_DETECTION.md`) |
+| **Sécurité** | `#3fb950` vert | **Audits** (ex-« Pentest » — cf. `docs/AUDITS.md`, ✅ implémenté) : un seul modèle couvre les 5 types d'audit (architecture, configuration, code, pentest, Red Team). Principe posé : Allsafe **héberge et trace** l'audit, n'exécute jamais rien d'offensif. Garde-fou structurel : autorisation écrite bloquante, immuable une fois posée. **Bastion** (placeholder) : futur accès jump host vers les serveurs critiques, sans rapport avec l'ancien module « Bastion » retiré (cf. encadré ci-dessous) — entrerait en conflit frontal avec la règle de non-intervention, à trancher avant implémentation |
+| **Rapports** | `#a371f7` violet | Rapport exécutif CVE, Rapport Veille, Rapport Surveillance — les trois avec des **rapports hebdomadaires figés** (générés le lundi 7h, export CSV, cf. `docs/ARCHITECTURE.md` § Rapports hebdomadaires figés) ; le rapport CVE se décline en plus par actif. Rapport Incidents à part : **par incident**, généré à la demande, jamais figé — un incident est rare, jamais plusieurs la même semaine (cf. docs/INCIDENTS.md § 7). ⚠️ "export PDF" n'existe pas côté serveur pour ces rapports — seul CSV est généré en backend (le seul export PDF serveur du projet est celui d'Inventaire, `reportlab`) ; le bouton "Exporter PDF" des 4 rapports (dont Incidents) est une impression navigateur côté client (`ReportMarkdown.jsx::exportPdf`), pas un fichier généré côté serveur |
+| **Incidents** | `#b5793a` marron | Registre incidents — déclaration, qualification NIS 2 (`requires_notification`, **toujours manuelle**) et suivi des 3 échéances légales (Art. 23 : alerte précoce 24h, notification 72h, rapport final 1 mois calendaire). L'app ne notifie **jamais** elle-même l'ANSSI — trace qui a déclaré/qualifié/envoyé quoi et quand (`services/nis2_deadlines.py`). Préremplissage depuis Sécurité/Vulnérabilités/Veille, roadmap de réponse + annuaire de contacts (ANSSI/CERT-FR/CNIL/police), pièces jointes PDF — détail complet : `docs/INCIDENTS.md`. **Gestion de crise** (page séparée `/crises`) : escalade en crise, cellule nommée, journal de décisions/communications, jamais d'envoi réel (docs/INCIDENTS.md § 5ter) |
+| **Gouvernance** (ex-« Documentation », renommé le 18/08/2026) | `#e3b341` or | Documents de gouvernance nécessaires à la conformité NIS 2 : PSSI, Charte Administrateur, Charte Utilisateur, Organigramme en seed — registre de types ouvert (`DocumentType`), ajoutable sans code (spécifique à ce module, contrairement à Services/Rôles). Formats acceptés : PDF/Word/Excel/PNG/JPEG (validation par signature de fichier, 10 Mo max, `services/document_storage.py`). Historique des versions conservé, prévisualisation native PDF/images + glisser-déposer — détail : `docs/ARCHITECTURE.md` § Module Gouvernance |
+| **Paramètres** | `#8b949e` gris | Transverse — nav à deux volets sans tuile (cf. `docs/FRONTEND.md` § Settings.jsx) : Présentation (mode démo), Apparence (thème), **Compte** (identité, mot de passe, sessions actives, nom d'analyste par défaut), **Intégrations** (statut configuré + dernière synchro des connecteurs externes, lecture seule), **Sécurité** (ligne → Administration, réservée admin). Onglets « Services » et « Rôles » (organigramme poste → personne → email, `OrganizationRole`) consommés par Incidents et Gestion de crise. Le registre « Analystes » (dropdowns `validated_by`) est géré depuis Administration, pas Paramètres (cf. § Authentification) |
+| **Notes de version** | `#f778ba` rose | Détaché de Paramètres — module à part entière, lien simple sous Paramètres dans la nav. Changelog produit (`models.py::ReleaseNote`, table unique `scope='allsafe'`/`'agent'`) : nouveautés/correctifs groupés par version, résumé replié par défaut, détail au clic (`ReleaseNotesPanel.jsx`) — alimenté en fin de session par l'assistant, relu/validé par l'utilisateur. Le scope `agent` reste sur sa propre page sous Inventaire > Agents (`/agents/notes-de-version`). Détail : `docs/ARCHITECTURE.md` § Table `release_notes` |
 
-⚠️ **Module Bastion / Administration retiré le 30/07/2026** : l'ancien sélecteur « Je suis… » en
-bas de sidebar (`visible_modules`, filtrage de nav par profil, aucun mot de passe ni session) a été
-supprimé intégralement — pure personnalisation d'affichage sans valeur de sécurité, remplacée par
-une vraie authentification (en cours de conception, cf. STATUS.md). Seul le registre de noms
-d'analystes a été conservé (déplacé dans Paramètres, cf. ci-dessus) pour ne pas casser les menus
-déroulants d'attribution existants (`validated_by` et équivalents).
+⚠️ **Module Bastion / Administration retiré le 30/07/2026** : l'ancien sélecteur « Je suis… » en bas
+de sidebar (`visible_modules`, filtrage de nav par profil, aucun mot de passe ni session) a été
+supprimé intégralement — pure personnalisation d'affichage sans valeur de sécurité, remplacée le même
+jour par une vraie authentification (cf. § Authentification ci-dessous). Seul le registre de noms
+d'analystes a été conservé (déplacé dans Paramètres) pour ne pas casser les dropdowns d'attribution
+existants (`validated_by` et équivalents).
 
 Dans le code, "CyberVuln" reste le nom historique de plusieurs modules internes (dossier `backend/`,
 title `Gestion des vulnérabilités`...) — ne pas chercher à tout renommer, seule l'identité visible
 (sidebar, `<title>` HTML) porte le nom actuel du produit.
 
-**Rebranding CBR → Allsafe (11/08/2026)** : le produit s'appelait « CBR » jusqu'à cette date, renommé
-« Allsafe » ce jour-là — pur changement d'identité visible (wordmark sidebar/Home/Login, `<title>`
-HTML, tooltips et textes UI qui nomment explicitement le produit), aucun changement fonctionnel. Même
-principe que ci-dessus appliqué à "CBR" lui-même : les mentions dans les commentaires de code, les
-identifiants internes (`cybervuln` rôle DB superuser, `cbr_app` rôle applicatif, dossier `backend/`,
-composant `CbrMark.jsx`/`CbrLogoTile`, variables CSS `--brand-*`) et le journal historique
-(`docs/HISTORIQUE.md`, entrées passées de `STATUS.md`) ne sont **pas** retouchés rétroactivement —
-"CBR" y reste exact pour la période qu'ils décrivent, exactement comme "CyberVuln" est resté non
-retouché lors du rebranding vers "CBR" initial (01/07/2026, cf. `docs/HISTORIQUE.md`).
+**Rebranding CBR → Allsafe (11/08/2026)** : le produit s'appelait « CBR » jusqu'à cette date — pur
+changement d'identité visible (wordmark, `<title>` HTML, textes UI), aucun changement fonctionnel.
+Même règle que pour "CyberVuln" ci-dessus : identifiants internes (`cybervuln`, `cbr_app`,
+`CbrMark.jsx`, `--brand-*`) et journal historique déjà écrit (`docs/HISTORIQUE.md`) ne sont **jamais**
+retouchés rétroactivement — "CBR" y reste exact pour la période qu'il décrit. Détail : `docs/HISTORIQUE.md`
+(11/08/2026) et (01/07/2026, rebranding CyberVuln → CBR initial).
 
-**Page d'accueil (`/`, `pages/Home.jsx`)** : sélecteur de module, sans sidebar — 8 tuiles (une par
-module ci-dessus, mêmes couleurs) qui redirigent chacune vers la première page du module choisi. Le
-Dashboard CyberVuln a été déplacé de `/` vers `/dashboard` pour laisser la place à cette page d'accueil.
-Le logo/titre "Allsafe" dans la sidebar (`Layout.jsx`) ramène toujours à `/`. La sidebar est réductible
-(bouton `<` en haut à droite, bascule vers une fine bande d'icônes) — état persisté côté client.
+**Page d'accueil (`/`, `pages/Home.jsx`)** : sélecteur de module, sans sidebar — une tuile par module
+ci-dessus (mêmes couleurs), redirige vers la première page du module choisi (Dashboard CyberVuln vit
+sur `/dashboard`, pas `/`). Le logo/titre "Allsafe" dans la sidebar (`Layout.jsx`) ramène toujours à
+`/`. Sidebar réductible (bouton `<`, bascule vers une fine bande d'icônes), état persisté côté client.
+Détail : `docs/FRONTEND.md` § Home.jsx.
 
-**Guide d'aide contextuel** (19/08/2026, demande utilisateur) : bouton flottant monté une seule fois
-dans `Layout.jsx` (`components/PageGuide.jsx`), résout son contenu selon la route courante
-(`constants/pageGuides.js`) et se thème avec la couleur du module actif. Masquable globalement
-(Paramètres > Apparence, préférence 100% client `localStorage`, `contexts/GuidePreferenceContext.jsx`
-— même patron que `AnalystPreferenceContext.jsx`/`ThemeContext.jsx`). Généralise l'ancien guide
-spécifique à la page Agents (rendu "paquets" avec logo OS + commandes conservé pour `/agents`).
+**Guide d'aide contextuel** : bouton flottant monté une seule fois dans `Layout.jsx`
+(`components/PageGuide.jsx`), résout son contenu selon la route courante (`constants/pageGuides.js`)
+et se thème avec la couleur du module actif. Masquable globalement (Paramètres > Apparence,
+`contexts/GuidePreferenceContext.jsx`). Détail : `docs/FRONTEND.md` § Guide d'aide contextuel.
 
 ### 🧭 Principe directeur : penser scalable
 
@@ -277,17 +272,16 @@ cybervuln/
 │   ├── MATCHING.md              → CPE matcher, scoring, patch checker (Windows + Linux/Debian tracker)
 │   ├── FRONTEND.md              → Dashboard, composants React, design
 │   ├── VEILLE.md                → Module veille cyber NIS 2 (sources, workflow, export auditeur)
-│   └── INCIDENTS.md             → Module Incidents (délais NIS 2 Art. 23, garde-fous, workflow)
+│   ├── INCIDENTS.md             → Module Incidents (délais NIS 2 Art. 23, garde-fous, workflow)
+│   ├── AUDITS.md                → Module Audits (5 types, autorisation bloquante, findings, retest)
+│   ├── AGENTS.md                → Agent Rust allsafe-agent (enrôlement, checks, empaquetage)
+│   ├── AGENT_DETECTION.md       → ⏳ Détection d'évènements sensibles côté poste
+│   └── HISTORIQUE.md            → Journal des sessions passées
 ├── frontend/                    ✅ — arborescence détaillée dans docs/FRONTEND.md
-├── agent/                       ✅ — agent Rust `allsafe-agent` (12/08/2026, module Sécurité > Agents),
-│                                  lecture seule, complète le scan centralisé SSH/WinRM sur les postes
-│                                  qu'il atteint mal (éteints, hors réseau, VPN) — jamais un remplacement
-│                                  des serveurs. Deux sous-commandes (`enroll`/`checkin`), pas de
-│                                  service/daemon packagé dans ce MVP (planification externe, cron/
-│                                  Planificateur de tâches). Empaquetage `.deb` (`cargo-deb`) et `.msi`
-│                                  (`wixl`, alternative libre au WiX Toolset officiel) documentés dans
-│                                  `agent/README.md`. Par actif, l'utilisateur choisit la méthode de
-│                                  collecte (`Asset.collection_method`, cf. ci-dessous)
+├── agent/                       ✅ — agent Rust `allsafe-agent` (module Inventaire > Agents), lecture
+│                                  seule, complète le scan centralisé SSH/WinRM sur les postes qu'il
+│                                  atteint mal — jamais un remplacement des serveurs. Détail complet
+│                                  (empaquetage .deb/.msi/.exe, GUI Tauri, mode service) : docs/AGENTS.md
 └── backend/
     ├── Dockerfile               ✅
     ├── requirements.txt         ✅
@@ -295,208 +289,61 @@ cybervuln/
     │                              + bootstrap du 1er compte admin (BOOTSTRAP_ADMIN_EMAIL/PASSWORD)
     ├── config.py                ✅
     ├── database.py              ✅ — poolclass=NullPool (cf. docs/ARCHITECTURE.md)
-    ├── auth_deps.py             ✅ — dependencies FastAPI require_auth/require_admin (30/07/2026) +
-    │                              require_agent (12/08/2026, en-tête X-Agent-Token, identité non-humaine
-    │                              distincte des comptes utilisateurs — cf. routers/agents.py)
-    ├── models.py                ✅ — CVE, Asset, Vulnerability, VulnerabilityStatusHistory, Feed, WatchItem, WatchSource, SyncState, WatchedIdentity, ConnectionLog, KbBuild, Report, WatchProfileItem, SecurityEvent, Incident, IncidentTimelineEntry, IncidentNotificationContact, IncidentAttachment, Crisis, CrisisTimelineEntry, CrisisContact, Analyst, OrganizationRole, Service, DocumentType, Document, WindowsAppMapping, User, UserSession, AuthAuditLog, Audit, AuditAsset, AuditFinding, AuditFindingHistory, AuditAttachment, NetworkStatus, PatchCheckAssetCompletion, Agent, AgentEnrollmentToken, ScanPolicy
+    ├── auth_deps.py             ✅ — dependencies FastAPI require_auth/require_admin/require_page +
+    │                              require_agent (en-tête X-Agent-Token, identité non-humaine distincte
+    │                              des comptes utilisateurs — cf. routers/agents.py)
+    ├── models.py                ✅ — CVE, Asset, Vulnerability, VulnerabilityStatusHistory, Feed, WatchItem, WatchSource, SyncState, WatchedIdentity, ConnectionLog, KbBuild, Report, WatchProfileItem, SecurityEvent, Incident, IncidentTimelineEntry, IncidentNotificationContact, IncidentAttachment, Crisis, CrisisTimelineEntry, CrisisContact, Analyst, OrganizationRole, Service, DocumentType, Document, WindowsAppMapping, User, UserSession, AuthAuditLog, Audit, AuditAsset, AuditFinding, AuditFindingHistory, AuditAttachment, NetworkStatus, PatchCheckAssetCompletion, Agent, AgentEnrollmentToken, ScanPolicy, ReleaseNote
     ├── db/
     │   ├── deception_setup.sql  ✅ — honeypots DB (vues + rôles leurres, honeytokens) → security_events.
-    │   │                          Idempotent, à rejouer sur toute base. NE JAMAIS référencer ces objets
-    │   │                          dans le code (cf. docs/ARCHITECTURE.md § Déception)
+    │   │                          Idempotent. NE JAMAIS référencer ces objets dans le code (cf.
+    │   │                          docs/ARCHITECTURE.md § Déception)
     │   ├── app_role.sql         ✅ — rôle applicatif `cbr_app` à privilèges réduits (DML only, non
-    │   │                          superuser). L'app tourne avec lui (APP_DB_USER), pas avec le superuser
-    │   │                          cybervuln. Idempotent (cf. docs/ARCHITECTURE.md § Rôle applicatif)
+    │   │                          superuser) ; l'app tourne avec lui, pas le superuser `cybervuln`
     │   ├── ddl_guard.sql        ✅ — event trigger : bloque + journalise toute DDL par un rôle non
-    │   │                          whitelisté (seul `cybervuln` autorisé) → security_events (source
-    │   │                          `ddl_attempt`). Log autonome via dblink. Idempotent (cf. ARCHITECTURE.md)
-    │   └── schema_patches.sql   ✅ — `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` centralisés (pas d'Alembic,
-    │                              `create_all` ne modifie jamais une table existante). À exécuter avec le
-    │                              rôle superuser `cybervuln`, jamais `cbr_app` (bloqué par ddl_guard.sql)
-    ├── services/
-    │   ├── nvd_fetcher.py       ✅
-    │   ├── rss_fetcher.py       ✅
-    │   ├── watch_fetcher.py     ✅ — veille cyber NIS 2, sources natives codées en dur + sources
-    │   │                          personnalisées ajoutables sans code (table `WatchSource`, cf. docs/VEILLE.md)
-    │   ├── net_guard.py         ✅ — validation anti-SSRF des URLs de sources de veille (`validate_public_url`),
-    │   │                          rejette les hôtes non publics ; re-appelée à chaque redirection HTTP
-    │   ├── asset_importer.py    ✅ — import AD/SSH ; bind LDAP chiffré (`AD_USE_TLS`, StartTLS par défaut)
-    │   ├── asset_scanner.py     ✅ — scan read-only (fiabilité, apps, hardware) + durcissement CIS-like
-    │   │                          (politique mdp, SSH root/mdp, RDP-NLA/SMBv1/pare-feu Windows, signature/
-    │   │                          chiffrement SMB, LLMNR, WDigest, niveau NTLM, algos SSH faibles — 10/08/2026).
-    │   │                          Windows : **deux appels WinRM séparés** (inventaire + conformité, chacun sa
-    │   │                          propre marge de ~8191 caractères encodés) depuis le 10/08/2026 — un seul
-    │   │                          script avait déjà dépassé cette limite 3 fois à force d'ajouts, cf. STATUS.md.
-    │   │                          `apply_scan_result(asset, result, session)` (12/08/2026) : logique de
-    │   │                          persistance extraite de `routers/assets.py::scan_asset_endpoint` pour être
-    │   │                          partagée par DEUX producteurs du même shape de résultat — le scan pull
-    │   │                          SSH/WinRM ci-dessus, et le push d'un agent posé sur un poste
-    │   │                          (`routers/agents.py::checkin`) — jamais de logique dupliquée entre les deux
-    │   ├── scan_policy.py       ✅ — politiques de scan planifié par criticité (17/08/2026, cf.
-    │   │                          models.py::ScanPolicy) : `run_scan_for_criticite` réutilise exactement
-    │   │                          la séquence de `scan_asset_endpoint` ci-dessus (scan_asset ->
-    │   │                          apply_scan_result) sur les actifs service_account du groupe, puis
-    │   │                          `run_all_website_checks(asset_ids=...)` sur ses sites web. Toujours
-    │   │                          appelé depuis le process backend (jamais un worker Celery direct, cf.
-    │   │                          docs/ARCHITECTURE.md § Politiques de scan planifié)
-    │   ├── ssh_trust.py         ✅ — TOFU SSH (`connect_trusted`) : apprend et pinne la clé hôte au premier
-    │   │                          contact dans `keys/known_hosts`, rejette toute clé différente ensuite
-    │   ├── crypto.py            ✅ — chiffrement Fernet des mots de passe SSH par machine
-    │   ├── vuln_history.py      ✅ — historique des transitions de statut (`record_status_change`),
-    │   │                          branché aux 9 points qui modifient Vulnerability.status (6 manuels
-    │   │                          dans routers/vulnerabilities.py + apply_patch_result pour l'auto)
-    │   ├── claude_analyzer.py   ⚠️ règles de mots-clés locales — n'appelle PAS l'API Claude malgré
-    │   │                          le nom (aucun `anthropic`/`httpx` vers l'API dans ce fichier ni
-    │   │                          ailleurs) ; le tableau d'anonymisation ci-dessus décrit la règle à
-    │   │                          respecter si/quand un vrai appel API est ajouté, pas l'état actuel
-    │   ├── cpe_matcher.py       ✅ — matching CPE composant par composant + paquets installés + mots-clés.
-    │   │                          `still_matches()` a deux variantes pour le volume : `asset_match_context()`
-    │   │                          (données dérivées de l'actif, une fois par actif) + `still_matches_ctx()`
-    │   │                          — à utiliser dès qu'on teste beaucoup de CVE (cf. STATUS.md 28/07).
-    │   │                          Windows : dérivation des candidats produit via `WindowsAppMapping`
-    │   │                          (table réglable en base, `models.py`), pas `_package_candidates`
-    │   │                          (conventions Debian/RPM, sans rapport avec le texte libre des noms
-    │   │                          d'applications Windows) — cf. STATUS.md 31/07. `run_cpe_matching`/
-    │   │                          `run_cpe_matching_for_asset` : `load_only(..., raiseload=True)` sur les
-    │   │                          CVE (évite `raw_data`, 377 Mo en base) + `asyncio.sleep(0)` périodique
-    │   │                          dans la double boucle actif × CVE — sans ça, gelait l'event loop du
-    │   │                          backend entier le temps du calcul (10/08/2026, cf. STATUS.md)
-    │   ├── scoring.py           ✅ — cvss × epss × criticité (`asset.tags.criticite`, réglable depuis
-    │   │                          Actifs, cf. docs/MATCHING.md § Scoring)
-    │   ├── stats.py             ✅ — KPI (compute_stats), partagé par routers/stats.py ET reports.py
-    │   ├── remediation.py       ✅
-    │   ├── patch_checker.py     ✅ — WinRM (KB) + SSH (Debian Security Tracker, fallback plages NVD).
-    │   │                          `_asset_progress`/`_cycle_started_at` (10/08/2026) : suivi par actif du
-    │   │                          cycle en cours (checked/total, noms résolus dès le démarrage) + horodatage
-    │   │                          de départ, exposés par `GET /api/patch-check/status` pour le Dashboard
-    │   ├── debian_tracker.py    ✅ — Debian Security Tracker (comparaison version fiable, backports inclus)
-    │   ├── kb_build.py          ✅ — KB Microsoft → build OS (titre article support.microsoft.com),
-    │   │                          cache permanent en base (`kb_builds`) ; tranche avec certitude les
-    │   │                          CVE Windows anciennes que NVD/MSRC ne couvrent pas (cf. docs/MATCHING.md)
-    │   ├── watch_profile.py     ✅ — profil de veille (OS/logiciels/matériel du parc) : suggestions
-    │   │                          depuis l'inventaire (dont `hardware.vendor_hint` des actifs PRTG,
-    │   │                          04/08/2026) + correspondance. **Marque, ne filtre jamais**
-    │   ├── ip_watch.py          ✅ — Surveillance Identités, vérif IP/plage IP contre listes de blocage
-    │   │                            gratuites (IPsum, Blocklist.de, Feodo Tracker), cache process 30 min
-    │   ├── weekly_report.py     ✅ — rapports hebdomadaires **figés** (semaine ISO, table `reports`),
-    │   │                          générique ; les 3 types (cve/veille/surveillance) sont branchés
-    │   │                          (cf. docs/ARCHITECTURE.md) — Incidents n'en fait pas partie, cf. ci-dessous
-    │   ├── watch_report.py      ✅ — contenu du rapport hebdo de veille (NIS 2) : volume collecté,
-    │   │                          traités, SLA 48h sur les critiques, décisions consignées
-    │   ├── identity_report.py   ✅ — contenu du rapport hebdo de surveillance : périmètre surveillé,
-    │   │                            fuites correspondantes, IP blocklistées (volet IP non rétroactif)
-    │   ├── nis2_deadlines.py    ✅ — module Incidents (29/07/2026) : calcul des 3 échéances légales
-    │   │                            NIS 2 (24h/72h/1 mois calendaire) + garde-fous (qualification/
-    │   │                            envoi/aware_at toujours manuels, jamais automatiques, cf. docs/INCIDENTS.md)
-    │   ├── incident_timeline.py ✅ — journal auditable append-only des incidents (`record()`), même
-    │   │                            pattern que vuln_history.py
-    │   ├── incident_attachments.py ✅ — pièces jointes PDF du rapport final : validation pure (taille
-    │   │                            5 Mo max, signature `%PDF-`), constantes de stockage disque
-    │   ├── document_storage.py  ✅ — module Documentation (31/07/2026) : validation pure PDF/Word/Excel
-    │   │                            (signature de fichier par format, 10 Mo max), constantes de
-    │   │                            stockage disque (volume `documents`), même esprit qu'incident_attachments.py
-    │   └── incident_report.py   ✅ — rapport **par incident** (pas hebdo, cf. docs/INCIDENTS.md § 7) :
-    │                                `build_incident_report()`, markdown généré à la demande, jamais
-    │                                persisté — contenu des jalons envoyés + liens PDF joints
-    │   ├── backup.py            ✅ — pg_dump vers le volume `backups`, rétention (`BACKUP_RETENTION_DAYS`),
-    │   │                            toujours exécuté côté worker (cf. docs/ARCHITECTURE.md § Sauvegarde)
-    │   ├── inventory_export.py  ✅ — export PDF du module Inventaire (28/07/2026, `reportlab` — premier
-    │   │                            export PDF du projet, les rapports hebdo ne font que du CSV malgré
-    │   │                            l'intitulé "export PDF/CSV" plus haut) : tableau récapitulatif +
-    │   │                            détail des apps par actif (cf. docs/ARCHITECTURE.md)
-    │   ├── withsecure_client.py ✅ — client OAuth2 API Elements (28/07/2026, lecture seule, client
-    │   │                            "Read-only" côté Security Center) : devices, correctifs manquants
-    │   │                            CVE/CVSS (confirmé Windows uniquement), security-events/incidents.
-    │   │                            Module Vulnerability Management (ex-Radar) non souscrit, pas utilisé
-    │   ├── withsecure_matcher.py ✅ — appariement hostname WithSecure ↔ Asset existant (ne crée jamais
-    │   │                            d'actif) + création de Vulnerability, même schéma que cpe_matcher.py.
-    │   │                            Complément à AD/SSH, pas un remplacement (cf. STATUS.md 28/07/2026)
-    │   ├── auth.py               ✅ — authentification (30/07/2026) : hash/verify mot de passe (bcrypt),
-    │   │                            sessions par cookie (token opaque, hash SHA-256 stocké), verrou
-    │   │                            anti-bruteforce (email + IP, cf. docs/ARCHITECTURE.md).
-    │   │                            `validate_password_strength()` (14/08/2026) centralise la politique
-    │   │                            (16 car. + majuscule/minuscule/chiffre/spécial), avant dupliquée
-    │   ├── audit_attachments.py  ✅ — module Audits (03/08/2026) : pièces jointes PDF/PNG/JPEG (mandat
-    │   │                            d'audit ou preuve de finding), validation pure, calqué sur
-    │   │                            document_storage.py restreint à ces 3 formats
-    │   ├── audit_finding_history.py ✅ — transitions de statut d'un finding, append-only, même pattern
-    │   │                            que vuln_history.py (pas incident_timeline.py, décision assumée
-    │   │                            de ne pas fusionner les 3 formes de journal du projet)
-    │   ├── audit_report.py       ✅ — rapport d'audit, markdown généré à la demande, jamais persisté,
-    │   │                            calqué sur incident_report.py (cf. docs/AUDITS.md)
-    │   ├── meraki_client.py      ✅ — client API Dashboard Meraki (04/08/2026, lecture seule, clé API en
-    │   │                            en-tête) : état en ligne/hors ligne des équipements réseau. Agrège
-    │   │                            toutes les organisations visibles par la clé si aucune n'est
-    │   │                            précisée (constaté en conditions réelles : une même clé peut voir
-    │   │                            plusieurs organisations bien réelles et distinctes)
-    │   ├── meraki_matcher.py     ✅ — appariement hostname Meraki ↔ Asset existant (ne crée jamais
-    │   │                            d'actif), même schéma que withsecure_matcher.py, mais alimente
-    │   │                            NetworkStatus (état réseau) et non des Vulnerability. Reprend l'idée
-    │   │                            PRTG évoquée le 31/07/2026, codée le même jour à la suite (ci-dessous)
-    │   ├── prtg_client.py        ✅ — client API cœur PRTG Network Monitor (04/08/2026, lecture seule,
-    │   │                            `apitoken` en paramètre de requête — pas Multiboard, produit à part
-    │   │                            qui agrège des widgets visuels entre instances) : état en ligne/
-    │   │                            hors ligne des devices (content=devices)
-    │   ├── prtg_matcher.py       ✅ — appariement host/hostname/nom PRTG ↔ Asset existant, alimente
-    │   │                            NetworkStatus comme meraki_matcher.py. `import_new_assets` comme
-    │   │                            Meraki (décision revue en session, 339 actifs créés au premier
-    │   │                            import réel), avec une exclusion propre à PRTG : les objets
-    │   │                            internes à la plateforme (sonde, serveur central) ne sont jamais
-    │   │                            créés (host vide/loopback, exclusion structurelle, pas une liste
-    │   │                            de noms — cf. `_is_prtg_internal`)
-    │   ├── glpi_client.py        ✅ — client API REST GLPI (11/08/2026, lecture seule, CMDB patrimoine) :
-    │   │                            auth à deux jetons (App-Token client API + User-Token compte de
-    │   │                            service dédié) → Session-Token via `initSession`/`killSession`,
-    │   │                            contrairement à Meraki (clé seule) et PRTG (`apitoken` en query
-    │   │                            param). Pagine `Computer` par `range` (pas d'équivalent au
-    │   │                            `count=50000` de PRTG en un seul appel)
-    │   ├── glpi_matcher.py       ✅ — appariement `Computer.name` GLPI ↔ Asset existant, enrichit
-    │   │                            `Asset.hardware` (modèle/n° série/n° d'inventaire/fabricant/
-    │   │                            localisation, clés `glpi_*`) — **jamais** de création d'actif
-    │   │                            (décision explicite, contrairement à Meraki/PRTG et leur
-    │   │                            `import_new_assets`) ni d'écriture dans `network_status` (GLPI
-    │   │                            n'est pas un outil de supervision réseau). Premier sync réel :
-    │   │                            1855 computers GLPI, 1 seul actif Allsafe rapproché (`Bcrafter`,
-    │   │                            enrichissement vérifié en base) — le catalogue `Computer` de ce
-    │   │                            GLPI couvre le parc utilisateurs (`PC-*`/`PORT-*`), pas le parc
-    │   │                            serveurs qu'Allsafe suit ; pas un bug, cf. STATUS.md 11/08/2026
-    │   └── agent_detection.py    ⏳ PARTIEL (19/08/2026, cf. docs/AGENT_DETECTION.md) — diff d'état
-    │                                (comptes/admins/persistance) contre le dernier `AgentStateSnapshot`
-    │                                connu, no-backfill au 1er check-in, dédoublonnage du journal natif
-    │                                sur `(agent_id, native_event_id)`, plafonds serveur indépendants de
-    │                                ce que l'agent respecte. Branché sur `POST /agents/checkin` via
-    │                                `apply_security_events()` (fonction dédiée, pas `apply_scan_result`)
-    ├── routers/
-    │   ├── cves.py, assets.py, vulnerabilities.py, stats.py, analysis.py, remediation.py,
-    │   │   reports.py, sync.py, patch_check.py, connections.py, watch.py, identities.py, security.py,
-    │   │   backup.py, withsecure.py, meraki.py, prtg.py, glpi.py, incidents.py, crises.py, analysts.py,
-    │   │   organization_roles.py, services.py, documents.py, windows_app_mappings.py, audits.py
-    │   │   ✅ (tous montés dans main.py)
-    │   ├── auth.py                ✅ — login/logout/me/change-password (30/07/2026), seul router sans
-    │   │                             dependency globale (/login public, le reste protégé par route).
-    │   │                             `/change-email`, `/sessions` (GET/DELETE) ajoutés le 14/08/2026 —
-    │   │                             self-service sur son propre compte, cf. CLAUDE.md § Authentification
-    │   ├── users.py               ✅ — CRUD des comptes, réservé admin (30/07/2026)
-    │   ├── agents.py              ✅ — module Sécurité > Agents (12/08/2026), protection déclarée par
-    │   │                             route comme auth.py/connections.py ci-dessus (pas au niveau du
-    │   │                             router) : jetons d'enrôlement (admin), `/enroll` (public, protégé
-    │   │                             par le jeton lui-même), `/checkin` (`require_agent`), liste/révocation
-    │   │                             (`require_page("/agents")`/admin)
-    │   ├── integrations.py        ✅ — Paramètres > Intégrations (14/08/2026) : `GET /status`, statut
-    │   │                             agrégé configuré/non configuré + dernière synchro (lecture directe
-    │   │                             de `sync_state`, pas de rappel des `GET /<service>/status` existants)
-    │   └── scan_policies.py       ✅ — Politiques de scan planifié par criticité (17/08/2026, même page
-    │                                 Paramètres > Intégrations) : `GET`/`PATCH` (admin), `POST .../run-now`
-    │                                 (`require_admin_or_internal` — appelé aussi bien par le bouton manuel
-    │                                 que par le poller horaire `scan-policy-check-hourly`). Monté SANS
-    │                                 dependency de niveau router (comme patch_check.py) : le jeton interne
-    │                                 n'a pas de session, une dependency de router s'exécuterait avant celle
-    │                                 de la route et le rejetterait avant même qu'elle ne s'exécute
+    │   │                          whitelisté → security_events (source `ddl_attempt`)
+    │   └── schema_patches.sql   ✅ — `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`/`CREATE TABLE IF NOT
+    │                              EXISTS` centralisés (pas d'Alembic). À exécuter avec `cybervuln`,
+    │                              jamais `cbr_app` (bloqué par ddl_guard.sql)
+    ├── services/                → nvd_fetcher/rss_fetcher/watch_fetcher (docs/VEILLE.md), net_guard
+    │                              (anti-SSRF, `validate_public_url`), asset_importer/asset_scanner/
+    │                              scan_policy/ssh_trust/crypto (scan + durcissement du parc),
+    │                              vuln_history/incident_timeline/audit_finding_history (3 journaux
+    │                              append-only distincts, un par module — pas fusionnés), cpe_matcher/
+    │                              scoring/remediation/patch_checker/debian_tracker/kb_build (docs/
+    │                              MATCHING.md), stats, watch_profile/ip_watch (Surveillance Identités),
+    │                              weekly_report/watch_report/identity_report (rapports hebdo figés —
+    │                              Incidents a son propre rapport non figé, incident_report.py),
+    │                              nis2_deadlines (docs/INCIDENTS.md), incident_attachments/
+    │                              document_storage/audit_attachments (validation pure de pièces
+    │                              jointes, même schéma), incident_report/audit_report (markdown à la
+    │                              demande, jamais persisté), backup, inventory_export (seul export PDF
+    │                              serveur du projet), withsecure_client/meraki_client/prtg_client/
+    │                              glpi_client + leurs `*_matcher.py` (clients API lecture seule +
+    │                              appariement hostname ↔ Asset par intégration externe — seul GLPI
+    │                              n'écrit jamais `network_status` ni ne crée d'actif), auth (bcrypt,
+    │                              sessions cookie, `validate_password_strength()`). Détail
+    │                              architectural complet par fichier : docs/ARCHITECTURE.md.
+    │   ├── claude_analyzer.py   ⚠️ règles de mots-clés locales — n'appelle PAS l'API Claude malgré le
+    │   │                          nom (cf. § Anonymisation ci-dessus, état actuel de l'implémentation)
+    │   ├── asset_scanner.py     — `apply_scan_result()` partagé par le scan pull (SSH/WinRM) et le push
+    │   │                          agent (`routers/agents.py::checkin`), jamais de logique dupliquée
+    │   └── agent_detection.py   ⏳ PARTIEL — cf. docs/AGENT_DETECTION.md
+    ├── routers/                 → cves.py, assets.py, vulnerabilities.py, stats.py, analysis.py,
+    │                              remediation.py, reports.py, sync.py, patch_check.py, connections.py,
+    │                              watch.py, identities.py, security.py, backup.py, withsecure.py,
+    │                              meraki.py, prtg.py, glpi.py, incidents.py, crises.py, analysts.py,
+    │                              organization_roles.py, services.py, documents.py,
+    │                              windows_app_mappings.py, audits.py, users.py, agents.py,
+    │                              integrations.py, scan_policies.py ✅ (tous montés dans main.py).
+    │                              `auth.py` seul sans dependency globale (`/login` public, le reste
+    │                              protégé par route) ; `patch_check.py`/`scan_policies.py` montés sans
+    │                              dependency de niveau router (jeton interne `X-Internal-Token`, pas de
+    │                              session — une dependency de router s'exécuterait avant et le rejetterait)
     ├── tasks/
     │   └── scheduled_tasks.py   ✅ — Celery beat, planning détaillé dans docs/ARCHITECTURE.md
-    └── tests/                   ✅ — premiers tests du projet (27/07/2026), sans base de données
-        └── test_patch_checker_guardrails.py, test_vulnerabilities_status_transitions.py,
-            test_nis2_deadlines.py, test_incidents_guardrails.py, test_incident_attachments.py,
-            test_auth_guardrails.py
+    └── tests/                   ✅ — sans base de données : test_patch_checker_guardrails.py,
+        test_vulnerabilities_status_transitions.py, test_nis2_deadlines.py, test_incidents_guardrails.py,
+        test_incident_attachments.py, test_auth_guardrails.py
 ```
 
 `backend/routers.py` (fichier plat à la racine, code mort jamais importé) a été supprimé — ne pas le
@@ -533,12 +380,9 @@ DB_USER=cybervuln      # superuser (init db, admin, migrations, déception) — 
 DB_PASSWORD=           # ← À remplir
 APP_DB_USER=cbr_app    # rôle applicatif à privilèges réduits (DML only) — l'app tourne avec lui
 APP_DB_PASSWORD=       # ← À remplir (rôle créé par backend/db/app_role.sql). Si vide → repli sur DB_USER
-DB_MAX_CONCURRENT_SESSIONS=15  # sémaphore sur database.py::get_session (10/08/2026, cf.
-                       # audit/AUDIT_SECURITE.md) — pas un pool de connexions (NullPool conservé,
-                       # nécessaire pour Celery), juste un plafond de requêtes HTTP simultanées.
-                       # Relevé de 5 à 15 le 14/08/2026 : Dashboard.jsx génère à lui seul 8
-                       # requêtes simultanées toutes les 30s (+1/3s) — 5 saturait dès qu'un 2e
-                       # onglet/utilisateur était actif (lenteurs signalées par l'utilisateur)
+DB_MAX_CONCURRENT_SESSIONS=15  # sémaphore sur database.py::get_session — pas un pool de connexions
+                       # (NullPool conservé, nécessaire pour Celery), juste un plafond de requêtes
+                       # HTTP simultanées. Historique de la valeur (5→15) : docs/HISTORIQUE.md
 REDIS_URL=redis://redis:6379
 ANTHROPIC_API_KEY=     # ← À remplir
 NVD_API_KEY=           # Optionnel, recommandé (gratuit nvd.nist.gov)

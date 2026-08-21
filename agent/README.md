@@ -193,23 +193,58 @@ Pas d'auto-update poussé par Allsafe (le backend ne se connecte jamais aux post
 §1) : une nouvelle version se déploie en **rebuild + redistribution**. Réinstaller ne touche que
 le binaire, jamais `agent.json` (le poste reste enrôlé, pas besoin de relancer `enroll`).
 
-À chaque release :
-1. Bumper `version` dans `Cargo.toml` **et** `Version="..."` dans `wix/main.wxs` (§ Product, ex.
-   `0.1.1.0` — 4 segments, valeur séparée de `Cargo.toml`, oubliée une fois le 13/08/2026 : sans ce
-   bump, `ProductVersion` reste figé côté MSI même si le binaire à l'intérieur est à jour)
-2. Rebuild + repackage (§ Build ci-dessous), copier les nouveaux paquets dans `dist/`
-3. Bumper `CURRENT_AGENT_VERSION` dans `backend/routers/agents.py` **avec la même valeur** — sinon
-   Allsafe compare à une version périmée et les postes à jour s'affichent à tort comme en retard
-   (ou l'inverse). Rien n'automatise ce lien, les deux projets sont compilés séparément.
-4. Redistribuer :
-   - **Poste isolé/test** : `dpkg -i`/`msiexec` manuel (§ Installation ci-dessus)
+⚠️ **Versionnement séparé par plateforme** (19/08/2026, demande explicite) — `.exe`/`.msi`
+(même binaire Windows compilé une fois, `.msi` l'embarque tel quel : ne peuvent jamais diverger
+l'un de l'autre) et `.deb` sont des artefacts souvent modifiés indépendamment (un correctif MSI
+ne touche jamais au binaire Linux, et réciproquement). Avant, une seule version crate
+(`Cargo.toml`) forçait à bumper les deux à chaque release, même sans rien changer pour l'autre
+OS — l'agent Linux s'affichait "en retard" dans Allsafe après un correctif Windows pur (incident
+réel, cf. STATUS.md). Deux pistes indépendantes désormais, **ne jamais bumper l'une pour un
+changement qui ne concerne que l'autre** :
+
+| | Windows (.exe/.msi) | Linux (.deb) |
+|---|---|---|
+| Source de vérité | `src/main.rs::RELEASE_VERSION` (`#[cfg(target_os = "windows")]`) | `src/main.rs::RELEASE_VERSION` (`#[cfg(target_os = "linux")]`) **et** `Cargo.toml::version` (doivent rester identiques — `cargo-deb` n'a pas d'override indépendant, `unknown field version`, testé en conditions réelles) |
+| Fichier MSI | `wix/main.wxs::Version` (4 segments, ex. `0.1.12.0`) — **oublié une fois le 13/08/2026** : sans ce bump, `ProductVersion` reste figé côté MSI même si le binaire à l'intérieur est à jour | — |
+| Backend | `CURRENT_AGENT_VERSION_WINDOWS` (`backend/routers/agents.py`) | `CURRENT_AGENT_VERSION_LINUX` (`backend/routers/agents.py`) |
+
+À chaque release, sur la ou les plateformes réellement concernées :
+1. Bumper `RELEASE_VERSION` (Rust) + `wix/main.wxs::Version` (Windows) et/ou `Cargo.toml::version`
+   (Linux) — cf. tableau ci-dessus, **avec la même valeur** de part et d'autre pour la plateforme
+   concernée.
+2. Rebuild + repackage (§ Build ci-dessous) — même si une seule plateforme a changé, la
+   compilation croisée reconstruit forcément les deux binaires dans le même job CI (`rust:1-trixie`
+   compile les deux cibles) ; seul ce qui a un `RELEASE_VERSION` bumpé change de contenu
+   significatif, l'autre reste identique bit à bit hors métadonnées.
+3. Copier les nouveaux paquets dans `dist/` — remplacer uniquement ceux qui ont changé (ne pas
+   supprimer/retélécharger l'autre plateforme si elle n'a pas bougé).
+4. Bumper `CURRENT_AGENT_VERSION_WINDOWS`/`_LINUX` (`backend/routers/agents.py`) **avec la même
+   valeur** — sinon Allsafe compare à une version périmée et les postes à jour s'affichent à tort
+   comme en retard (ou l'inverse). Rien n'automatise ce lien, les deux projets sont compilés
+   séparément.
+5. Redistribuer :
+   - **Poste isolé/test** : `dpkg -i`/`msiexec` manuel (§ Installation ci-dessus). Sur un poste déjà
+     enrôlé (`agent.json` déjà présent), le plus simple est de retélécharger directement le paquet
+     publié par Allsafe plutôt que de transférer un fichier à la main — testé en conditions réelles
+     le 19/08/2026 (`gitlab.aer.loc`, mise à jour 0.1.5 → 0.1.8 pour le socle diff de détection
+     d'évènements) :
+     ```bash
+     wget -O /tmp/allsafe-agent.deb http://<serveur-allsafe>:<port>/api/agents/latest/linux
+     sudo apt install /tmp/allsafe-agent.deb
+     ```
+     `apt install ./fichier.deb` fonctionne aussi bien que `dpkg -i` (résout les dépendances au
+     passage si besoin) — `postinst` (`debian/postinst`) réenregistre et **redémarre** le service
+     automatiquement (`systemctl restart`, cf. § Mise à jour du 19/08/2026 plus haut dans
+     l'historique — `enable --now` seul ne suffisait pas sur un service déjà actif), rien d'autre à
+     faire côté poste.
    - **Parc géré (13/08/2026)** : `deploy/update-agent.sh`/`.ps1`, planifiés par votre propre infra
      (cron/GPO), viennent chercher `GET /api/agents/latest/*` tout seuls et se réinstallent si
      besoin — cf. `deploy/README.md`. Toujours "pull", jamais Allsafe qui pousse.
 
-Chaque `checkin` déclare sa version (`agent_version`, `CARGO_PKG_VERSION`) — comparée côté serveur
-à `CURRENT_AGENT_VERSION`, elle fait apparaître un badge « Mise à jour dispo » sur la page Agents
-pour les postes en retard (cf. `docs/AGENTS.md` § Mise à jour).
+Chaque `checkin` déclare sa version (`agent_version`, `RELEASE_VERSION`) — comparée côté serveur
+à `CURRENT_AGENT_VERSION_WINDOWS`/`_LINUX` (selon l'OS de l'agent), elle fait apparaître un badge
+« Mise à jour dispo » sur la page Agents pour les postes en retard (cf. `docs/AGENTS.md` § Mise à
+jour).
 
 ## Build
 
@@ -226,10 +261,27 @@ binaire dans `/usr/bin/allsafe-agent` (métadonnées dans `Cargo.toml` §
 `[package.metadata.deb]`) :
 
 ```bash
+sudo apt-get install musl-tools
+rustup target add x86_64-unknown-linux-musl
 cargo install cargo-deb
-cargo deb
+cargo deb --target x86_64-unknown-linux-musl
 # → target/debian/allsafe-agent_<version>_amd64.deb
 ```
+
+⚠️ **`--target x86_64-unknown-linux-musl` obligatoire** (19/08/2026) — sans lui, `cargo deb`
+build/package pour la cible **native** du conteneur de build, glibc comprise. Incident réel :
+un `.deb` construit nativement dans `rust:1-trixie` (Debian 13, glibc 2.41 — cette image est
+nécessaire pour `wixl` côté build Windows, cf. § ci-dessous) refusait de s'installer sur le
+parc cible (Debian 12/bookworm, glibc 2.36) :
+`Dépend: libc6 (>= 2.39) mais 2.36-9+deb12u14 devra être installé`. musl (lien 100% statique,
+aucune dépendance dynamique, `ldd` renvoie `statically linked`) élimine le problème pour de
+bon plutôt que de juste viser une distro de build plus ancienne (qui aurait fini par
+reproduire le même écart glibc un jour, cf. Debian 11→12→13). Aucune dépendance C dans
+l'arbre Linux du crate (les seules deps qui en auraient — `tauri`/`winapi`/`windows-service`
+— sont `[target.'cfg(windows)'.dependencies]`, jamais compilées côté Linux ; `reqwest` en
+`rustls-tls`, pas OpenSSL, le piège musl le plus classique) : compile sans adaptation.
+Vérifié en conditions réelles : `dpkg-deb --info` sur le `.deb` généré affiche `Depends:`
+**vide**.
 
 Vérification : `dpkg-deb --info`/`--contents target/debian/*.deb`.
 

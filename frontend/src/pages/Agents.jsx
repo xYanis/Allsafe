@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import {
   listAgents, createEnrollmentToken, listEnrollmentTokens, deleteEnrollmentToken,
-  revokeAgent, deleteAgent, assets as fetchAssets, agentLatestVersion,
+  revokeAgent, deleteAgent, assets as fetchAssets, agentLatestVersion, requestAgentScan,
 } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -31,13 +31,20 @@ const labelStyle = { color: 'var(--text-muted)' }
 // seul le .exe autonome (zippé avec WebView2Loader.dll, indispensable à côté de lui) est
 // nouveau. Simple <a> natif (routes publiques, pas de session à porter) plutôt qu'un
 // téléchargement piloté en JS — le navigateur gère nativement Content-Disposition.
+// Versionnement séparé par plateforme (19/08/2026, demande explicite) — .exe/.msi
+// partagent forcément la même version (même binaire Windows compilé une fois, le .msi
+// l'embarque tel quel) mais divergent de .deb, souvent modifié indépendamment.
 const DOWNLOAD_OPTIONS = [
-  { href: '/api/agents/latest/windows-exe', os: 'windows', label: 'Windows — .exe autonome', desc: 'Poste critique, assistant graphique (installation/réparation/mise à jour)' },
-  { href: '/api/agents/latest/windows', os: 'windows', label: 'Windows — .msi (GPO)', desc: 'Déploiement de parc via GPO/script, jeton pré-rempli possible' },
-  { href: '/api/agents/latest/linux', os: 'linux', label: 'Linux — .deb', desc: 'apt install ./allsafe-agent*.deb' },
+  { href: '/api/agents/latest/windows-exe', os: 'windows', dateKey: 'built_at_windows', versionKey: 'version_windows', label: 'Windows — .exe autonome', desc: 'Poste critique, assistant graphique (installation/réparation/mise à jour)' },
+  { href: '/api/agents/latest/windows', os: 'windows', dateKey: 'built_at_windows', versionKey: 'version_windows', label: 'Windows — .msi (GPO)', desc: 'Déploiement de parc via GPO/script, jeton pré-rempli possible' },
+  { href: '/api/agents/latest/linux', os: 'linux', dateKey: 'built_at_linux', versionKey: 'version_linux', label: 'Linux — .deb', desc: 'apt install ./allsafe-agent*.deb' },
 ]
 
-function DownloadDropdown({ color }) {
+// Version + date de build affichées par option (19/08/2026, demande explicite) — un
+// utilisateur a téléchargé un paquet obsolète resservi par le cache disque du navigateur
+// (le nom de fichier seul ne suffisait pas à s'en rendre compte, cf. STATUS.md). Vient de
+// `GET /agents/latest/version` (déjà interrogée pour le badge de version du titre).
+function DownloadDropdown({ color, versionInfo }) {
   const [open, setOpen] = useState(false)
   const [menuStyle, setMenuStyle] = useState({})
   const btnRef = useRef(null)
@@ -79,7 +86,7 @@ function DownloadDropdown({ color }) {
       </button>
       {open && (
         <div ref={menuRef} className="rounded-xl overflow-hidden"
-          style={{ ...menuStyle, width: 280, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          style={{ ...menuStyle, width: 310, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
           {DOWNLOAD_OPTIONS.map(o => (
             <a key={o.href} href={o.href} onClick={() => setOpen(false)}
               className="flex items-start gap-2.5 px-3.5 py-2.5 transition-colors"
@@ -87,9 +94,22 @@ function DownloadDropdown({ color }) {
               onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
               <span className="flex-shrink-0 mt-0.5"><OsLogo os={o.os} size={18} /></span>
-              <span className="min-w-0">
-                <p className="text-sm font-medium" style={{ color }}>{o.label}</p>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-2">
+                  <p className="text-sm font-medium" style={{ color }}>{o.label}</p>
+                  {versionInfo?.[o.versionKey] && (
+                    <span className="flex-shrink-0 text-[11px] font-bold px-1.5 py-0.5 rounded"
+                      style={{ color, background: 'rgba(57,197,207,0.15)' }}>
+                      v{versionInfo[o.versionKey]}
+                    </span>
+                  )}
+                </span>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{o.desc}</p>
+                {versionInfo?.[o.versionKey] && (
+                  <p className="text-xs mt-1 font-semibold" style={{ color: 'var(--text-secondary)' }}>
+                    Construit le {formatDateTime(versionInfo[o.dateKey])}
+                  </p>
+                )}
               </span>
             </a>
           ))}
@@ -381,12 +401,15 @@ export default function Agents() {
   const [deleteAgentTarget, setDeleteAgentTarget] = useState(null)
   const [deleteTokenTarget, setDeleteTokenTarget] = useState(null)
   const [error, setError] = useState('')
-  // Version courante de l'agent (18/08/2026, demande explicite) — affichée à côté du titre
-  // de page, même source que le champ `outdated` de chaque ligne (CURRENT_AGENT_VERSION,
-  // cf. routers/agents.py), déjà exposée publiquement pour la distribution des paquets
-  // (GET /agents/latest/version, utilisé aussi par l'agent lui-même pour se mettre à jour).
-  const [latestVersion, setLatestVersion] = useState(null)
-  useEffect(() => { agentLatestVersion().then(r => setLatestVersion(r.data?.version)).catch(() => {}) }, [])
+  // Version courante de l'agent (18/08/2026, demande explicite ; versionnement séparé par
+  // plateforme le 19/08/2026) — affichée à côté du titre de page, même source que le champ
+  // `outdated` de chaque ligne (CURRENT_AGENT_VERSION_WINDOWS/_LINUX, cf. routers/agents.py),
+  // déjà exposée publiquement pour la distribution des paquets (GET /agents/latest/version,
+  // utilisé aussi par l'agent lui-même pour se mettre à jour). Objet complet
+  // (version_windows/version_linux + built_at_windows/linux) — pas de version "unique",
+  // .exe/.msi et .deb évoluent indépendamment.
+  const [latestVersionInfo, setLatestVersionInfo] = useState(null)
+  useEffect(() => { agentLatestVersion().then(r => setLatestVersionInfo(r.data)).catch(() => {}) }, [])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -405,6 +428,30 @@ export default function Agents() {
   }, [isAdmin])
 
   useEffect(() => { load() }, [load])
+
+  // Poll léger pendant un scan à la demande (19/08/2026, demande explicite) — le scan se
+  // termine quand l'agent, au prochain sondage court côté lui (`GET /pending`, jusqu'à 60s),
+  // le détecte et pousse un check-in : rien côté serveur ne prévient la page quand c'est fait,
+  // il faut redemander la liste pour le voir. Silencieux (pas de `setLoading`, sinon le
+  // PageLoader plein écran clignoterait à chaque tick) ; ne tourne QUE tant qu'au moins un
+  // agent a un scan en attente — pas de polling permanent inutile le reste du temps.
+  const hasPendingScan = agentList.some(a => a.pending_scan_requested_at)
+  useEffect(() => {
+    if (!hasPendingScan) return
+    const id = setInterval(() => {
+      listAgents().then(r => {
+        const agents = r.data?.items || []
+        setAgentList(agents)
+        agentsCache = { ...agentsCache, agentList: agents }
+      }).catch(() => {})
+    }, 5000)
+    return () => clearInterval(id)
+  }, [hasPendingScan])
+
+  async function handleRequestScan(agentId) {
+    await requestAgentScan(agentId)
+    load()
+  }
   useEffect(() => {
     if (!isAdmin) return
     fetchAssets().then(r => setAssetList([...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => {})
@@ -439,18 +486,22 @@ export default function Agents() {
     <div className="p-6 space-y-5">
       <PageHero
         icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
-        title={<>Agents{latestVersion && (
+        title={<>Agents{(latestVersionInfo?.version_windows || latestVersionInfo?.version_linux) && (
           <Link to="/agents/notes-de-version" title="Voir les notes de version de l'agent"
             className="text-xs font-semibold px-2 py-0.5 rounded-full hover:underline"
             style={{ color: '#39c5cf', background: 'rgba(57,197,207,0.12)', border: '1px solid rgba(57,197,207,0.3)' }}>
-            v{latestVersion}
+            Win v{latestVersionInfo.version_windows} · Linux v{latestVersionInfo.version_linux}
           </Link>
-        )}</>}
+        )}<Link to="/agents/historique" title="Historique global des agents, y compris révoqués et supprimés"
+            className="text-xs font-semibold px-2 py-0.5 rounded-full hover:underline ml-1.5 align-middle"
+            style={{ color: '#39c5cf', background: 'rgba(57,197,207,0.12)', border: '1px solid rgba(57,197,207,0.3)' }}>
+            Historique
+          </Link></>}
         color="#39c5cf"
         subtitle="Collecte alternative pour les postes, en complément du compte de service AD/SSH — lecture seule."
       >
         <div className="flex items-center gap-2">
-          <DownloadDropdown color={MODULE_COLOR} />
+          <DownloadDropdown color={MODULE_COLOR} versionInfo={latestVersionInfo} />
           {isAdmin && (
             <button onClick={() => setTokenModal(true)}
               className="px-4 py-2 text-sm font-medium rounded-lg"
@@ -488,7 +539,14 @@ export default function Agents() {
               )}
               {agentList.map(a => (
                 <tr key={a.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>{a.hostname}</td>
+                  <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
+                    <span className="inline-flex items-center gap-2">
+                      {a.hostname}
+                      {a.pending_scan_requested_at && (
+                        <span title="Scan en cours…"><PageLoader size="sm" label="" color={MODULE_COLOR} /></span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-3">
                     <OsLogo os={a.os} size={18} />
                   </td>
@@ -506,6 +564,13 @@ export default function Agents() {
                   <td className="px-4 py-3 whitespace-nowrap"><StatusBadge value={a.status} /></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><TokenStateBadge status={a.token_status} /></td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {isAdmin && a.status === 'enrolled' && !a.pending_scan_requested_at && (
+                      <button onClick={() => handleRequestScan(a.id)}
+                        className="text-xs px-2.5 py-1.5 rounded-lg font-medium mr-1.5"
+                        style={{ background: 'var(--bg-secondary)', color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}33` }}>
+                        Scanner maintenant
+                      </button>
+                    )}
                     {isAdmin && a.status === 'enrolled' && (
                       <button onClick={() => setRevokeTarget(a)}
                         className="text-xs px-2.5 py-1.5 rounded-lg font-medium"

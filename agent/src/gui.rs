@@ -52,6 +52,14 @@ fn cmd_known_server() -> Option<String> {
     install::known_server()
 }
 
+/// Version du binaire actuellement en train de tourner (19/08/2026, demande explicite —
+/// affichée dans le bandeau) : sans ça, rien dans la fenêtre ne dit quelle version est
+/// réellement active, seul `allsafe-agent --version` en ligne de commande le révélait.
+#[tauri::command]
+fn cmd_version() -> &'static str {
+    crate::RELEASE_VERSION
+}
+
 #[tauri::command]
 fn cmd_quit(app: tauri::AppHandle) {
     app.exit(0);
@@ -82,6 +90,7 @@ pub fn run_install_wizard() -> anyhow::Result<()> {
             cmd_uninstall,
             cmd_known_server,
             cmd_quit,
+            cmd_version,
         ])
         .run(tauri::generate_context!())
         .map_err(|e| anyhow::anyhow!("erreur Tauri : {e}"))

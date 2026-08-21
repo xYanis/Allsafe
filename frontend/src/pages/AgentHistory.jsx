@@ -7,8 +7,8 @@ import { StatusBadge, VersionBadge, DistroBadge, formatDateTime, contactFreshnes
 import { MODULES } from '../constants/modules.js'
 import { formatDisks } from '../utils/hardware.js'
 import CriticiteBadge from '../components/CriticiteBadge.jsx'
-import NetworkStatusBadge from '../components/NetworkStatusBadge.jsx'
 import PendingUpdatesBadge from '../components/PendingUpdatesBadge.jsx'
+import { complianceSummary } from '../components/ComplianceChecklist.jsx'
 import { TYPE_LABELS } from '../utils/assetCategory.js'
 import { tintedCard } from '../utils/cardStyle.js'
 
@@ -42,6 +42,18 @@ function formatDuration(ms) {
   return remHours > 0 ? `${days} j ${remHours} h` : `${days} j`
 }
 
+// Actifs déjà en base avant l'ajout de la colonne `created_at` : rétrodatés à
+// 2020-01-01T00:00:00Z par la migration (backfill, cf. schema_patches.sql) — cette date
+// ne veut alors rien dire. On affiche "Avant le suivi" plutôt que ce faux horodatage.
+// Même sentinelle que le badge "Nouveau" d'Assets.jsx traite implicitement (isNewAsset :
+// une date 2020 n'est jamais "récente"), pas encore assez répandue pour un util partagé.
+const CREATED_AT_SENTINEL_MS = Date.parse('2020-01-01T00:00:00Z')
+function formatKnownSince(iso) {
+  if (!iso) return '—'
+  if (new Date(iso).getTime() === CREATED_AT_SENTINEL_MS) return 'Avant le suivi'
+  return formatDateTime(iso)
+}
+
 function StatTile({ label, children }) {
   return (
     <div className="rounded-xl p-3" style={tintedCard(MODULE_COLOR)}>
@@ -49,6 +61,35 @@ function StatTile({ label, children }) {
       <div className="text-sm mt-1" style={{ color: 'var(--text-primary)' }}>{children}</div>
     </div>
   )
+}
+
+// Résumé de durcissement (checks CIS-like de last_scan_result.compliance) — réutilise
+// complianceSummary (ComplianceChecklist.jsx), mêmes icônes/couleurs que la page Durcissement.
+// Remplace l'ancienne tuile "État réseau" (Meraki/PRTG), sans objet pour un poste suivi par
+// agent : jamais rapproché d'une sonde réseau (network_status toujours None), alors que le
+// durcissement EST le cœur de métier de l'agent. Cliquable vers le détail par actif.
+function ComplianceTileValue({ asset }) {
+  const s = complianceSummary(asset.last_scan_result?.compliance?.checks)
+  if (s.total === 0) return <span style={{ color: 'var(--text-muted)' }}>Non évalué</span>
+  return (
+    <Link to={`/durcissement?asset=${asset.id}`} className="inline-flex items-center gap-2 hover:underline"
+      title="Voir le détail du durcissement">
+      <span style={{ color: '#3fb950' }}>✓ {s.ok}</span>
+      <span style={{ color: '#fb8f44' }}>⚠ {s.warn}</span>
+      {s.unknown > 0 && <span style={{ color: 'var(--text-muted)' }}>— {s.unknown}</span>}
+    </Link>
+  )
+}
+
+// Fiabilité de la dernière collecte (agent → apply_scan_result) — remplace l'ancienne tuile
+// "Mises à jour disponibles", structurellement à 0 sur Windows (available_version jamais posé,
+// impasse assumée côté agent, cf. routers/assets.py::_asset_dict). Surface plutôt si la collecte
+// a abouti proprement : orthogonal au "Dernier contact" (fraîcheur) juste au-dessus.
+function ScanReliabilityValue({ result }) {
+  if (!result) return <span style={{ color: 'var(--text-muted)' }}>—</span>
+  if (result.reachable === false) return <span style={{ color: '#f85149' }}>Injoignable</span>
+  if (result.error) return <span style={{ color: '#fb8f44' }} title={result.error}>Partielle</span>
+  return <span style={{ color: '#3fb950' }}>Complète</span>
 }
 
 // Une entrée de la chronologie — un check-in normal, ou une coupure détectée par ce
@@ -82,6 +123,21 @@ function CheckinEntry({ item }) {
           reconnecté après {formatDuration(new Date(item.checked_in_at) - new Date(item.gap_started_at))}
         </p>
       )}
+    </div>
+  )
+}
+
+// Évènement fondateur de la frise (génération du jeton, enrôlement) — même carte à bordure
+// gauche que CheckinEntry, mais un jalon unique daté sans métriques. Toujours les plus anciens,
+// donc affichés tout en bas (la liste va du plus récent au plus ancien).
+function FoundingEntry({ title, subtitle, date, color }) {
+  return (
+    <div className="pl-3" style={{ borderLeft: `2px solid ${color}` }}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{title}</p>
+        <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{date ? formatDateTime(date) : '—'}</span>
+      </div>
+      {subtitle && <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{subtitle}</p>}
     </div>
   )
 }
@@ -200,12 +256,10 @@ export default function AgentHistory() {
                 </>
               ) : '—'}
             </StatTile>
-            <StatTile label="État réseau">
-              {asset.network_status ? <NetworkStatusBadge networkStatus={asset.network_status} /> : <span style={{ color: 'var(--text-muted)' }}>Non supervisé</span>}
-            </StatTile>
+            <StatTile label="Durcissement"><ComplianceTileValue asset={asset} /></StatTile>
             <StatTile label="Mises à jour en attente"><PendingUpdatesBadge pendingUpdates={asset.pending_updates} /></StatTile>
-            <StatTile label="Mises à jour disponibles">{asset.available_updates_count ?? 0}</StatTile>
-            <StatTile label="Connu depuis">{formatDateTime(asset.created_at)}</StatTile>
+            <StatTile label="Fiabilité du dernier scan"><ScanReliabilityValue result={asset.last_scan_result} /></StatTile>
+            <StatTile label="Connu depuis">{formatKnownSince(asset.created_at)}</StatTile>
           </>
         )}
       </div>
@@ -256,18 +310,38 @@ export default function AgentHistory() {
 
       <div style={CARD} className="p-6">
         <h2 className="text-sm font-semibold mb-3" style={{ color: 'var(--text-primary)' }}>Historique des contacts</h2>
-        {items.length === 0 ? (
-          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Aucun check-in enregistré pour cet agent.</p>
-        ) : (
-          <div className="space-y-3">
-            {items.map(item => <CheckinEntry key={item.id} item={item} />)}
-            {checkins.total > items.length && (
-              <p className="text-xs pl-3" style={{ color: 'var(--text-muted)' }}>
-                … et {checkins.total - items.length} de plus (non chargés)
-              </p>
-            )}
-          </div>
-        )}
+        <div className="space-y-3">
+          {items.length === 0 ? (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Aucun check-in enregistré pour cet agent.</p>
+          ) : (
+            <>
+              {items.map(item => <CheckinEntry key={item.id} item={item} />)}
+              {checkins.total > items.length && (
+                <p className="text-xs pl-3" style={{ color: 'var(--text-muted)' }}>
+                  … et {checkins.total - items.length} de plus (non chargés)
+                </p>
+              )}
+            </>
+          )}
+          {/* Évènements fondateurs — toujours les plus anciens, donc en bas (frise du plus récent
+              au plus ancien). Donnent l'historique "depuis le début" : enrôlement (validation par
+              le poste), puis génération du jeton (par qui/quand) tout en bas. Affichés même sans
+              aucun check-in (agent juste enrôlé). */}
+          <FoundingEntry
+            title="Poste enrôlé"
+            subtitle="Jeton validé par le poste, identité de l'agent créée"
+            date={agent.enrolled_at}
+            color="#3fb950"
+          />
+          <FoundingEntry
+            title="Jeton d'enrôlement généré"
+            subtitle={agent.enrollment_token_created_at
+              ? `par ${agent.enrollment_token_created_by || '—'}`
+              : 'Détails indisponibles (jeton révoqué ou supprimé)'}
+            date={agent.enrollment_token_created_at}
+            color={MODULE_COLOR}
+          />
+        </div>
       </div>
     </div>
   )

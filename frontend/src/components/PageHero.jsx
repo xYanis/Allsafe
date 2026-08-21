@@ -35,21 +35,32 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
   // hero (cf. note de tête de fichier) : une simple forme, jamais de pulsation/déplacement.
   const glowOpacity = isDark ? 0.4 : 0.22
   return (
-    <div className="relative overflow-hidden px-4 py-3 flex flex-wrap items-center justify-between gap-3" style={{
+    <div className="relative px-4 py-3 flex flex-wrap items-center justify-between gap-3" style={{
       ...CARD_SHAPE,
       background: `linear-gradient(135deg, color-mix(in srgb, ${color} 14%, var(--bg-card)), var(--bg-card) 65%)`,
       borderColor: `color-mix(in srgb, ${color} 28%, var(--border))`,
       boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
     }}>
-      <div className="absolute pointer-events-none" style={{
-        left: -40, top: '50%', transform: 'translateY(-50%)', width: 220, height: 220,
-        background: `radial-gradient(circle, ${color} 0%, transparent 70%)`,
-        filter: 'blur(40px)', opacity: glowOpacity, zIndex: 0,
-      }} />
-      <div className="hero-grid" style={{
-        maskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
-        WebkitMaskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
-      }} />
+      {/* Décor (lueur + trame de points) isolé dans son propre wrapper clippé
+          (18/08/2026, cf. audit) — auparavant l'`overflow-hidden` était posé sur le
+          conteneur entier, ce qui clippait aussi tout menu déroulant ouvert depuis
+          `children` (ex. NotificationHistory sur Dashboard.jsx, "l'affichage se
+          cache dans la tuile") : un enfant en `position: absolute` reste borné par
+          le premier ancêtre `overflow` non-`visible`, quel que soit son `z-index`.
+          `border-radius` seul (sur le conteneur ci-dessus) suffit à arrondir le
+          fond du hero lui-même — `overflow-hidden` n'était nécessaire que pour ces
+          deux éléments décoratifs qui débordent visuellement de la boîte. */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none" style={{ borderRadius: CARD_SHAPE.borderRadius }}>
+        <div className="absolute pointer-events-none" style={{
+          left: -40, top: '50%', transform: 'translateY(-50%)', width: 220, height: 220,
+          background: `radial-gradient(circle, ${color} 0%, transparent 70%)`,
+          filter: 'blur(40px)', opacity: glowOpacity, zIndex: 0,
+        }} />
+        <div className="hero-grid" style={{
+          maskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
+          WebkitMaskImage: `radial-gradient(ellipse ${gridMaskSize} at ${gridMaskPos}, black 0%, transparent 70%)`,
+        }} />
+      </div>
       <div className="relative z-[1] flex items-center gap-2.5 min-w-0">
         <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{
           background: `linear-gradient(155deg, ${color}, color-mix(in srgb, ${color} 55%, black))`,

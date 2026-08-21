@@ -1,6 +1,15 @@
 [package]
 name = "allsafe-agent"
-version = "0.1.5"
+# Version du crate — depuis le 19/08/2026, dédiée au suivi **Linux** (versionnement séparé
+# par plateforme, demande explicite). `cargo-deb` (cette version) ne permet PAS d'override de
+# version indépendant dans `[package.metadata.deb]` (`unknown field version`, testé en
+# conditions réelles) : c'est cette valeur, et uniquement elle, qui nomme le `.deb` généré
+# (`allsafe-agent_<version>-1_amd64.deb`). DOIT rester strictement synchronisée avec
+# `RELEASE_VERSION` côté Linux (`src/main.rs`) — les deux DOIVENT toujours être identiques,
+# ce n'est pas une coïncidence à vérifier mais une contrainte à maintenir à la main à chaque
+# bump. Windows vit entièrement à part : `wix/main.wxs::Version` + `RELEASE_VERSION` côté
+# Windows — ne JAMAIS bumper ce champ pour un changement Windows seul.
+version = "0.1.9"
 edition = "2021"
 description = "Agent Allsafe (lecture seule) pour postes Windows/Linux — complète le scan centralisé SSH/WinRM (cf. CLAUDE.md § non-intervention)."
 license = "Proprietary"

@@ -5,6 +5,7 @@ import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
+import { useGuidePreference } from '../contexts/GuidePreferenceContext.jsx'
 import { changeEmail, changePassword, integrationsStatus, mySessions, revokeMySession, scanPolicies, updateScanPolicy, runScanPolicyNow } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import PasswordInput from '../components/PasswordInput.jsx'
@@ -82,6 +83,7 @@ export default function Settings() {
   const { user, logout, refresh } = useAuth()
   const { names: analystNames } = useAnalysts()
   const { preferredAnalyst, setPreferredAnalyst } = useAnalystPreference()
+  const { guidesHidden, setGuidesHidden } = useGuidePreference()
   const [section, setSection] = useState('presentation')
 
   // Modification du compte (14/08/2026, demande utilisateur) — jusqu'ici seule la
@@ -277,14 +279,27 @@ export default function Settings() {
           )}
 
           {section === 'appearance' && (
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Thème</p>
-                <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                  {isDark ? 'Mode sombre' : 'Mode clair'}
-                </p>
+            <div className="space-y-5">
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Thème</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {isDark ? 'Mode sombre' : 'Mode clair'}
+                  </p>
+                </div>
+                <Switch checked={isDark} onChange={toggle} ariaLabel="Basculer le thème" />
               </div>
-              <Switch checked={isDark} onChange={toggle} ariaLabel="Basculer le thème" />
+              <div className="flex items-center justify-between gap-4 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Guides d'aide</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    {guidesHidden
+                      ? "Masqués — le bouton d'aide « ? » n'apparaît sur aucune page"
+                      : "Affichés — un bouton d'aide « ? » en bas à droite de chaque page"}
+                  </p>
+                </div>
+                <Switch checked={!guidesHidden} onChange={() => setGuidesHidden(v => !v)} ariaLabel="Afficher ou masquer les guides d'aide" />
+              </div>
             </div>
           )}
 

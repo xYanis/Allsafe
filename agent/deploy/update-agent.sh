@@ -37,7 +37,7 @@ version_json=$(curl -sf "$SERVER/api/agents/latest/version") || {
     log "Échec de récupération de la version côté serveur ($SERVER)"
     exit 1
 }
-latest_version=$(echo "$version_json" | grep -oP '"version"\s*:\s*"\K[^"]+')
+latest_version=$(echo "$version_json" | grep -oP '"version_linux"\s*:\s*"\K[^"]+')
 expected_sha256=$(echo "$version_json" | grep -oP '"sha256_linux"\s*:\s*"\K[^"]+' || true)
 
 installed_version=""

@@ -18,11 +18,18 @@ pub struct AgentConfig {
     pub os: String,
 }
 
+/// Dossier `%ProgramData%\allsafe-agent` — `pub` (19/08/2026) pour être réutilisé par
+/// `install::uninstall()` (suppression des résidus à la désinstallation, demande explicite) :
+/// une seule construction du chemin, pas de duplication de la résolution `%ProgramData%`.
 #[cfg(target_os = "windows")]
-fn config_path() -> PathBuf {
+pub fn data_dir() -> PathBuf {
     PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into()))
         .join("allsafe-agent")
-        .join("agent.json")
+}
+
+#[cfg(target_os = "windows")]
+fn config_path() -> PathBuf {
+    data_dir().join("agent.json")
 }
 
 #[cfg(not(target_os = "windows"))]

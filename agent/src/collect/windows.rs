@@ -8,7 +8,10 @@
 //! que le registre — seuls les checks de durcissement et l'inventaire applicatif, illisibles
 //! autrement en lecture seule, passent par le registre.
 
-use crate::model::{Check, CheckinPayload, Compliance, Detected, Disk, Hardware, Package};
+use crate::model::{
+    AuditCoverage, Check, CheckinPayload, Compliance, Detected, Disk, Hardware, LocalUser,
+    Package, PersistenceEntry, StateSnapshot,
+};
 use std::process::Command;
 use sysinfo::{Disks, Networks, System};
 use winreg::enums::*;
@@ -476,6 +479,166 @@ fn network_shares_everyone_check() -> Check {
     }
 }
 
+// ─── Détection d'évènements sensibles — socle diff (19/08/2026, docs/AGENT_DETECTION.md) ──
+// Même principe que collect/linux.rs : l'agent envoie l'état brut à chaque check-in, le
+// serveur compare au dernier snapshot connu et génère les détections (services/agent_detection.py).
+// PowerShell + `ConvertTo-Json` plutôt que du parsing texte (contrairement à
+// `local_admins_check()`/`net localgroup` ci-dessus, dont le filtrage par mots-clés est
+// dépendant de la langue d'installation Windows, FR/EN codés en dur) — plus robuste pour un
+// diff qui doit rester fiable, pas juste un affichage informatif à l'utilisateur.
+
+/// Exécute un script PowerShell et parse sa sortie `ConvertTo-Json -Compress` en JSON —
+/// `@(...)` autour du script force un contexte tableau (sinon PowerShell 5.1, seule version
+/// garantie présente sur ce parc, sérialise un résultat à 0/1 élément comme `null`/objet nu
+/// au lieu d'un tableau, cassant le parsing pour ce cas précis).
+///
+/// `Command::new("powershell")` en arguments séparés (19/08/2026, incident réel constaté sur
+/// `armadasenonches` — les 4 appels de ce module sont tous revenus vides côté serveur alors
+/// qu'un Windows Server a toujours au moins un compte Administrateur/des services en
+/// démarrage automatique) — **pas** `run()` ci-dessus (`cmd /C "powershell ... \"...\""`,
+/// utilisé par le reste de ce fichier) : les scripts de ce module imbriquent `@{...}`/`{...}`/
+/// guillemets sur plusieurs niveaux (`Select-Object @{N=...;E={...}}`), un terrain nettement
+/// plus favorable à une mauvaise réinterprétation des guillemets par `cmd.exe` lui-même
+/// (`/C` a ses propres règles de dépouillement de guillemets, distinctes de celles de
+/// PowerShell) que les commandes plus simples qui utilisaient `run()` jusqu'ici sans souci.
+/// Contourné en évitant `cmd.exe` comme intermédiaire : Rust échappe déjà correctement les
+/// arguments pour le processus enfant qu'il lance (convention MSVCRT, celle que
+/// `powershell.exe` sait lire nativement) — un seul niveau d'échappement au lieu de deux.
+fn ps_json(script: &str) -> Option<serde_json::Value> {
+    // `$OutputEncoding = ...UTF8` (19/08/2026, bug réel constaté — "Invité" remonté en
+    // "Invit�") : PowerShell 5.1 encode sa sortie standard dans la page de code ANSI
+    // système par défaut dès qu'elle est redirigée (pas un vrai terminal, notre cas via
+    // `.output()`) — casse tout caractère accentué (comptes/tâches en français). Forcer
+    // l'encodage de sortie en UTF-8, celui que `String::from_utf8_lossy` ci-dessous suppose.
+    let full = format!(
+        "$OutputEncoding = [System.Text.Encoding]::UTF8; @({script}) | ConvertTo-Json -Compress"
+    );
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &full])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let out = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    serde_json::from_str(&out).ok()
+}
+
+/// Comptes de bruit présents par défaut sur (quasi) toute installation Windows, jamais
+/// pertinents pour la détection (jamais activés/désactivés par un attaquant, cf.
+/// docs/AGENT_DETECTION.md § "filtrage strict dès le départ" — même principe que le filtre
+/// UID côté Linux, `collect/linux.rs::HUMAN_UID_MIN`).
+const WINDOWS_NOISE_ACCOUNTS: &[&str] = &["Guest", "DefaultAccount", "WDAGUtilityAccount", "defaultuser0"];
+
+fn local_users_snapshot() -> Vec<LocalUser> {
+    let Some(json) = ps_json("Get-LocalUser | Select-Object Name, @{N='Sid';E={$_.SID.Value}}, Enabled") else {
+        return Vec::new();
+    };
+    let Some(arr) = json.as_array() else { return Vec::new() };
+    arr.iter()
+        .filter_map(|v| {
+            let name = v.get("Name")?.as_str()?.to_string();
+            if WINDOWS_NOISE_ACCOUNTS.iter().any(|n| n.eq_ignore_ascii_case(&name)) {
+                return None;
+            }
+            let sid = v.get("Sid").and_then(|s| s.as_str()).unwrap_or_default().to_string();
+            let enabled = v.get("Enabled").and_then(|e| e.as_bool()).unwrap_or(true);
+            Some(LocalUser { name, sid_or_uid: sid, enabled })
+        })
+        .collect()
+}
+
+/// Membres du groupe `Administrators` local — `Get-LocalGroupMember`, pas `net localgroup`
+/// (cf. commentaire de tête ci-dessus). `-ErrorAction SilentlyContinue` : cette cmdlet lève
+/// une exception si un membre a un SID orphelin (compte de domaine supprimé) — connu, ne
+/// doit pas faire échouer toute la collecte pour un seul membre irrésolvable.
+///
+/// `-SID 'S-1-5-32-544'` (19/08/2026, bug réel constaté sur `armadasenonches` : revenait
+/// systématiquement vide) plutôt que `-Group 'Administrators'` — le NOM du groupe intégré
+/// est LOCALISÉ ("Administrateurs" sur un Windows en français), `-Group 'Administrators'`
+/// échoue donc silencieusement (`-ErrorAction SilentlyContinue` avale l'erreur) sur tout
+/// poste non anglophone. Le SID bien connu du groupe Administrators local est identique sur
+/// toute installation Windows quelle que soit la langue — même principe que `*S-1-5-32-544`
+/// déjà utilisé dans `config.rs::restrict_permissions`.
+fn admin_members_snapshot() -> Vec<String> {
+    let Some(json) = ps_json("Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Name") else {
+        return Vec::new();
+    };
+    match json.as_array() {
+        Some(arr) => arr.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        // ConvertTo-Json sur un tableau à 1 élément malgré @() ne devrait pas arriver ici
+        // (déjà couvert par ps_json), mais un scalaire JSON (chaîne nue) reste possible si
+        // PowerShell aplatit malgré tout — filet de sécurité plutôt qu'un tableau vide silencieux.
+        None => json.as_str().map(|s| vec![s.to_string()]).unwrap_or_default(),
+    }
+}
+
+/// Persistance : tâches planifiées non désactivées + services au démarrage automatique.
+/// `TaskPath+TaskName` (pas juste le nom) : deux tâches de dossiers différents peuvent
+/// porter le même nom, le chemin fait partie de l'identité pour le diff.
+fn persistence_snapshot() -> Vec<PersistenceEntry> {
+    let mut entries = Vec::new();
+
+    if let Some(json) = ps_json(
+        "Get-ScheduledTask | Where-Object {$_.State -ne 'Disabled'} | \
+         Select-Object @{N='Full';E={$_.TaskPath + $_.TaskName}}",
+    ) {
+        if let Some(arr) = json.as_array() {
+            for v in arr {
+                if let Some(name) = v.get("Full").and_then(|f| f.as_str()) {
+                    entries.push(PersistenceEntry { kind: "scheduled_task".to_string(), name: name.to_string() });
+                }
+            }
+        }
+    }
+
+    if let Some(json) = ps_json(
+        "Get-CimInstance Win32_Service | Where-Object {$_.StartMode -eq 'Auto'} | Select-Object -ExpandProperty Name",
+    ) {
+        if let Some(arr) = json.as_array() {
+            for v in arr {
+                if let Some(name) = v.as_str() {
+                    entries.push(PersistenceEntry { kind: "service".to_string(), name: name.to_string() });
+                }
+            }
+        }
+    }
+
+    entries
+}
+
+fn state_snapshot() -> StateSnapshot {
+    StateSnapshot {
+        local_users: local_users_snapshot(),
+        admin_members: admin_members_snapshot(),
+        persistence: persistence_snapshot(),
+    }
+}
+
+/// L'agent CONSTATE si l'audit de création de processus + ligne de commande (GPO,
+/// prérequis pour `suspicious_process`/`4688`, cf. docs/AGENT_DETECTION.md § Prérequis OS)
+/// est actif, ne l'active jamais lui-même.
+///
+/// `command_line_logging` : clé de registre `ProcessCreationIncludeCmdLine_Enabled`
+/// (DWORD) — locale-indépendante, contrairement à la sortie texte d'`auditpol` ("Success"/
+/// "Succès" selon la langue d'installation). `process_auditing` : best-effort sur `auditpol`
+/// (anglais uniquement pour l'instant, comme `screen_lock_check` côté Linux reste GNOME
+/// uniquement) — honnête plutôt que de deviner sur un poste en français.
+fn audit_coverage() -> AuditCoverage {
+    let command_line_logging = reg_dword(
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System\Audit",
+        "ProcessCreationIncludeCmdLine_Enabled",
+    ) == Some(1);
+
+    let auditpol_out = run_lossy(r#"auditpol /get /subcategory:"Process Creation""#).to_lowercase();
+    let process_auditing = auditpol_out.contains("success");
+
+    AuditCoverage::from([
+        ("process_auditing".to_string(), process_auditing),
+        ("command_line_logging".to_string(), command_line_logging),
+    ])
+}
+
 pub fn collect() -> CheckinPayload {
     let (caption, version) = os_caption();
     let hardware = hardware_and_network();
@@ -505,8 +668,15 @@ pub fn collect() -> CheckinPayload {
         hardware,
         compliance: Compliance { checks },
         error: None,
-        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        agent_version: crate::RELEASE_VERSION.to_string(),
         offline_since: None,
         failed_attempts: None,
+        // Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — socle
+        // diff seulement à ce stade (comptes/admins/persistance), comme côté Linux.
+        // L'enrichissement journal natif (Event Log Security, 4688/4720/4732...) reste une
+        // passe suivante — security_events vide pour l'instant.
+        security_events: Vec::new(),
+        audit_coverage: Some(self::audit_coverage()),
+        state_snapshot: Some(self::state_snapshot()),
     }
 }

@@ -135,6 +135,23 @@ démarrage de l'app).
   Conséquence pratique : les nouvelles vulnérabilités révélées par un scan/ajout n'apparaissent que
   quelques secondes plus tard, pas dans la réponse HTTP elle-même.
 
+### Performance sur le volume (`asset_match_context()`/`still_matches_ctx()`, session 28/07/2026)
+
+`still_matches()` a deux variantes : la forme unitaire (une CVE à la fois) et une forme optimisée pour
+tester **beaucoup** de CVE contre un même actif — `asset_match_context()` calcule une fois par actif
+les données dérivées (paquets normalisés, candidats produit...), puis `still_matches_ctx()` réutilise
+ce contexte CVE par CVE. À utiliser dès qu'on boucle sur un volume de CVE pour un même actif ; la forme
+unitaire reste appropriée pour un test au cas par cas.
+
+`run_cpe_matching`/`run_cpe_matching_for_asset` chargent les CVE avec `load_only(..., raiseload=True)`
+(évite de matérialiser `raw_data`, ~377 Mo en base au total) et cèdent la main via `asyncio.sleep(0)`
+périodiquement dans la double boucle actif × CVE — sans ce `sleep(0)`, le calcul gelait l'event loop
+du backend entier le temps du matching complet (10/08/2026).
+
+**Windows — dérivation des candidats produit** : passe par `WindowsAppMapping` (table réglable sans
+code, CRUD dans `routers/windows_app_mappings.py`), pas `_package_candidates` (conventions de nommage
+Debian/RPM, sans rapport avec le texte libre des noms d'applications Windows).
+
 ### Construction du CPE pour un actif (`_build_cpe()`, `services/asset_importer.py`)
 Un actif **sans `cpe_list`** ne matche jamais aucune CVE (bug rencontré : un actif ajouté à la main
 via "Ajouter un actif" restait à 0 CVE indéfiniment, `cpe_list` vide par défaut). `_build_cpe(os_name,

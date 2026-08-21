@@ -16,9 +16,24 @@
 //! poste Windows (élévation, écriture registre, SCM) — cf. docs/AGENTS.md § Vérification.
 
 use std::ffi::OsString;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+/// Flags de création de processus Win32 (19/08/2026, bug réel constaté — 2e mise à jour
+/// consécutive sans effet, l'ancienne version restant en place cette fois au lieu d'être
+/// vidée) : les apps Tauri/WebView2 tournent souvent dans un **Job Object** Windows qui tue
+/// automatiquement tous les processus enfants à la fermeture du parent — l'aide PowerShell
+/// détachée (ci-dessous, dans `apply_update`/`uninstall`) mourrait donc EN MÊME TEMPS que
+/// cette fenêtre se ferme (`app.exit(0)`), avant même d'avoir pu attendre puis lancer
+/// `msiexec`/`Remove-Item`. `CREATE_BREAKAWAY_FROM_JOB` (0x01000000) fait explicitement
+/// sortir le processus enfant du job object du parent — la plupart des jobs par défaut
+/// l'autorisent (deny breakaway est l'exception, pas la règle). `DETACHED_PROCESS`
+/// (0x00000008) en plus : pas de console héritée (cohérent avec `Stdio::null()` déjà posé
+/// sur les handles).
+const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+const DETACHED_PROCESS: u32 = 0x0000_0008;
 use windows_service::service::{
     ServiceAccess, ServiceErrorControl, ServiceInfo, ServiceStartType, ServiceState, ServiceType,
 };
@@ -211,6 +226,7 @@ pub async fn install(token: Option<String>, server: Option<String>) -> Result<()
 }
 
 async fn enroll(token: String, server: String) -> Result<()> {
+    let server = crate::api::normalize_server(&server);
     let hostname = crate::collect::hostname();
     if hostname.is_empty() {
         anyhow::bail!("impossible de déterminer le nom d'hôte local");
@@ -229,19 +245,21 @@ pub fn known_server() -> Option<String> {
     crate::config::AgentConfig::load().ok().map(|c| c.server)
 }
 
-/// Compare la version compilée (`CARGO_PKG_VERSION`) à celle publiée par le serveur
-/// (`GET /latest/version`, même route que `agent/deploy/update-agent.*`). `Ok(Some(v))`
-/// si une version différente est disponible, `Ok(None)` si déjà à jour.
+/// Compare `RELEASE_VERSION` (Windows) à celle publiée par le serveur (`GET /latest/version`,
+/// même route que `agent/deploy/update-agent.ps1`). `Ok(Some(v))` si une version différente
+/// est disponible, `Ok(None)` si déjà à jour. `version_windows` spécifiquement (19/08/2026,
+/// versionnement séparé par plateforme, cf. `main.rs::RELEASE_VERSION`) — jamais
+/// `version_linux`, sans rapport avec ce binaire.
 pub async fn check_update(server: &str) -> Result<Option<String>> {
     crate::api::warn_if_not_https(server);
-    let VersionResponse { version: latest, .. } = fetch_version_info(server).await?;
-    let current = env!("CARGO_PKG_VERSION");
+    let VersionResponse { version_windows: latest, .. } = fetch_version_info(server).await?;
+    let current = crate::RELEASE_VERSION;
     Ok((latest != current).then_some(latest))
 }
 
 #[derive(serde::Deserialize)]
 struct VersionResponse {
-    version: String,
+    version_windows: String,
     /// SHA-256 hexadécimal du `.msi` actuellement publié (18/08/2026, cf.
     /// audit/AUDIT_SECURITE.md #13) — `None` si le serveur ne l'expose pas encore
     /// (rétrocompatibilité avec un backend pas encore mis à jour : `apply_update` refuse
@@ -250,6 +268,7 @@ struct VersionResponse {
 }
 
 async fn fetch_version_info(server: &str) -> Result<VersionResponse> {
+    let server = crate::api::normalize_server(server);
     let url = format!("{}/api/agents/latest/version", server.trim_end_matches('/'));
     let resp = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
@@ -292,6 +311,8 @@ async fn fetch_version_info(server: &str) -> Result<VersionResponse> {
 /// de confiance standard tant que ce déploiement n'existe pas.
 pub async fn apply_update(server: &str) -> Result<()> {
     require_elevated()?;
+    let server = crate::api::normalize_server(server);
+    let server = server.as_str();
     crate::api::warn_if_not_https(server);
 
     let version_info = fetch_version_info(server).await?;
@@ -332,12 +353,78 @@ pub async fn apply_update(server: &str) -> Result<()> {
     std::fs::write(&tmp, &bytes).with_context(|| format!("écriture de {}", tmp.display()))?;
 
     let log = std::env::temp_dir().join("allsafe-agent-update-install.log");
+
+    // Auto-verrouillage (19/08/2026, incident réel poste "armadasenonches", en plus du bug
+    // <Upgrade> de wix/main.wxs corrigé le même jour) : le composant `MainExecutable` du
+    // .msi cible exactement `install_exe_path()` — si CE process qui exécute `apply_update`
+    // tourne depuis ce même fichier (cas normal : GUI lancée depuis l'installation existante,
+    // pas un .exe fraîchement téléchargé, cf. commentaire de tête ci-dessus), `msiexec` ne
+    // peut pas écraser un binaire que son propre lanceur a encore ouvert — Windows Installer
+    // dévie alors sur son mécanisme de remplacement différé au reboot (`msiexec` rend quand
+    // même succès, mais rien ne change avant un redémarrage). Contourné en laissant CE
+    // process se terminer PROPREMENT avant que `msiexec` ne démarre :
+    //   1. une aide PowerShell détachée est lancée, elle attend explicitement (`Wait-Process`,
+    //      pas un `sleep` deviné — l'ordre est garanti, pas approximé) la fin du PID courant ;
+    //   2. `apply_update` rend `Ok(())` tout de suite, la GUI affiche le succès puis se ferme
+    //      elle-même après quelques secondes (mécanisme déjà en place,
+    //      `ui/app.js::autoQuitAfterSuccess` → `cmd_quit` → `app.exit(0)`) ;
+    //   3. `app.exit(0)` libère enfin le verrou sur le fichier, l'aide déjà en attente lance
+    //      alors `msiexec` immédiatement.
+    // Contrairement au choix assumé dans `uninstall()` plus bas ("pas d'astuce fragile de
+    // suppression différée") : là-bas, laisser l'utilisateur supprimer un fichier à la main
+    // est une dégradation acceptable (rare, non bloquant). Ici, sans ce détour, la mise à
+    // jour depuis la GUI installée — le chemin normal, pas un cas limite — ne marche
+    // simplement jamais : pas d'alternative propre, `Wait-Process` rend la séquence
+    // déterministe plutôt que fragile.
+    // Comparaison CANONIQUE (19/08/2026, bug réel constaté sur `armadasenonches` — mise à
+    // jour "réussie" rejouée en boucle, la même version reproposée après relance) : une
+    // égalité brute `PathBuf == PathBuf` entre `current_exe()` (souvent préfixé `\\?\` par
+    // Windows) et `install_exe_path()` (chaîne codée en dur, jamais préfixée) échoue même
+    // quand c'est EXACTEMENT le même fichier — `self_locking` restait `false` à tort, le
+    // code retombait sur le chemin synchrone ci-dessous (verrouillé), `msiexec` diffère
+    // alors silencieusement le remplacement au reboot tout en rendant "succès" (comportement
+    // Windows Installer standard sur un fichier en cours d'usage, jamais de reboot en
+    // pratique = jamais remplacé). `canonicalize()` normalise les deux chemins à la même
+    // forme avant de comparer.
+    let self_locking = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .and_then(|cur| std::fs::canonicalize(install_exe_path()).map(|target| cur == target))
+        .unwrap_or(false);
+    if self_locking {
+        let pid = std::process::id();
+        let helper = format!(
+            "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
+             Start-Process msiexec -ArgumentList '/i','{msi}','/qn','/l*v','{log}' -Wait",
+            msi = tmp.display(),
+            log = log.display(),
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &helper])
+            .creation_flags(CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .context("lancement de l'aide de mise à jour détachée")?;
+        return Ok(());
+    }
+
+    // stdio explicitement nulle (19/08/2026, incident réel poste "armadasenonches") :
+    // sans ça, `Command::status()` hérite par défaut des handles stdio du process appelant
+    // — or `apply_update` est appelé depuis la GUI Tauri (`gui.rs::cmd_apply_update`), un
+    // exécutable `windows_subsystem` sans console, donc sans handles stdio valides.
+    // `CreateProcess` échoue alors avec `ERROR_NOT_SUPPORTED` ("os error 50"), bug connu de
+    // `std::process` sous Windows pour les apps GUI (rust-lang/rust#89191) — rien à voir
+    // avec msiexec/l'élévation, déjà vérifiée par `require_elevated()` juste au-dessus.
     let status = std::process::Command::new("msiexec")
         .arg("/i")
         .arg(&tmp)
         .arg("/qn")
         .arg("/l*v")
         .arg(&log)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .status()
         .context("lancement de msiexec")?;
     let _ = std::fs::remove_file(&tmp);
@@ -353,6 +440,15 @@ pub async fn apply_update(server: &str) -> Result<()> {
 /// exécutable Windows ne peut pas se supprimer lui-même pendant qu'il tourne ; laissé à
 /// l'utilisateur (message affiché) plutôt qu'une astuce fragile de suppression différée
 /// (script `cmd` détaché, planificateur de tâches...).
+/// Suppression des fichiers résiduels (19/08/2026, demande explicite — avant, laissée à
+/// l'utilisateur : `Program Files\Allsafe Agent`/`%ProgramData%\allsafe-agent` restaient sur
+/// le disque après désinstallation "un exécutable ne peut pas se supprimer lui-même en cours
+/// d'exécution"). `%ProgramData%\allsafe-agent` (config/état, jamais verrouillé une fois le
+/// service arrêté ci-dessus) est supprimé directement, tout de suite. `Program Files\Allsafe
+/// Agent` (contient l'exe lui-même) reprend le même contournement que
+/// `apply_update` ci-dessus (auto-verrouillage si ce process tourne depuis cet emplacement,
+/// cf. son commentaire détaillé) — aide détachée qui attend la fermeture de CETTE fenêtre
+/// avant de supprimer le dossier.
 pub fn uninstall() -> Result<()> {
     require_elevated()?;
 
@@ -371,10 +467,42 @@ pub fn uninstall() -> Result<()> {
 
     remove_from_system_path(&PathBuf::from(INSTALL_DIR)).context("retrait du PATH système")?;
 
-    println!(
-        "Service désinstallé. Supprimer manuellement \"{INSTALL_DIR}\" et \
-         \"%ProgramData%\\allsafe-agent\" si besoin (l'exécutable ne peut pas se supprimer lui-même)."
-    );
+    // `%ProgramData%\allsafe-agent` — service déjà arrêté ci-dessus, plus aucun process ne
+    // tient ces fichiers ouverts. Best-effort (`let _`) : un résidu non supprimable (droits,
+    // fichier ouvert par un antivirus...) ne doit pas faire échouer toute la désinstallation,
+    // le service est déjà proprement retiré à ce stade.
+    let _ = std::fs::remove_dir_all(crate::config::data_dir());
+
+    let self_locking = std::env::current_exe()
+        .and_then(std::fs::canonicalize)
+        .and_then(|cur| std::fs::canonicalize(install_exe_path()).map(|target| cur == target))
+        .unwrap_or(false);
+
+    if self_locking {
+        let pid = std::process::id();
+        let helper = format!(
+            "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
+             Remove-Item -LiteralPath '{dir}' -Recurse -Force -ErrorAction SilentlyContinue",
+            dir = INSTALL_DIR,
+        );
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &helper])
+            .creation_flags(CREATE_BREAKAWAY_FROM_JOB | DETACHED_PROCESS)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .context("lancement de l'aide de nettoyage détachée")?;
+        // Utile seulement en usage CLI (`allsafe-agent uninstall`) — la GUI n'affiche jamais
+        // stdout, elle a son propre message de succès côté `ui/app.js`.
+        println!("Service désinstallé. \"{INSTALL_DIR}\" sera supprimé dès la fermeture de ce process.");
+    } else {
+        // Invoqué depuis un exe qui n'est PAS celui installé (ex. `allsafe-agent uninstall`
+        // lancé depuis un `.exe` téléchargé à part) : rien ne verrouille `INSTALL_DIR`,
+        // suppression directe.
+        let _ = std::fs::remove_dir_all(INSTALL_DIR);
+    }
+
     Ok(())
 }
 

@@ -29,7 +29,9 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 
-const MODULE_COLOR = '#8b949e' // MODULES.parametres.color — module Paramètres, cf. PageHero ci-dessous
+const MODULE_COLOR = '#fb8f44' // orange Administration (demande utilisateur, 19/08/2026) — diverge
+// volontairement du gris #8b949e de Paramètres : reprend l'orange déjà utilisé sur cette page (boutons
+// « + Ajouter » d'Utilisateurs/Analystes/Services), pour thémer hero + nav + carte + filtres d'un seul point.
 const CARD = tintedCard(MODULE_COLOR)
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
@@ -1159,7 +1161,7 @@ export default function AdministrationSecurity() {
       </button>
       <PageHero
         icon="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.964 0a9 9 0 10-11.964 0m11.964 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"
-        title="Administration" color="#8b949e"
+        title="Administration" color={MODULE_COLOR}
         subtitle="Journal de connexion, administration de la base et comptes utilisateurs — réservé aux administrateurs"
       />
 
@@ -1182,23 +1184,23 @@ export default function AdministrationSecurity() {
               <button key={t.key} onClick={() => setTab(t.key)} title={navCollapsed ? t.label : undefined}
                 className="flex-shrink-0 w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors"
                 style={{
-                  background: active ? 'color-mix(in srgb, var(--accent-blue) 12%, transparent)' : 'transparent',
-                  boxShadow: active ? 'inset 3px 0 0 0 var(--accent-blue)' : 'none',
+                  background: active ? `color-mix(in srgb, ${MODULE_COLOR} 12%, transparent)` : 'transparent',
+                  boxShadow: active ? `inset 3px 0 0 0 ${MODULE_COLOR}` : 'none',
                   justifyContent: navCollapsed ? 'center' : 'flex-start',
                 }}
                 onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--bg-secondary)' }}
                 onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
               >
                 <span className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{
-                  background: active ? 'color-mix(in srgb, var(--accent-blue) 20%, transparent)' : 'var(--bg-secondary)',
-                  color: active ? 'var(--accent-blue)' : 'var(--text-muted)',
+                  background: active ? `color-mix(in srgb, ${MODULE_COLOR} 20%, transparent)` : 'var(--bg-secondary)',
+                  color: active ? MODULE_COLOR : 'var(--text-muted)',
                 }}>
                   <TabIcon name={t.key} />
                 </span>
                 {!navCollapsed && (
                   <span className="min-w-0 flex-1 flex items-center justify-between gap-2">
                     <span className="min-w-0">
-                      <span className="block text-sm font-medium truncate" style={{ color: active ? 'var(--accent-blue)' : 'var(--text-primary)' }}>{t.label}</span>
+                      <span className="block text-sm font-medium truncate" style={{ color: active ? MODULE_COLOR : 'var(--text-primary)' }}>{t.label}</span>
                       <span className="hidden lg:block text-xs truncate" style={{ color: 'var(--text-muted)' }}>{t.desc}</span>
                     </span>
                     {t.key === 'users' && pendingResets > 0 && (

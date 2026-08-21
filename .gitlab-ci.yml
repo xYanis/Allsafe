@@ -78,18 +78,28 @@ build-agent:
     # vérifications post-build ci-dessous, pas pour construire le `.msi` lui-même.
     # osslsigncode (18/08/2026) : signature Authenticode du `.exe`/`.msi`, cf. bloc signature
     # plus bas — tourne nativement sous Linux, pas besoin de `signtool`/Windows SDK.
-    - apt-get update && apt-get install -y --no-install-recommends mingw-w64 wixl msitools osslsigncode
+    - apt-get update && apt-get install -y --no-install-recommends mingw-w64 wixl msitools osslsigncode musl-tools
     # gcc-mingw-w64 est un paquet "alternatives" (posix/win32) — Rust exige le runtime posix
     # (`x86_64-pc-windows-gnu` ne supporte pas le modèle de threads win32), jamais garanti par
     # défaut après un `apt-get install` frais (constaté en session : bascule sur win32 par défaut).
     - update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
     - update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
-    - rustup target add x86_64-pc-windows-gnu
+    - rustup target add x86_64-pc-windows-gnu x86_64-unknown-linux-musl
     - cargo install cargo-deb --locked
     - cd agent
     - cargo build --release --target x86_64-pc-windows-gnu
     - wixl -a x64 -v wix/main.wxs -o allsafe-agent.msi
-    - cargo deb
+    # --target x86_64-unknown-linux-musl (19/08/2026, cf. STATUS.md — incident réel : `apt
+    # install` d'un .deb construit nativement dans ce conteneur `rust:1-trixie` échouait sur
+    # le parc cible avec `Dépend: libc6 (>= 2.39) mais 2.36-9+deb12u14 devra être installé`)
+    # — l'image CI (Debian 13/trixie, glibc 2.41, nécessaire pour `wixl` côté Windows ci-dessus)
+    # est plus récente que le parc Linux réel (Debian 12/bookworm, glibc 2.36). Le binaire Linux
+    # buildé nativement héritait donc d'un plancher glibc que le parc ne satisfait pas. musl
+    # (lien 100% statique, `ldd` confirme "statically linked") élimine le problème *pour de bon*
+    # plutôt que de juste viser une distro de build plus ancienne (qui aurait fini par reproduire
+    # le même écart un jour) — vérifié en conditions réelles : `Depends:` du `.deb` généré est
+    # vide (`dpkg-deb --info`), aucune dépendance glibc à satisfaire côté cible.
+    - cargo deb --target x86_64-unknown-linux-musl
     # Vérifications déjà connues pour être silencieusement cassées côté wixl/msitools par le
     # passé (cf. README § Build) — le job échoue net plutôt que de publier un artefact
     # défectueux sans le signaler.

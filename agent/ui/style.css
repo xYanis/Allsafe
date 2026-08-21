@@ -99,6 +99,25 @@ input, textarea {
   color: transparent;
 }
 
+/* Version affichée dans le bandeau (19/08/2026, demande explicite) — sans elle, rien dans
+   la fenêtre ne disait quelle version tourne réellement (seul `--version` en ligne de
+   commande le révélait). `margin-left: auto` la pousse à droite du titre. */
+.banner-version {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--brand);
+  background: rgba(245, 197, 24, 0.12);
+  border: 1px solid rgba(245, 197, 24, 0.3);
+  white-space: nowrap;
+}
+
+.banner-version:empty {
+  display: none;
+}
+
 main {
   padding: 20px 24px 24px;
   height: calc(100% - 64px);
@@ -204,6 +223,40 @@ main {
   background: rgba(248, 81, 73, 0.12);
   border-color: rgba(248, 81, 73, 0.35);
   color: var(--danger);
+}
+
+/* Barre de progression indéterminée (19/08/2026, demande explicite) — pas de pourcentage
+   réel remontable depuis Rust (une opération = un seul appel `invoke` async, sans étapes
+   intermédiaires signalées), donc une animation "va-et-vient" honnête plutôt qu'une fausse
+   barre à pourcentage. Affichée pendant qu'une opération tourne (état "info" de `.status`
+   ci-dessus), masquée sur succès/échec — cf. `app.js::setProgress`. */
+.progress-track {
+  position: relative;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.progress-track[hidden] {
+  display: none;
+}
+
+.progress-fill {
+  position: absolute;
+  top: 0;
+  left: -35%;
+  height: 100%;
+  width: 35%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--brand), transparent);
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes progress-indeterminate {
+  0%   { left: -35%; }
+  100% { left: 100%; }
 }
 
 .menu-list {

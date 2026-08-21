@@ -13,7 +13,7 @@
   <Product Id="*"
            Name="Allsafe Agent"
            Language="1033"
-           Version="0.1.4.0"
+           Version="0.1.19.0"
            Manufacturer="Allsafe"
            UpgradeCode="F7307503-099E-4424-9611-81DE4739933C">
 
@@ -30,6 +30,53 @@
              Manufacturer="Allsafe" />
 
     <Media Id="1" Cabinet="allsafe.cab" EmbedCab="yes" />
+
+    <!-- Mise à jour majeure (19/08/2026, bug réel constaté — install::apply_update lance
+         `msiexec /i` sur un .msi rebuild à chaque release avec un NOUVEAU ProductCode
+         (Product Id="*" ci-dessus, volontaire) : sans cette table `Upgrade`, Windows
+         Installer n'a aucun moyen de savoir que ce nouveau produit doit REMPLACER
+         l'ancien — `msiexec` rend un succès (exit 0) sans que rien de significatif ne se
+         passe (constaté sur `armadasenonches` : "succès" affiché côté agent, mais version
+         inchangée en base après). `UpgradeCode` (fixe, jamais régénéré, cf. commentaire
+         d'en-tête) identifie la FAMILLE de produits à travers tous les ProductCode ; la
+         plage de versions couvre tout sauf la version en cours d'installation elle-même.
+         `RemoveExistingProducts` dans la séquence déclenche la désinstallation de l'ancien
+         produit détecté.
+
+         ⚠️ **`After="InstallFinalize"` (pas `InstallValidate`), corrigé le même jour après un
+         2e incident réel** : le composant `MainExecutable` ci-dessous garde un GUID FIXE
+         entre les versions (délibéré, pour que le remplacement de fichier passe par le
+         comptage de références MSI plutôt qu'une suppression/recréation) — un piège MSI
+         documenté (Microsoft) veut qu'avec un composant PARTAGÉ ainsi entre l'ancien et le
+         nouveau produit, programmer `RemoveExistingProducts` TÔT (comme la première version
+         de ce correctif le faisait) retire l'ancien produit AVANT que le nouveau n'ait posé
+         ses propres fichiers : le comptage de références du composant partagé tombe à zéro,
+         ses fichiers sont supprimés, et rien ne les remet en place — reproduit en conditions
+         réelles sur `armadasenonches` (mise à jour "réussie" mais `Program Files\Allsafe
+         Agent` entièrement vide après coup, plus d'exe ni de dll). Programmé TARD à la place :
+         le nouveau produit installe D'ABORD ses fichiers (le composant partagé passe à 2
+         propriétaires), PUIS l'ancien produit se désinstalle (le compteur retombe à 1, les
+         fichiers restent puisque le nouveau produit en a toujours besoin). C'est le
+         comportement historique par défaut de Windows Installer, pas une exception — l'early
+         scheduling n'est utile que si les DEUX versions ne doivent jamais coexister, même
+         un court instant, ce qui n'est pas notre cas ici.
+
+         `Maximum="99.0.0.0"` (pas la version courante) — délibéré : `wixl` ne supporte pas
+         l'élément `<MajorUpgrade>` de WiX v3 (qui calculerait ce plafond dynamiquement depuis
+         la version en cours de build), donc une valeur figée demanderait normalement d'être
+         rebumpée à CHAQUE release pour continuer à couvrir "toute version antérieure" — un 4e
+         endroit à ne pas oublier en plus de Cargo.toml/Cargo.lock/`Version` ci-dessus (déjà un
+         piège connu une fois par le passé, cf. § Mise à jour de agent/README.md). Un plafond
+         haut et fixe élimine ce risque : couvre toute version plausible du produit sans jamais
+         avoir besoin d'y retoucher. -->
+    <Upgrade Id="F7307503-099E-4424-9611-81DE4739933C">
+      <UpgradeVersion Minimum="0.0.0.0" IncludeMinimum="yes"
+                       Maximum="99.0.0.0" IncludeMaximum="no"
+                       Property="OLDER_VERSION_FOUND" />
+    </Upgrade>
+    <InstallExecuteSequence>
+      <RemoveExistingProducts After="InstallFinalize" />
+    </InstallExecuteSequence>
 
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">

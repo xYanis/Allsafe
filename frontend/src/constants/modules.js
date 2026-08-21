@@ -45,3 +45,9 @@ export function moduleColorForPath(pathname) {
   const mod = Object.values(MODULES).find(m => m.paths.some(p => pathname.startsWith(p)))
   return mod ? mod.color : DEFAULT_COLOR
 }
+
+// Module complet (couleur + `dark`) pour une route — utilisé quand un `dark` est nécessaire
+// (texte sur CTA rempli), ex. le bouton flottant PageGuide. `null` si aucun module ne matche.
+export function moduleForPath(pathname) {
+  return Object.values(MODULES).find(m => m.paths.some(p => pathname.startsWith(p))) || null
+}

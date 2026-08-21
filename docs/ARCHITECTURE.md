@@ -143,6 +143,12 @@ un regex naïf sur le texte du fichier, sous peine de surestimer d'environ 15%. 
 mesurée ainsi : **8048/8191 caractères encodés** (143 de marge) — à revérifier avec la même méthode
 avant tout nouvel ajout au script.
 
+**Scindé en deux appels WinRM séparés (10/08/2026)** : la limite a été dépassée une 3e fois à force
+d'ajouts. `asset_scanner.py` fait désormais **deux appels distincts** — inventaire (`ps_script`,
+inchangé) et conformité/durcissement (`ps_compliance_script`, nouveau) — chacun avec sa propre marge
+de ~8191 caractères encodés, plutôt que de continuer à optimiser un seul script à l'os. Les deux
+résultats sont fusionnés côté Python avant `apply_scan_result`.
+
 **Correction automatique au scan** (`routers/assets.py`, `POST /{id}/scan`) : le scan fait foi sur ce
 qui est déclaré à la création. Si le hostname détecté diffère de celui déclaré, `hostname` **et**
 `name` (affiché partout dans l'UI) sont alignés automatiquement sur la valeur détectée — utile pour un
@@ -551,6 +557,25 @@ name        VARCHAR NOT NULL UNIQUE
 created_at  TIMESTAMPTZ
 ```
 
+### Module Gouvernance — `document_types` / `documents` (session 31/07/2026)
+
+Module renommé « Documentation » → **Gouvernance** le 18/08/2026 (demande utilisateur, plus cohérent
+avec son contenu — aucun changement fonctionnel). Documents de gouvernance nécessaires à la conformité
+NIS 2 : PSSI, Charte Administrateur, Charte Utilisateur, Organigramme, seedés à la création du module.
+
+`DocumentType` : registre de types **ouvert**, ajoutable sans code — spécifique à ce module (pas géré
+dans Administration, contrairement à `Service`/`OrganizationRole` qui sont consommés par plusieurs
+modules). `Document` : chaque upload crée une **nouvelle ligne**, rien n'est supprimé automatiquement —
+pas de table de versions séparée, la liste triée par date EST l'historique des versions.
+
+Formats acceptés : PDF/Word/Excel/PNG/JPEG, validés par **signature de fichier** (pas seulement
+l'extension), 10 Mo max (`services/document_storage.py`, constantes de stockage disque, même esprit
+qu'`incident_attachments.py`).
+
+**Prévisualisation** : PDF/images servis avec `Content-Disposition: inline`, affichés nativement par
+le navigateur — Word/Excel restent en téléchargement, aucune API web ne peut ouvrir l'appli native
+depuis une page. **Glisser-déposer** : modale d'upload et directement sur la carte d'un type.
+
 ### Authentification (`users`, `sessions`, `auth_audit_logs`, session 30/07/2026)
 
 Remplace le module Bastion (sélecteur « Je suis… », `visible_modules`, retiré le même jour — sans
@@ -722,6 +747,18 @@ schéma **avec `cybervuln`** d'abord : laisser `APP_DB_*` vide au premier démar
 `DB_USER=cybervuln`, whitelisté, et create_all bâtit le schéma), puis renseigner `APP_DB_USER=cbr_app`.
 Ordre de pose des scripts sur base neuve : schéma (cybervuln) → `app_role.sql` → `deception_setup.sql` →
 `ddl_guard.sql` → `schema_patches.sql` (peut être rejoué à tout moment, idempotent).
+
+### Table `release_notes` (session 18/08/2026)
+
+Module **Notes de version**, détaché de Paramètres le même jour (lien simple sous Paramètres dans la
+nav, pas d'en-tête de groupe). Table unique `release_notes`, distinguée par `scope` (`'allsafe'` |
+`'agent'`) plutôt que deux tables séparées — changelog produit : nouveautés/correctifs groupés par
+version, résumé replié par défaut, détail au clic (`ReleaseNotesPanel.jsx`, composant partagé par les
+deux scopes). Versionné rétroactivement le même jour (1er vrai numéro de version du produit, 1.0.0, en
+relisant `STATUS.md`/`docs/HISTORIQUE.md` sur le mois précédent) — alimenté en fin de session par
+l'assistant, relu/validé par l'utilisateur directement sur la page. Le scope `agent` vit sur sa propre
+page sous Inventaire > Agents (`/agents/notes-de-version`, `AgentReleaseNotes.jsx`, cf. `docs/AGENTS.md`)
+plutôt que dans ce module — seul `allsafe` y est affiché.
 
 ### `backend/db/schema_patches.sql` (session 27/07/2026)
 

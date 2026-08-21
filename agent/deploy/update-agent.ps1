@@ -52,7 +52,7 @@ function Log($msg) {
 
 try {
     $versionInfo = Invoke-RestMethod "$Server/api/agents/latest/version" -TimeoutSec 15
-    $latestVersion = $versionInfo.version
+    $latestVersion = $versionInfo.version_windows
 } catch {
     Log "Échec de récupération de la version côté serveur ($Server) : $_"
     exit 1

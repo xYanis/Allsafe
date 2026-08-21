@@ -20,6 +20,7 @@
       </svg>
     </span>
     <span class="banner-title">Allsafe Agent</span>
+    <span class="banner-version" id="banner-version"></span>
   </header>
 
   <main id="views">
@@ -38,11 +39,12 @@
     <!-- Installation -->
     <section class="view" id="view-install">
       <p class="view-subtitle">Installation</p>
-      <label class="field-label" for="install-server">URL du serveur Allsafe (ex : http://192.168.1.10:3000)</label>
-      <input class="field-input" id="install-server" type="text" value="http://" />
+      <label class="field-label" for="install-server">URL du serveur Allsafe</label>
+      <input class="field-input" id="install-server" type="text" placeholder="http://192.168.1.10:3000" />
       <label class="field-label" for="install-token">Jeton d'enrôlement</label>
       <input class="field-input" id="install-token" type="text" />
       <div class="status" id="install-status"></div>
+      <div class="progress-track" id="install-progress" hidden><div class="progress-fill"></div></div>
       <div class="view-actions">
         <button class="btn btn-primary" id="btn-install-go">Installer</button>
         <button class="btn btn-secondary" data-nav="menu">Retour</button>
@@ -58,6 +60,7 @@
         démarre plus ou si <code>allsafe-agent</code> n'est plus reconnu en ligne de commande.
       </p>
       <div class="status" id="repair-status"></div>
+      <div class="progress-track" id="repair-progress" hidden><div class="progress-fill"></div></div>
       <div class="view-actions">
         <button class="btn btn-primary" id="btn-repair-go">Réparer</button>
         <button class="btn btn-secondary" data-nav="menu">Retour</button>
@@ -68,8 +71,9 @@
     <section class="view" id="view-update">
       <p class="view-subtitle">Mise à jour</p>
       <label class="field-label" for="update-server">URL du serveur Allsafe</label>
-      <input class="field-input" id="update-server" type="text" value="http://" />
+      <input class="field-input" id="update-server" type="text" placeholder="http://192.168.1.10:3000" />
       <div class="status" id="update-status"></div>
+      <div class="progress-track" id="update-progress" hidden><div class="progress-fill"></div></div>
       <div class="view-actions">
         <button class="btn btn-secondary" id="btn-update-check">Vérifier</button>
         <button class="btn btn-primary" id="btn-update-go" disabled>Mettre à jour</button>
@@ -81,12 +85,13 @@
     <section class="view" id="view-uninstall">
       <p class="view-subtitle">Désinstallation</p>
       <p class="view-text">
-        Arrête et désenregistre le service Windows, retire l'entrée PATH. Les fichiers
-        (<code>Program Files\Allsafe Agent</code>, <code>%ProgramData%\allsafe-agent</code>)
-        ne sont pas supprimés automatiquement — un exécutable ne peut pas se supprimer
-        lui-même en cours d'exécution.
+        Arrête et désenregistre le service Windows, retire l'entrée PATH, supprime la
+        configuration (<code>%ProgramData%\allsafe-agent</code>) et le dossier d'installation
+        (<code>Program Files\Allsafe Agent</code>) — cette fenêtre se ferme automatiquement une
+        fois lancé, le temps de libérer son propre fichier avant de le supprimer.
       </p>
       <div class="status" id="uninstall-status"></div>
+      <div class="progress-track" id="uninstall-progress" hidden><div class="progress-fill"></div></div>
       <div class="view-actions">
         <button class="btn btn-danger" id="btn-uninstall-go">Désinstaller</button>
         <button class="btn btn-secondary" data-nav="menu">Retour</button>

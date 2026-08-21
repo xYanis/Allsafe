@@ -1,10 +1,29 @@
 # Agent — Détection d'évènements sensibles côté poste
 
-> ⏳ **SPÉCIFIÉ, PAS ENCORE IMPLÉMENTÉ (19/08/2026).** Ce document fige la conception validée avec
-> l'utilisateur avant écriture du code. Rien de ce qui suit n'existe encore en base, dans l'agent Rust
-> ni dans le frontend. Il complète `docs/AGENTS.md` (agent d'inventaire existant) — même binaire
-> `allsafe-agent`, même transport, on **ajoute** une capacité de détection, on ne crée pas un second
-> agent.
+> ⏳ **PARTIELLEMENT IMPLÉMENTÉ (19/08/2026).** Fondations backend posées et testées de bout en bout
+> (modèles `AgentSecurityEvent`/`AgentStateSnapshot`, `schema_patches.sql` appliqué en base réelle,
+> `POST /agents/checkin` étendu, diff d'état + dédoublonnage du journal natif dans
+> `services/agent_detection.py`, endpoints `GET/POST /agents/security-events*`). **Côté agent** :
+> socle diff posé pour **Linux et Windows** (`collect/linux.rs`/`collect/windows.rs` —
+> `local_users`/`admin_members`/`persistence` envoyés à chaque check-in, `audit_coverage`
+> constaté), compile pour les deux cibles. **Les deux vérifiés en conditions réelles** :
+> Linux (`gitlab.aer.loc`, 0.1.8 — snapshot correctement collecté, comptes/sudo/cron/systemd
+> filtrés comme attendu, 0 faux évènement au 1er check-in, `audit_coverage` honnête) et Windows
+> (`armadasenonches`, 0.1.19 — comptes locaux réels, ~130 tâches planifiées/services réels dont
+> `AllsafeAgent` lui-même ; deux bugs trouvés et corrigés sur ces données réelles :
+> `Get-LocalGroupMember -Group 'Administrators'` échouait silencieusement sur un Windows en
+> français, group localisé — remplacé par le SID bien connu `S-1-5-32-544` ; sortie PowerShell
+> encodée ANSI par défaut en redirection — corrompait les noms accentués, forcé en UTF-8).
+> **Reste à faire** : enrichissement journal natif des
+> deux côtés (Event Log Security / auditd — `suspicious_process`/`audit_tampering`, ni l'un ni
+> l'autre catégorisable par diff seul, curseur persistant + buffer plafonné, § Mécanique agent
+> ci-dessous) et le frontend (page Durcissement, badge nav, bandeau Dashboard). Il complète
+> `docs/AGENTS.md` (agent d'inventaire existant) — même binaire `allsafe-agent`, même transport, on
+> **ajoute** une capacité de détection, on ne crée pas un second agent.
+>
+> `Agent.audit_coverage` (dict JSONB libre, pas de schéma fixe) : clés `auditd_installed`/
+> `auditd_running` côté Linux, `process_auditing`/`command_line_logging` côté Windows — chaque
+> plateforme constate ce qui a du sens pour elle, l'UI ne doit pas supposer un jeu de clés commun.
 >
 > Cible retenue : **Niveau 2 (hybride diff d'état + journal natif)**, cf. § Stratégie. Le Niveau 3
 > (corrélation / baseline / règles en base) est documenté comme trajectoire, **hors MVP**.
@@ -60,6 +79,7 @@ par-dessus (principe scalable, `CLAUDE.md`).
 | `persistence` | `4698` (tâche planifiée), `7045`/`4697` (service) | cron/unit systemd neuf | journal + diff |
 | `suspicious_process` | `4688` (ex. `nmap.exe`, outils de recon) | `execve` (auditd) | journal seul (éphémère) |
 | `audit_tampering` | `1102` (journal vidé), audit désactivé | `auditd` stoppé/règles retirées | journal + `audit_coverage` |
+| `buffer_overflow` | — (synthétique, pas un évènement OS) | — | émis par l'agent lui-même quand son buffer de coupure (§ Mécanique agent, piège #3) dépasse son plafond — « M évènements perdus » plutôt qu'un flush silencieux ou un disque qui se remplit. À inclure dans l'enum/les filtres au même titre que les autres, pas une catégorie à part oubliée du tableau. |
 
 **`audit_tampering` est obligatoire** : sans lui, désactiver l'audit fait retomber toutes les détections
 à zéro silencieusement (l'app croirait « RAS »). C'est le signal qui protège les autres.
@@ -160,9 +180,36 @@ Réutilise l'auth (`require_agent`), le modèle de coupure et tout le rodé. Le 
 (`state_snapshot` reçu vs `AgentStateSnapshot` stocké), écrit les `AgentSecurityEvent` (journal + diff),
 met à jour le snapshot et `audit_coverage`.
 
+⚠️ **Plafond côté serveur obligatoire sur `security_events`** (19/08/2026, cf. audit/AUDIT_SECURITE.md
+#35 — même leçon appliquée le même jour à `packages`/`compliance.checks` sur ce même endpoint
+`/checkin`) : le § « Mécanique agent » ci-dessous prévoit déjà un plafond **côté agent** (buffer
+pendant coupure), mais rien ne doit dépendre de ce que le client respecte réellement cette limite —
+un agent compromis ou buggé pourrait envoyer un `security_events` démesuré. Tronquer explicitement
+côté serveur à l'écriture (ex. `[:300]`, même ordre de grandeur que le plafond déjà posé sur
+`packages`), indépendamment du plafond client. Le throttle 1 check-in/minute déjà en place
+(`routers/agents.py::CHECKIN_MIN_INTERVAL_SECONDS`) s'applique aussi à cet endpoint sans changement —
+sans incidence sur la détection : les check-ins normaux restent à l'heure, ce plafond ne vise que le
+spam.
+
+Même vigilance sur `audit_coverage` et `state_snapshot` : ce sont des `dict` libres (pas de schéma
+Pydantic strict clé par clé), donc rien n'empêche un agent compromis/buggé d'y glisser un objet
+démesuré au lieu d'un état compact attendu. `audit_coverage` reste petit par nature (quelques
+booléens) mais mérite quand même une taille max côté serveur avant stockage JSONB (ex. rejeter/tronquer
+au-delà de quelques Ko) ; `state_snapshot` (comptes/admins/persistance d'un poste réel) est plus gros
+et plus variable — même traitement que `security_events` : plafonner explicitement côté serveur
+(nombre d'entrées par catégorie, ex. comptes/admins/tâches planifiées) avant le diff et l'écriture,
+indépendamment de ce que l'agent est censé respecter.
+
 Exposition en lecture : nouveau `routers/agents.py` (ou `routers/agent_events.py`) —
 `GET /api/agents/security-events` (+ `?unack_only`, pagination), `POST .../{id}/ack`, `.../ack-all`,
 même schéma d'acquittement que `routers/security.py`. Réservé admin (comme `/api/security/*`).
+
+⚠️ **Sauf le compteur.** Le § « Décisions figées » ci-dessous prévoit un badge compteur dans la nav
+Inventaire — visible à tout connecté, pas seulement admin (comme le badge `/api/security/*`
+équivalent). Il faudra donc une route dédiée non gatée admin pour juste le nombre (ex.
+`GET /api/agents/security-events/count`), sur le modèle exact de l'exception déjà posée sur
+`routers/security.py::/api/security/events/count` — sans elle, la règle "Réservé admin" ci-dessus
+empêcherait le badge de s'afficher pour un compte `analyst`.
 
 ## Mécanique agent — les pièges à traiter
 

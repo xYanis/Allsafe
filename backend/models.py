@@ -1146,6 +1146,11 @@ class Agent(Base):
     # via un même jeton réutilisable. Remplace l'ancien `AgentEnrollmentToken.used_by_agent_id`
     # scalaire, qui ne pouvait référencer qu'un seul agent — inadapté à un jeton multi-usages.
     enrollment_token_id = Column(_UUID(as_uuid=True), ForeignKey("agent_enrollment_tokens.id", ondelete="SET NULL"), nullable=True)
+    # Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — l'agent
+    # CONSTATE si l'audit OS est actif (ex. {"process_auditing": true, "auditd_running": false}),
+    # jamais activé par lui (écriture système, hors non-intervention). Laisse l'UI afficher
+    # "détection partielle" plutôt que de faire croire à une couverture totale.
+    audit_coverage = Column(_JSONB)
 
 
 class AgentCheckinLog(Base):
@@ -1212,6 +1217,87 @@ class AgentEnrollmentToken(Base):
     use_count         = Column(Integer, nullable=False, default=0)
 
 
+class AgentDeletionLog(Base):
+    """Journal append-only — un agent a été supprimé (19/08/2026, demande explicite : badge
+    "historique complet des agents" de la page liste, qui doit compter AUSSI les agents
+    supprimés). `delete_agent` (hard delete, routers/agents.py) fait disparaître la ligne
+    `agents` sans trace — même problème que `AssetDeletionLog` pour les actifs, même solution.
+    L'historique complet = agents vivants (table `agents`) ∪ ce journal ; le compteur démarre
+    donc aux agents actuellement enrôlés, pas besoin de seed rétroactif (on ne peut de toute
+    façon pas reconstituer les suppressions antérieures à ce journal).
+
+    Champs en texte, pas de FK vers `agents` (l'agent n'existe plus par définition) — snapshot
+    au moment de la suppression, comme `AssetDeletionLog`. `enrolled_by` = l'admin qui avait
+    généré le jeton d'enrôlement (best-effort : None si le jeton avait déjà été révoqué)."""
+    __tablename__ = "agent_deletion_logs"
+
+    id          = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    hostname    = Column(String, nullable=False)
+    os          = Column(String)
+    asset_name  = Column(String)
+    enrolled_at = Column(DateTime(timezone=True))
+    enrolled_by = Column(String)
+    deleted_at  = Column(DateTime(timezone=True), nullable=False)
+    deleted_by  = Column(String)
+
+
+class AgentSecurityEvent(Base):
+    """Détections d'évènements sensibles côté poste (19/08/2026, cf. docs/AGENT_DETECTION.md) —
+    lecture des journaux d'audit natifs de l'OS (Event Log Security / auditd) et diff d'état
+    entre deux check-ins, jamais une exécution. Append-only, un évènement = une ligne, plutôt
+    qu'un JSON snapshot écrasé au scan suivant comme Asset.last_scan_result.compliance (un
+    évènement ponctuel n'est pas un état à remplacer).
+
+    agent_id nullable + ON DELETE SET NULL + hostname/os en snapshot : un agent supprimé
+    (toujours après révocation) ne doit pas emporter son historique de détections — même
+    logique que AgentDeletionLog, à l'inverse d'AgentCheckinLog (CASCADE, télémétrie sans
+    valeur d'audit).
+
+    (agent_id, native_event_id) unique (index, pas UniqueConstraint — convention du fichier,
+    cf. network_status ci-dessus) : dédoublonnage. Le check-in relit une fenêtre du journal OS
+    à chaque cycle ; sans clé naturelle (RecordID Windows / clé ausearch Linux) un même
+    évènement réapparaîtrait tant qu'il reste dans la fenêtre relue. NULL pour les détections
+    state_diff (pas de ligne de journal derrière) — Postgres ne considère jamais deux NULL comme
+    égaux dans un index unique, donc plusieurs lignes state_diff sans native_event_id cohabitent
+    sans se bloquer ; leur dédoublonnage est assuré par le diff lui-même, pas cet index."""
+    __tablename__ = "agent_security_events"
+
+    id               = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    agent_id         = Column(_UUID(as_uuid=True), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True, index=True)
+    hostname         = Column(String, nullable=False)   # snapshot au moment de l'évènement
+    os               = Column(String, nullable=False)   # snapshot, "windows" | "linux"
+    category         = Column(String, nullable=False)   # cf. docs/AGENT_DETECTION.md § Catégories
+    severity         = Column(String, nullable=False, default="info")   # info | warning | critical, déclaratif agent
+    detection_method = Column(String, nullable=False)   # state_diff | native_log
+    occurred_at      = Column(DateTime(timezone=True), nullable=False)  # horloge du POSTE (indicatif, falsifiable)
+    reported_at      = Column(DateTime(timezone=True), server_default=_sfunc.now())  # horloge SERVEUR (fiable)
+    native_source    = Column(String, nullable=True)    # windows_security_log | linux_auditd | linux_authlog
+    native_event_id  = Column(String, nullable=True)    # RecordID / clé ausearch — dédoublonnage (NULL si state_diff)
+    summary          = Column(String, nullable=False)   # résumé humain généré côté agent
+    detail           = Column(_JSONB)                   # champs bruts par catégorie (username, groupe, cmdline...)
+    acknowledged     = Column(Boolean, nullable=False, default=False)
+    ack_by           = Column(String)
+    ack_at           = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        _Index("uq_agent_security_event_native", "agent_id", "native_event_id", unique=True),
+    )
+
+
+class AgentStateSnapshot(Base):
+    """Dernier état connu par agent (19/08/2026, cf. docs/AGENT_DETECTION.md), comparé au
+    check-in suivant pour générer les détections state_diff. Mis à jour en place (pas un
+    historique — un instantané, cf. Asset.last_scan_result). CASCADE : cet état n'a de sens
+    que tant que l'agent existe."""
+    __tablename__ = "agent_state_snapshots"
+
+    agent_id      = Column(_UUID(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True)
+    local_users   = Column(_JSONB)   # [{name, sid_or_uid, enabled}]
+    admin_members = Column(_JSONB)   # membres Administrators / sudo / wheel
+    persistence   = Column(_JSONB)   # tâches planifiées / services / cron / units
+    captured_at   = Column(DateTime(timezone=True))
+
+
 class ScanPolicy(Base):
     """Politique de scan planifié par criticité (17/08/2026) — 4 lignes fixes, une par valeur
     de `asset.tags.criticite` (critique/haute/moyenne/faible), chacune éditable indépendamment
@@ -1237,8 +1323,8 @@ class ReleaseNote(Base):
     """Notes de version (18/08/2026, demande explicite) — deux portées séparées par `scope` :
     `allsafe` (page Paramètres, versionning/fonctionnalités/correctifs de la plateforme dans son
     ensemble) et `agent` (page dédiée liée à Sécurité > Agents, propre au binaire `allsafe-agent`,
-    `version` y prend alors le sens du semver réel du binaire — cf. CURRENT_AGENT_VERSION,
-    routers/agents.py). Alimenté en fin de session par l'assistant, revu/validé par
+    `version` y prend alors le sens du semver réel du binaire — cf. CURRENT_AGENT_VERSION_WINDOWS/
+    _LINUX, routers/agents.py). Alimenté en fin de session par l'assistant, revu/validé par
     l'utilisateur — pas de statut brouillon/publié séparé : une note existe ou n'existe pas,
     la validation se fait par relecture directe sur la page plutôt que par un workflow
     d'approbation à part, qui aurait été disproportionné pour ce besoin."""

@@ -6,7 +6,10 @@
 //! `sshd -T` — si la commande échoue quand même (agent lancé sans droits suffisants),
 //! le check remonte "unknown" plutôt que de faire échouer toute la collecte.
 
-use crate::model::{Check, CheckinPayload, Compliance, Detected, Disk, Hardware, Package};
+use crate::model::{
+    AuditCoverage, Check, CheckinPayload, Compliance, Detected, Disk, Hardware, LocalUser,
+    Package, PersistenceEntry, StateSnapshot,
+};
 use std::collections::{HashMap, HashSet};
 use std::process::Command;
 
@@ -281,6 +284,128 @@ pub fn hostname() -> String {
     run_lossy("hostname -f 2>/dev/null || hostname").to_lowercase()
 }
 
+// ─── Détection d'évènements sensibles — socle diff (19/08/2026, docs/AGENT_DETECTION.md) ──
+// L'agent n'effectue aucun diff lui-même : il envoie l'état brut constaté à chaque check-in,
+// le serveur compare au dernier snapshot connu (`services/agent_detection.py`, backend) et
+// génère les détections. Lecture seule stricte, comme le reste de l'agent.
+
+/// Seuil UID standard Debian/Ubuntu (`/etc/login.defs::UID_MIN`, généralement 1000) séparant
+/// comptes humains et comptes système/daemon. Filtrage volontaire (cf. docs/AGENT_DETECTION.md
+/// § Catégories, "filtrage strict dès le départ") : sans lui, une simple installation de
+/// paquet (`apt install` crée souvent un compte système dédié) déclencherait un faux
+/// `account_created` — root (uid 0) reste inclus explicitement malgré uid < seuil.
+const HUMAN_UID_MIN: u32 = 1000;
+
+/// Comptes locaux avec statut activé/désactivé — `/etc/shadow` (verrouillage `!`/`*` en 2e
+/// champ) croisé avec `/etc/passwd` (uid, filtré aux comptes humains + root). Nécessite root
+/// (l'agent tourne déjà en root, cf. `deploy/allsafe-agent.service`) — `unwrap_or_default` si
+/// illisible, pas d'échec de toute la collecte pour ça.
+fn local_users_snapshot() -> Vec<LocalUser> {
+    let passwd = run_lossy("cat /etc/passwd 2>/dev/null");
+    let shadow = run_lossy("cat /etc/shadow 2>/dev/null");
+
+    let locked: HashSet<String> = shadow
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split(':');
+            let name = parts.next()?;
+            let hash = parts.next()?;
+            (hash.starts_with('!') || hash.starts_with('*')).then(|| name.to_string())
+        })
+        .collect();
+
+    passwd
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() < 3 {
+                return None;
+            }
+            let name = parts[0];
+            let uid: u32 = parts[2].parse().ok()?;
+            if uid != 0 && uid < HUMAN_UID_MIN {
+                return None;
+            }
+            Some(LocalUser {
+                name: name.to_string(),
+                sid_or_uid: uid.to_string(),
+                enabled: !locked.contains(name),
+            })
+        })
+        .collect()
+}
+
+/// Membres uniques des groupes `sudo`/`wheel` (Debian/Ubuntu vs RHEL/Fedora) — même source
+/// que `privileged_accounts_check()` ci-dessus, réutilisée comme liste brute plutôt que comme
+/// `Check` formaté (le diff se fait côté serveur sur cette liste, pas sur un texte affiché).
+fn admin_members_snapshot() -> Vec<String> {
+    let sudo_members = run_lossy("getent group sudo 2>/dev/null | cut -d: -f4");
+    let wheel_members = run_lossy("getent group wheel 2>/dev/null | cut -d: -f4");
+    let mut members: Vec<String> = sudo_members
+        .split(',')
+        .chain(wheel_members.split(','))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    members.sort();
+    members.dedup();
+    members
+}
+
+/// Persistance : fichiers cron système + crontab root + unités systemd **activées**
+/// (`enabled`, pas juste en cours d'exécution — c'est l'activation qui survit à un reboot,
+/// le signal de persistance qui intéresse un attaquant). Périmètre volontairement simple pour
+/// le MVP : ne couvre pas les crontabs des autres comptes utilisateurs ni les timers systemd
+/// séparément des services (`--type=service,timer` les couvre déjà tous les deux).
+fn persistence_snapshot() -> Vec<PersistenceEntry> {
+    let mut entries = Vec::new();
+
+    let cron_files = run_lossy(
+        "find /etc/cron.d /etc/cron.daily /etc/cron.weekly /etc/cron.monthly /etc/cron.hourly \
+         -type f 2>/dev/null",
+    );
+    for path in cron_files.lines() {
+        entries.push(PersistenceEntry { kind: "cron".to_string(), name: path.to_string() });
+    }
+    let root_crontab = run_lossy("crontab -l -u root 2>/dev/null | grep -vE '^\\s*#|^\\s*$'");
+    for (i, line) in root_crontab.lines().enumerate() {
+        entries.push(PersistenceEntry {
+            kind: "cron".to_string(),
+            name: format!("root#{i}: {}", line.trim()),
+        });
+    }
+
+    let units = run_lossy(
+        "systemctl list-unit-files --type=service,timer --state=enabled --no-legend 2>/dev/null",
+    );
+    for line in units.lines() {
+        if let Some(unit) = line.split_whitespace().next() {
+            entries.push(PersistenceEntry { kind: "systemd_unit".to_string(), name: unit.to_string() });
+        }
+    }
+
+    entries
+}
+
+fn state_snapshot() -> StateSnapshot {
+    StateSnapshot {
+        local_users: local_users_snapshot(),
+        admin_members: admin_members_snapshot(),
+        persistence: persistence_snapshot(),
+    }
+}
+
+/// L'agent CONSTATE si `auditd` est installé/actif, ne l'active jamais lui-même (écriture
+/// système, hors non-intervention, cf. docs/AGENT_DETECTION.md § Prérequis OS). Alimente
+/// `Agent.audit_coverage` côté serveur — l'UI affichera "détection partielle" quand `auditd`
+/// manque, plutôt que de laisser croire à une couverture totale du socle diff seul.
+fn audit_coverage() -> AuditCoverage {
+    let installed = run("command -v auditctl 2>/dev/null").is_some();
+    let running = run_lossy("systemctl is-active auditd 2>/dev/null") == "active";
+    AuditCoverage::from([("auditd_installed".to_string(), installed), ("auditd_running".to_string(), running)])
+}
+
 pub fn collect() -> CheckinPayload {
     let hostname = self::hostname();
     let pretty = run_lossy("grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"'");
@@ -372,8 +497,15 @@ pub fn collect() -> CheckinPayload {
         hardware: Hardware { cpu, arch, cores, ram_gb, disks, ip, mac, open_ports },
         compliance: Compliance { checks },
         error: None,
-        agent_version: env!("CARGO_PKG_VERSION").to_string(),
+        agent_version: crate::RELEASE_VERSION.to_string(),
         offline_since: None,
         failed_attempts: None,
+        // Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — socle
+        // diff seulement à ce stade (comptes/admins/persistance), le serveur compare au
+        // dernier snapshot connu. L'enrichissement journal natif (auditd, process éphémères,
+        // sabotage d'audit) reste une passe suivante — security_events vide pour l'instant.
+        security_events: Vec::new(),
+        audit_coverage: Some(self::audit_coverage()),
+        state_snapshot: Some(self::state_snapshot()),
     }
 }

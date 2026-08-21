@@ -27,8 +27,25 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use config::AgentConfig;
 
+/// Version publiée, **par plateforme** (19/08/2026, demande explicite) — remplace
+/// `env!("CARGO_PKG_VERSION")` (celui-là reste la version du *crate*, un seul artefact
+/// de compilation Cargo.toml, partagé par construction entre les deux cibles). `.exe`/`.msi`
+/// (même binaire Windows, ne peuvent jamais diverger l'un de l'autre — le `.msi` embarque
+/// littéralement le même fichier compilé, cf. `wix/main.wxs`) et `.deb` sont des artefacts
+/// de release souvent modifiés indépendamment (un correctif MSI ne touche jamais au binaire
+/// Linux, et réciproquement) : les lier à une seule version crate forçait à "bumper" les deux
+/// à chaque changement, même quand rien n'avait réellement changé pour l'autre plateforme —
+/// l'agent Linux s'affichait "en retard" dans Allsafe sans raison après un correctif Windows
+/// pur. À bumper manuellement UNIQUEMENT quand la plateforme concernée change réellement (cf.
+/// `agent/README.md` § Mise à jour, `backend/routers/agents.py::CURRENT_AGENT_VERSION_*`
+/// côté serveur, `wix/main.wxs::Version` côté `.msi`).
+#[cfg(target_os = "windows")]
+pub const RELEASE_VERSION: &str = "0.1.19";
+#[cfg(target_os = "linux")]
+pub const RELEASE_VERSION: &str = "0.1.9";
+
 #[derive(Parser)]
-#[command(name = "allsafe-agent", version, about = "Agent Allsafe (lecture seule) pour postes Windows/Linux")]
+#[command(name = "allsafe-agent", version = RELEASE_VERSION, about = "Agent Allsafe (lecture seule) pour postes Windows/Linux")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -121,6 +138,7 @@ fn main() -> Result<()> {
 async fn run(command: Commands) -> Result<()> {
     match command {
         Commands::Enroll { token, server } => {
+            let server = api::normalize_server(&server);
             let hostname = collect::hostname();
             if hostname.is_empty() {
                 anyhow::bail!("impossible de déterminer le nom d'hôte local");

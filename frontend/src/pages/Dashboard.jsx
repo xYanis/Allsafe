@@ -2831,6 +2831,7 @@ export default function Dashboard() {
           cveId={otherInstancesModal.cveId}
           entries={otherInstancesModal.entries}
           loading={otherInstancesModal.loading}
+          targetAssetName={otherInstancesModal.vuln?.asset?.name}
           onClose={() => setOtherInstancesModal(null)}
           onReuse={note => handleReuseJustification(otherInstancesModal.vuln, note)}
         />

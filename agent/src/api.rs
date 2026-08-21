@@ -29,6 +29,30 @@ pub fn warn_if_not_https(server: &str) {
     }
 }
 
+/// Normalise l'URL serveur saisie par l'utilisateur (CLI `--server` ou champ GUI) avant
+/// toute requête (19/08/2026, incident réel) — protège contre un schéma doublé
+/// (`http://http://192.168.1.10:3000`), piège classique quand un champ de saisie est
+/// pré-rempli avec `http://` et que l'utilisateur tape l'URL complète sans effacer ce
+/// préfixe d'abord (cf. `ui/index.html`, qui pré-remplissait `value="http://"` au lieu
+/// d'un vrai `placeholder` — corrigé le même jour, mais CLI et anciens binaires GUI restent
+/// exposés à la même faute de frappe). `reqwest` ne signale pas cette erreur clairement —
+/// il tente une résolution DNS littérale sur `http` comme s'il s'agissait d'un nom d'hôte
+/// ("os error 11001", Windows). En cas de schéma doublé, le second (le plus interne) fait
+/// foi : c'est lui qui reflète ce que l'utilisateur a réellement tapé, le premier n'étant
+/// que le résidu du préremplissage.
+pub fn normalize_server(server: &str) -> String {
+    let mut s = server.trim();
+    for prefix in ["http://", "https://"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            if rest.starts_with("http://") || rest.starts_with("https://") {
+                s = rest;
+                break;
+            }
+        }
+    }
+    s.trim_end_matches('/').to_string()
+}
+
 fn client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))

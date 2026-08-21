@@ -360,16 +360,20 @@ export default function Vulnerabilities() {
   }
 
   async function handleShowOtherInstances(vuln) {
-    setOtherInstancesModal({ vulnId: vuln.id, cveId: vuln.cve.cve_id, entries: [], loading: true })
+    // targetAssetName stocké dès l'ouverture (pas relu depuis `data.items` au moment
+    // du clic sur "Réutiliser") — nécessaire pour corriger le préfixe `[NOM_ACTIF]`
+    // d'une justification générée automatiquement (cf. OtherInstancesModal.jsx).
+    const targetAssetName = vuln.asset?.name
+    setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: [], loading: true })
     if (isFakeId(vuln.id)) {
-      setOtherInstancesModal({ vulnId: vuln.id, cveId: vuln.cve.cve_id, entries: [], loading: false })
+      setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: [], loading: false })
       return
     }
     try {
       const r = await getVulnOtherInstances(vuln.id)
-      setOtherInstancesModal({ vulnId: vuln.id, cveId: vuln.cve.cve_id, entries: r.data || [], loading: false })
+      setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: r.data || [], loading: false })
     } catch {
-      setOtherInstancesModal({ vulnId: vuln.id, cveId: vuln.cve.cve_id, entries: [], loading: false })
+      setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: [], loading: false })
     }
   }
 
@@ -849,6 +853,7 @@ export default function Vulnerabilities() {
           cveId={otherInstancesModal.cveId}
           entries={otherInstancesModal.entries}
           loading={otherInstancesModal.loading}
+          targetAssetName={otherInstancesModal.targetAssetName}
           onClose={() => setOtherInstancesModal(null)}
           onReuse={note => handleReuseJustification(otherInstancesModal.vulnId, note)}
         />

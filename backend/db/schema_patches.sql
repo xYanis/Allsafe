@@ -670,7 +670,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON agent_enrollment_tokens TO cbr_app;
 -- Version du binaire allsafe-agent (13/08/2026), déclarée à chaque check-in — pas de
 -- mécanisme de mise à jour automatique côté agent (MVP), cette colonne sert juste à
 -- repérer côté Allsafe quels postes tournent une version périmée (cf. routers/agents.py::
--- CURRENT_AGENT_VERSION). NULL pour un agent enrôlé avant l'ajout de ce champ, tant qu'il
+-- CURRENT_AGENT_VERSION_WINDOWS/_LINUX, une constante par OS depuis le 19/08/2026). NULL
+-- pour un agent enrôlé avant l'ajout de ce champ, tant qu'il
 -- n'a pas encore fait de check-in avec un binaire qui le déclare.
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS agent_version VARCHAR;
 
@@ -817,6 +818,24 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON agent_checkin_logs TO cbr_app;
 -- des check-ins (18/08/2026, retour utilisateur — "voir le cycle des scans avec historique").
 ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS on_demand BOOLEAN NOT NULL DEFAULT false;
 
+-- Journal "agent supprimé" (19/08/2026, cf. models.py::AgentDeletionLog) — même problème/même
+-- solution que asset_deletion_logs ci-dessus : delete_agent (hard delete) fait disparaître la
+-- ligne `agents` sans trace, alors que le badge "historique complet des agents" de la page liste
+-- doit compter aussi les supprimés. Historique complet = agents vivants ∪ ce journal ; pas de FK
+-- (l'agent n'existe plus), snapshot texte au moment de la suppression.
+CREATE TABLE IF NOT EXISTS agent_deletion_logs (
+    id          UUID PRIMARY KEY,
+    hostname    VARCHAR NOT NULL,
+    os          VARCHAR,
+    asset_name  VARCHAR,
+    enrolled_at TIMESTAMPTZ,
+    enrolled_by VARCHAR,
+    deleted_at  TIMESTAMPTZ NOT NULL,
+    deleted_by  VARCHAR
+);
+CREATE INDEX IF NOT EXISTS idx_agent_deletion_logs_deleted_at ON agent_deletion_logs(deleted_at);
+GRANT SELECT, INSERT, UPDATE, DELETE ON agent_deletion_logs TO cbr_app;
+
 -- Notes de version (18/08/2026, demande explicite, cf. models.py::ReleaseNote) : `allsafe`
 -- (page Paramètres) et `agent` (page dédiée, Sécurité > Agents) dans la même table, distinguées
 -- par `scope` plutôt que deux tables séparées — même forme exacte des deux côtés (version/
@@ -856,3 +875,45 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_password_reset_pending ON password_reset_re
 -- sur la vraie base, pas mesuré depuis l'environnement où cet index a été écrit (pas d'accès
 -- DB, cf. STATUS.md).
 CREATE INDEX IF NOT EXISTS idx_vulnerabilities_status_risk_score ON vulnerabilities(status, risk_score DESC);
+
+-- Détection d'évènements sensibles côté poste (19/08/2026, cf. docs/AGENT_DETECTION.md,
+-- models.py::AgentSecurityEvent/AgentStateSnapshot). Journal append-only séparé de
+-- security_events (honeypot DB) — même décision que vuln_history/incident_timeline/
+-- audit_finding_history, jamais fusionnés entre eux.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS audit_coverage JSONB;
+
+CREATE TABLE IF NOT EXISTS agent_security_events (
+    id                UUID PRIMARY KEY,
+    agent_id          UUID REFERENCES agents(id) ON DELETE SET NULL,
+    hostname          VARCHAR NOT NULL,
+    os                VARCHAR NOT NULL,
+    category          VARCHAR NOT NULL,
+    severity          VARCHAR NOT NULL DEFAULT 'info',
+    detection_method  VARCHAR NOT NULL,
+    occurred_at       TIMESTAMPTZ NOT NULL,
+    reported_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    native_source     VARCHAR,
+    native_event_id   VARCHAR,
+    summary           VARCHAR NOT NULL,
+    detail            JSONB,
+    acknowledged      BOOLEAN NOT NULL DEFAULT false,
+    ack_by            VARCHAR,
+    ack_at            TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_agent_security_events_agent ON agent_security_events(agent_id);
+-- Dédoublonnage du relecture de fenêtre côté agent — NULL (détections state_diff) jamais
+-- considéré égal à un autre NULL par Postgres, donc plusieurs lignes state_diff cohabitent
+-- sans se bloquer (cf. docstring models.py::AgentSecurityEvent).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_security_event_native ON agent_security_events(agent_id, native_event_id);
+-- Page Durcissement / badge nav Inventaire : liste triée par récence, filtrable sur les non-acquittés.
+CREATE INDEX IF NOT EXISTS idx_agent_security_events_unack ON agent_security_events(acknowledged, reported_at DESC);
+GRANT SELECT, INSERT, UPDATE, DELETE ON agent_security_events TO cbr_app;
+
+CREATE TABLE IF NOT EXISTS agent_state_snapshots (
+    agent_id      UUID PRIMARY KEY REFERENCES agents(id) ON DELETE CASCADE,
+    local_users   JSONB,
+    admin_members JSONB,
+    persistence   JSONB,
+    captured_at   TIMESTAMPTZ
+);
+GRANT SELECT, INSERT, UPDATE, DELETE ON agent_state_snapshots TO cbr_app;

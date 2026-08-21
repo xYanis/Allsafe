@@ -38,25 +38,46 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth_deps import require_admin, require_agent, require_page
+from auth_deps import require_admin, require_agent, require_auth, require_page
 from database import get_session
-from models import Agent, AgentCheckinLog, AgentEnrollmentToken, Asset, User
+from models import Agent, AgentCheckinLog, AgentDeletionLog, AgentEnrollmentToken, AgentSecurityEvent, Asset, User
+from services.agent_detection import apply_security_events
 from services.asset_scanner import apply_scan_result
 
 router = APIRouter()
 
 AGENT_DIST_DIR = "/app/agent-dist"
 
-# Dernière version publiée du binaire allsafe-agent (`agent/Cargo.toml::version`) — à
-# bumper manuellement à chaque release (`cargo deb`/`wixl`, cf. agent/README.md § Build).
-# Pas de mécanisme de mise à jour automatique côté agent dans ce MVP : cette constante ne
-# sert qu'à comparer côté serveur ce que chaque agent déclare à son dernier check-in
-# (`Agent.agent_version`) pour repérer les postes en retard (`_agent_dict::outdated`).
-CURRENT_AGENT_VERSION = "0.1.4"
+# Dernière version publiée, PAR PLATEFORME (19/08/2026, demande explicite — cf.
+# agent/src/main.rs::RELEASE_VERSION) — à bumper manuellement à chaque release, mais
+# uniquement pour la plateforme qui a réellement changé. Une seule constante partagée
+# forçait à bumper les deux à chaque changement, même quand rien n'avait bougé pour l'autre
+# OS : l'agent Linux s'affichait "en retard" dans Allsafe après un correctif Windows pur
+# (incident réel, même session — cf. STATUS.md). Pas de mécanisme de mise à jour automatique
+# poussé par Allsafe dans ce MVP : ces constantes ne servent qu'à comparer côté serveur ce
+# que chaque agent déclare à son dernier check-in (`Agent.agent_version`) pour repérer les
+# postes en retard (`_agent_dict::outdated`, cf. `_current_version_for` ci-dessous).
+CURRENT_AGENT_VERSION_WINDOWS = "0.1.19"
+CURRENT_AGENT_VERSION_LINUX = "0.1.9"
+
+
+def _current_version_for(os_: str) -> str:
+    return CURRENT_AGENT_VERSION_WINDOWS if os_ == "windows" else CURRENT_AGENT_VERSION_LINUX
 
 
 def _hash(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _short_hostname(hostname: str) -> str:
+    """Réduit un hostname à son nom court (avant le premier point) pour comparer un FQDN
+    (`armadasenonches.aer.loc`, `Asset.hostname` typique d'un import AD) à un nom court
+    (`armadasenonches`, `%COMPUTERNAME%` — c'est tout ce que l'agent Windows sait envoyer,
+    cf. `agent/src/collect/windows.rs::hostname`, jamais le FQDN). Utilisé uniquement par le
+    garde-fou d'enrôlement ci-dessous (19/08/2026, incident réel — la comparaison stricte
+    d'origine, cf. audit/AUDIT_SECURITE.md #16, bloquait tout enrôlement Windows contre un
+    actif nommé en FQDN, systématique sur ce parc majoritairement AD)."""
+    return hostname.strip().lower().split(".", 1)[0]
 
 
 # ─── Schémas ──────────────────────────────────────────────────────────────────
@@ -97,6 +118,13 @@ class AgentCheckinPayload(BaseModel):
     # échoué au moins une fois côté agent).
     offline_since: Optional[int] = None
     failed_attempts: Optional[int] = None
+    # Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — dict libres
+    # (pas de schéma strict clé par clé), plafonnés côté serveur avant tout traitement
+    # (services/agent_detection.py) : rien ne garantit qu'un agent compromis/buggé respecte
+    # les plafonds déjà posés côté client.
+    security_events: list = []   # évènements neufs depuis le dernier check-in réussi
+    audit_coverage: dict = {}    # état de l'audit OS constaté côté poste
+    state_snapshot: dict = {}    # comptes/admins/persistance pour le diff serveur
 
 
 def _token_dict(t: AgentEnrollmentToken) -> dict:
@@ -149,13 +177,20 @@ def _agent_dict(
         "agent_version": a.agent_version,
         # None avant tout check-in avec un binaire qui déclare sa version (agent enrôlé
         # avant l'ajout de ce champ) — pas encore comparable, jamais annoncé "périmé".
-        "outdated": a.agent_version is not None and a.agent_version != CURRENT_AGENT_VERSION,
+        "outdated": a.agent_version is not None and a.agent_version != _current_version_for(a.os),
         "pending_scan_requested_at": a.pending_scan_requested_at.isoformat() if a.pending_scan_requested_at else None,
         "last_gap_started_at": a.last_gap_started_at.isoformat() if a.last_gap_started_at else None,
         "last_gap_failed_attempts": a.last_gap_failed_attempts,
         "revoked_at": a.revoked_at.isoformat() if a.revoked_at else None,
         "revoked_by": a.revoked_by,
         "token_status": _token_status(token),
+        # Génération du jeton d'enrôlement (par qui/quand) — pour la frise "Historique des
+        # contacts" de AgentHistory.jsx, qui remonte jusqu'aux évènements fondateurs (jeton
+        # généré → poste enrôlé). None si le jeton a été révoqué/supprimé après coup
+        # (`enrollment_token_id` mis à NULL par ON DELETE SET NULL) : l'info est alors perdue,
+        # seul `enrolled_at` (sur l'agent lui-même) reste toujours disponible.
+        "enrollment_token_created_at": token.created_at.isoformat() if token and token.created_at else None,
+        "enrollment_token_created_by": token.created_by if token else None,
     }
 
 
@@ -239,12 +274,19 @@ async def enroll_agent(data: EnrollRequest, session: AsyncSession = Depends(get_
     # jeton sur un essai raté, forçant l'admin à en regénérer un, sans lien avec la sécurité
     # recherchée par ce garde-fou (cf. sa justification complète plus bas, à l'usage réel du
     # résultat de l'UPDATE).
+    #
+    # Comparaison sur le nom court (`_short_hostname`, 19/08/2026, incident réel) — pas le
+    # hostname en toutes lettres : l'agent Windows ne connaît que `%COMPUTERNAME%` (jamais le
+    # FQDN), alors que `Asset.hostname` porte le FQDN complet pour tout actif importé depuis
+    # l'AD (la majorité du parc, cf. CLAUDE.md § Contexte). Une égalité stricte bloquait donc
+    # systématiquement l'enrôlement Windows dès que l'actif était nommé en FQDN — pas un cas
+    # limite, le cas normal sur ce parc.
     preview = (await session.execute(
         select(AgentEnrollmentToken).where(AgentEnrollmentToken.token_hash == token_hash)
     )).scalar_one_or_none()
     if preview and preview.asset_id:
         bound_asset = await session.get(Asset, preview.asset_id)
-        if bound_asset and bound_asset.hostname and bound_asset.hostname.strip().lower() != data.hostname.strip().lower():
+        if bound_asset and bound_asset.hostname and _short_hostname(bound_asset.hostname) != _short_hostname(data.hostname):
             raise HTTPException(
                 403,
                 f"Ce jeton est lié à l'actif '{bound_asset.hostname}' — hostname déclaré "
@@ -353,10 +395,33 @@ def _sha256_of(path: str) -> Optional[str]:
 
 def _latest_deb_path() -> Optional[str]:
     # Le nom du .deb porte la version (`cargo-deb`, ex. allsafe-agent_0.2.0-1_amd64.deb) —
-    # pas de nom fixe à maintenir en plus de CURRENT_AGENT_VERSION, on sert simplement le
-    # plus récemment construit dans AGENT_DIST_DIR.
+    # pas de nom fixe à maintenir en plus de CURRENT_AGENT_VERSION_LINUX, on sert simplement
+    # le plus récemment construit dans AGENT_DIST_DIR.
     candidates = sorted(glob.glob(os.path.join(AGENT_DIST_DIR, "*.deb")), key=os.path.getmtime, reverse=True)
     return candidates[0] if candidates else None
+
+
+def _built_at(path: Optional[str]) -> Optional[str]:
+    """Date de construction du paquet (mtime du fichier sur le disque de distribution),
+    ISO 8601 UTC — `None` si le fichier n'existe pas. Affichée à côté de la version sur la
+    page Agents (19/08/2026, cf. STATUS.md — confusion réelle constatée : un utilisateur
+    téléchargeait un paquet resservi par le cache disque du navigateur, sans pouvoir la
+    distinguer d'un paquet à jour rien qu'au nom de fichier/numéro de version affiché)."""
+    if not path or not os.path.isfile(path):
+        return None
+    return datetime.fromtimestamp(os.path.getmtime(path), tz=timezone.utc).isoformat()
+
+
+# Pas de cache navigateur sur les 4 routes de distribution ci-dessous (19/08/2026, même
+# incident que ci-dessus) : sans en-tête explicite, un navigateur peut resservir un ancien
+# téléchargement depuis son cache disque par fraîcheur heuristique (RFC 7234, basée sur
+# Last-Modified) sans même recontacter le serveur — constaté en conditions réelles, un
+# utilisateur recevait encore le `.deb` buggé (cf. audit/AUDIT_SECURITE.md, incident glibc)
+# après le correctif serveur. `no-cache` (pas `no-store`) : force la revalidation à chaque
+# téléchargement plutôt que d'interdire toute mise en cache — le client renvoie l'ETag/
+# Last-Modified, le serveur répond 304 si rien n'a changé, 200 sinon. Coût négligeable face
+# à la fréquence de ces téléchargements (manuels, rares).
+_NO_CACHE_HEADERS = {"Cache-Control": "no-cache"}
 
 
 @router.get("/latest/version")
@@ -372,11 +437,26 @@ async def latest_agent_version():
     paquet dont l'empreinte ne correspond pas — seule protection posée avant qu'une vraie
     signature Authenticode vérifiable (certificat GPO) ne soit en place côté Windows, cf.
     docstring `apply_update`. `None` si aucun paquet n'est disponible côté serveur pour cet
-    OS (rien à hacher)."""
+    OS (rien à hacher).
+
+    `built_at_windows`/`built_at_linux` (19/08/2026) : date de construction du paquet
+    actuellement publié (mtime sur `AGENT_DIST_DIR`), affichée sur la page Agents à côté de
+    chaque option de téléchargement pour lever toute ambiguïté sur ce qui sera reçu — cf.
+    `_built_at` ci-dessus.
+
+    `version_windows`/`version_linux` (19/08/2026, remplace l'ancien `version` unique) —
+    versionnement séparé par plateforme, cf. `CURRENT_AGENT_VERSION_WINDOWS`/`_LINUX`
+    ci-dessus. `agent/src/install.rs::check_update` (Windows) et `update-agent.ps1`/`.sh`
+    (déploiement de parc, cf. leur propre lecture de ce champ) lisent chacun uniquement la
+    clé qui les concerne."""
+    deb_path = _latest_deb_path()
     return {
-        "version": CURRENT_AGENT_VERSION,
+        "version_windows": CURRENT_AGENT_VERSION_WINDOWS,
+        "version_linux": CURRENT_AGENT_VERSION_LINUX,
         "sha256_windows": _sha256_of(os.path.join(AGENT_DIST_DIR, "allsafe-agent.msi")),
-        "sha256_linux": _sha256_of(_latest_deb_path()) if _latest_deb_path() else None,
+        "sha256_linux": _sha256_of(deb_path) if deb_path else None,
+        "built_at_windows": _built_at(os.path.join(AGENT_DIST_DIR, "allsafe-agent.msi")),
+        "built_at_linux": _built_at(deb_path),
     }
 
 
@@ -385,7 +465,7 @@ async def latest_agent_windows():
     path = os.path.join(AGENT_DIST_DIR, "allsafe-agent.msi")
     if not os.path.isfile(path):
         raise HTTPException(404, "Paquet Windows non disponible côté serveur.")
-    return FileResponse(path, media_type="application/x-msi", filename="allsafe-agent.msi")
+    return FileResponse(path, media_type="application/x-msi", filename="allsafe-agent.msi", headers=_NO_CACHE_HEADERS)
 
 
 @router.get("/latest/linux")
@@ -393,7 +473,7 @@ async def latest_agent_linux():
     path = _latest_deb_path()
     if not path:
         raise HTTPException(404, "Paquet Linux non disponible côté serveur.")
-    return FileResponse(path, media_type="application/vnd.debian.binary-package", filename=os.path.basename(path))
+    return FileResponse(path, media_type="application/vnd.debian.binary-package", filename=os.path.basename(path), headers=_NO_CACHE_HEADERS)
 
 
 @router.get("/latest/windows-exe")
@@ -413,7 +493,7 @@ async def latest_agent_windows_exe():
     buf.seek(0)
     return StreamingResponse(
         buf, media_type="application/zip",
-        headers={"Content-Disposition": 'attachment; filename="allsafe-agent.zip"'},
+        headers={"Content-Disposition": 'attachment; filename="allsafe-agent.zip"', **_NO_CACHE_HEADERS},
     )
 
 
@@ -512,6 +592,13 @@ async def checkin(
     ))
 
     result = payload.model_dump()
+
+    # Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — fonction
+    # dédiée, pas apply_scan_result ci-dessous (shape différent, cf. doc § À vérifier à
+    # l'implémentation). Après apply_security_events (agent.audit_coverage déjà posé), avant
+    # apply_scan_result (indépendant, ne touche pas aux mêmes colonnes).
+    await apply_security_events(agent, result, session)
+
     result = await apply_scan_result(asset, result, session)
     return result
 
@@ -530,6 +617,151 @@ async def list_agents(session: AsyncSession = Depends(get_session), _user: User 
         _agent_dict(a, asset_name, asset_os, asset_os_version, token)
         for a, asset_name, asset_os, asset_os_version, token in rows
     ]}
+
+
+@router.get("/history")
+async def agents_history(session: AsyncSession = Depends(get_session), _user: User = Depends(require_page("/agents"))):
+    """Historique complet des agents (19/08/2026) — agents actuellement enrôlés/révoqués
+    (table `agents`) + agents supprimés (`AgentDeletionLog`, snapshot survivant au hard delete).
+    Alimente le badge compteur + la liste "depuis le début" de la page Sécurité > Agents. Le
+    compteur démarre aux agents actuels : rien n'est reconstitué avant la mise en place du
+    journal (cf. models.AgentDeletionLog). Déclaré AVANT `/{agent_id}` (route statique à un
+    segment) sous peine de se faire voler la requête par la route dynamique."""
+    live = (await session.execute(
+        select(Agent, Asset.name, AgentEnrollmentToken.created_by)
+        .outerjoin(Asset, Agent.asset_id == Asset.id)
+        .outerjoin(AgentEnrollmentToken, Agent.enrollment_token_id == AgentEnrollmentToken.id)
+    )).all()
+    deleted = (await session.execute(select(AgentDeletionLog))).scalars().all()
+
+    items = [
+        {
+            "hostname": a.hostname, "os": a.os, "asset_name": asset_name,
+            "enrolled_at": a.enrolled_at.isoformat() if a.enrolled_at else None,
+            "enrolled_by": created_by,
+            "status": a.status,                       # enrolled | revoked
+            "last_seen_at": a.last_seen_at.isoformat() if a.last_seen_at else None,
+            "revoked_at": a.revoked_at.isoformat() if a.revoked_at else None,
+            "revoked_by": a.revoked_by,
+            "deleted": False,
+        }
+        for a, asset_name, created_by in live
+    ] + [
+        {
+            "hostname": d.hostname, "os": d.os, "asset_name": d.asset_name,
+            "enrolled_at": d.enrolled_at.isoformat() if d.enrolled_at else None,
+            "enrolled_by": d.enrolled_by,
+            "status": "deleted",
+            "deleted_at": d.deleted_at.isoformat() if d.deleted_at else None,
+            "deleted_by": d.deleted_by,
+            "deleted": True,
+        }
+        for d in deleted
+    ]
+    # Tri du plus récent au plus ancien (date d'enrôlement, nulls en dernier) — les ISO produits
+    # par isoformat() sont comparables lexicographiquement, suffisant pour l'affichage.
+    items.sort(key=lambda i: i.get("enrolled_at") or "", reverse=True)
+    return {
+        "total": len(items),
+        "live_count": len(live),
+        "deleted_count": len(deleted),
+        "items": items,
+    }
+
+
+# ─── Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) ────
+# Écriture faite par apply_security_events() (services/agent_detection.py) au check-in
+# ci-dessus. Ici, uniquement lecture/acquittement — même schéma que routers/security.py
+# (déception DB) : réservé admin, SAUF le compteur (badge nav, visible à tout connecté).
+#
+# ⚠️ Enregistrées AVANT le catch-all `/{agent_id}` ci-dessous (comme `/history` au-dessus) —
+# FastAPI/Starlette matche les routes dans l'ordre de déclaration, pas par spécificité :
+# après ce catch-all, `GET /agents/security-events` serait intercepté par `get_agent` avec
+# `agent_id="security-events"` et ne répondrait jamais.
+
+def _security_event_dict(e: AgentSecurityEvent) -> dict:
+    return {
+        "id": str(e.id),
+        "agent_id": str(e.agent_id) if e.agent_id else None,
+        "hostname": e.hostname,
+        "os": e.os,
+        "category": e.category,
+        "severity": e.severity,
+        "detection_method": e.detection_method,
+        "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+        "reported_at": e.reported_at.isoformat() if e.reported_at else None,
+        "native_source": e.native_source,
+        "summary": e.summary,
+        "detail": e.detail,
+        "acknowledged": e.acknowledged,
+        "ack_by": e.ack_by,
+        "ack_at": e.ack_at.isoformat() if e.ack_at else None,
+    }
+
+
+@router.get("/security-events")
+async def list_security_events(
+    unack_only: bool = Query(False, description="Ne renvoyer que les évènements non acquittés"),
+    limit: int = Query(100, ge=1, le=500),
+    session: AsyncSession = Depends(get_session),
+    _admin: User = Depends(require_admin),
+):
+    """Journal des détections agent, le plus récent d'abord. Réservé admin — le compteur
+    ci-dessous reste accessible à tout utilisateur connecté (badge nav Inventaire)."""
+    q = select(AgentSecurityEvent).order_by(AgentSecurityEvent.reported_at.desc()).limit(limit)
+    if unack_only:
+        q = q.where(AgentSecurityEvent.acknowledged.is_(False))
+    rows = (await session.execute(q)).scalars().all()
+    return {"events": [_security_event_dict(e) for e in rows]}
+
+
+@router.get("/security-events/count")
+async def security_events_count(session: AsyncSession = Depends(get_session), _user: User = Depends(require_auth)):
+    """Compteur léger pour le badge nav (poll régulier) — exception délibérée à "réservé
+    admin" ci-dessus, même raisonnement que `routers/security.py::events_count`."""
+    unack = await session.scalar(
+        select(func.count()).select_from(AgentSecurityEvent).where(AgentSecurityEvent.acknowledged.is_(False))
+    )
+    latest = await session.scalar(
+        select(func.max(AgentSecurityEvent.reported_at)).where(AgentSecurityEvent.acknowledged.is_(False))
+    )
+    return {"unacknowledged": unack or 0, "latest": latest.isoformat() if latest else None}
+
+
+class AgentEventAckPayload(BaseModel):
+    ack_by: Optional[str] = None
+
+
+@router.post("/security-events/{event_id}/ack")
+async def ack_security_event(
+    event_id: str, data: AgentEventAckPayload,
+    session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin),
+):
+    """Acquitter un évènement — jamais une suppression (append-only strict, piste d'audit
+    NIS 2, cf. doc § Décisions figées)."""
+    e = await session.get(AgentSecurityEvent, event_id)
+    if not e:
+        raise HTTPException(404, "Évènement introuvable.")
+    e.acknowledged = True
+    e.ack_by = data.ack_by or None
+    e.ack_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(e)
+    return _security_event_dict(e)
+
+
+@router.post("/security-events/ack-all")
+async def ack_all_security_events(
+    data: AgentEventAckPayload,
+    session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin),
+):
+    now = datetime.now(timezone.utc)
+    res = await session.execute(
+        update(AgentSecurityEvent).where(AgentSecurityEvent.acknowledged.is_(False))
+        .values(acknowledged=True, ack_by=data.ack_by or None, ack_at=now)
+    )
+    await session.commit()
+    return {"acknowledged": res.rowcount or 0}
 
 
 @router.get("/{agent_id}")
@@ -605,5 +837,18 @@ async def delete_agent(agent_id: str, session: AsyncSession = Depends(get_sessio
         raise HTTPException(404, "Agent introuvable.")
     if agent.status != "revoked":
         raise HTTPException(409, "Révoquez d'abord l'agent avant de le supprimer.")
+    # Journal "agent supprimé" (19/08/2026, cf. models.AgentDeletionLog) : la ligne `agents` va
+    # disparaître sans trace (hard delete) — sans ce snapshot, l'historique complet des agents
+    # (badge de la page liste) ne pourrait plus compter ce poste. asset_name/enrolled_by résolus
+    # best-effort (l'actif ou le jeton d'origine peuvent avoir disparu entre-temps).
+    asset_name = await session.scalar(select(Asset.name).where(Asset.id == agent.asset_id)) if agent.asset_id else None
+    enrolled_by = (await session.scalar(
+        select(AgentEnrollmentToken.created_by).where(AgentEnrollmentToken.id == agent.enrollment_token_id)
+    )) if agent.enrollment_token_id else None
+    session.add(AgentDeletionLog(
+        hostname=agent.hostname, os=agent.os, asset_name=asset_name,
+        enrolled_at=agent.enrolled_at, enrolled_by=enrolled_by,
+        deleted_at=datetime.now(timezone.utc), deleted_by=_admin.full_name,
+    ))
     await session.delete(agent)
     await session.commit()

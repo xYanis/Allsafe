@@ -538,4 +538,17 @@ async def get_asset(asset_id: str, session: AsyncSession = Depends(get_session))
         select(NetworkStatus).where(NetworkStatus.asset_id == asset.id)
         .order_by(func.coalesce(NetworkStatus.updated_at, NetworkStatus.last_reported_at).desc())
     )).scalars().first()
-    return _asset_dict(asset, vuln_count or 0, network_status, None, open_vuln_count or 0)
+    # Mises à jour en attente, ventilées système/application — même logique que `list_assets`
+    # ci-dessus (mêmes PENDING_UPDATE_STATUSES, component_type NULL ignoré), scopée à cet actif.
+    # Sans ce calcul, l'endpoint passait `None` et le badge affichait toujours "—" sur les pages
+    # de détail (ex. AgentHistory.jsx), alors que la vue liste montrait le vrai compte.
+    pending_rows = (await session.execute(
+        select(Vulnerability.component_type, func.count())
+        .where(Vulnerability.asset_id == asset.id, Vulnerability.status.in_(PENDING_UPDATE_STATUSES))
+        .group_by(Vulnerability.component_type)
+    )).all()
+    pending_updates = {"system": 0, "application": 0}
+    for component_type, cnt in pending_rows:
+        if component_type in pending_updates:
+            pending_updates[component_type] += cnt
+    return _asset_dict(asset, vuln_count or 0, network_status, pending_updates, open_vuln_count or 0)

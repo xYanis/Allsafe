@@ -285,6 +285,17 @@ class TestAllApiRoutesAreProtected:
         page_only_paths = {
             ("GET", "/api/agents"), ("GET", "/api/agents/{agent_id}"),
             ("GET", "/api/agents/{agent_id}/checkins"),
+            # /history (19/08/2026) : même require_page("/agents") que les trois ci-dessus,
+            # manquait de cette liste depuis son ajout (route jamais couverte par ce test
+            # jusqu'ici, découvert en le faisant tourner pour de vrai).
+            ("GET", "/api/agents/history"),
+            # /security-events/count (19/08/2026, cf. docs/AGENT_DETECTION.md) : require_auth
+            # seul (pas require_page), même exception que routers/security.py::events_count —
+            # le badge nav doit rester visible à tout connecté, pas seulement admin. Le nom
+            # "page_only_paths" est un peu impropre ici (pas de require_page en jeu), mais
+            # cette branche ne vérifie que l'absence de require_admin, ce qui est exactement
+            # ce qu'on veut pour cette route.
+            ("GET", "/api/agents/security-events/count"),
         }
         non_admin_agent_paths = {
             ("POST", "/api/agents/enroll"), ("POST", "/api/agents/checkin"), ("GET", "/api/agents/pending"),

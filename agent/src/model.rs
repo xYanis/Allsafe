@@ -95,6 +95,80 @@ pub struct CheckinPayload {
     pub offline_since: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub failed_attempts: Option<u32>,
+    /// Détection d'évènements sensibles (19/08/2026, cf. docs/AGENT_DETECTION.md) — miroir de
+    /// `routers/agents.py::AgentCheckinPayload.security_events/audit_coverage/state_snapshot`.
+    /// `#[serde(default)]` côté Rust n'est pas nécessaire ici (jamais désérialisé, seulement
+    /// envoyé), mais `skip_serializing_if` évite de gonfler chaque check-in normal (aucune
+    /// détection neuve) d'un tableau/objet vide.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub security_events: Vec<SecurityEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audit_coverage: Option<AuditCoverage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_snapshot: Option<StateSnapshot>,
+}
+
+/// Un évènement du journal natif (Event Log Security / auditd), déjà catégorisé et résumé
+/// côté agent — le serveur ne fait aucune interprétation, juste stockage + dédoublonnage sur
+/// `native_event_id` (cf. `services/agent_detection.py`, backend).
+#[derive(Serialize, Default)]
+pub struct SecurityEvent {
+    pub category: String,             // cf. docs/AGENT_DETECTION.md § Catégories
+    pub severity: String,             // info | warning | critical
+    pub summary: String,              // résumé humain, ex. "nmap lancé par root"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<serde_json::Value>,
+    /// Horodatage de l'évènement côté POSTE (secondes Unix UTC) — indicatif, falsifiable
+    /// par un attaquant local. Le serveur pose sa propre horloge fiable à la réception
+    /// (`reported_at`, jamais transmis ici).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_source: Option<String>,   // windows_security_log | linux_auditd | linux_authlog
+    /// RecordID Windows / clé ausearch Linux — dédoublonnage serveur, `None` non pertinent
+    /// ici (SecurityEvent = toujours du journal natif, jamais du state_diff, calculé côté
+    /// serveur à partir de `state_snapshot` ci-dessous, pas envoyé par l'agent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_event_id: Option<String>,
+}
+
+/// État constaté de l'audit OS (19/08/2026) — l'agent CONSTATE, ne l'active jamais lui-même
+/// (écriture système, hors non-intervention). Laisse le serveur/l'UI afficher "détection
+/// partielle" plutôt que de faire croire à une couverture totale.
+///
+/// Dict libre (`HashMap`), pas une struct à champs fixes — miroir exact de
+/// `routers/agents.py::AgentCheckinPayload.audit_coverage: dict` (backend, aucun schéma
+/// strict clé par clé) : Linux et Windows n'ont pas les mêmes signaux à constater
+/// (`auditd_installed`/`auditd_running` côté Linux, `process_auditing`/`command_line_logging`
+/// côté Windows, cf. `collect/linux.rs`/`collect/windows.rs`) — une struct à champs fixes
+/// aurait forcé les deux plateformes à partager des noms de clé qui n'ont de sens que pour
+/// l'une des deux.
+pub type AuditCoverage = std::collections::HashMap<String, bool>;
+
+#[derive(Serialize, Default, Clone)]
+pub struct LocalUser {
+    pub name: String,
+    pub sid_or_uid: String,
+    pub enabled: bool,
+}
+
+#[derive(Serialize, Default, Clone)]
+pub struct PersistenceEntry {
+    #[serde(rename = "type")]
+    pub kind: String,   // cron | systemd_unit | scheduled_task | service
+    pub name: String,
+}
+
+/// Comptes/admins/persistance constatés à ce check-in — comparé côté serveur au dernier
+/// snapshot connu pour générer les détections `state_diff` (cf. `services/agent_detection.py`,
+/// backend). L'agent ne diffe rien lui-même : il envoie l'état brut à chaque check-in, le
+/// serveur garde la mémoire (`AgentStateSnapshot`) et fait la comparaison — plus simple qu'un
+/// diff local à synchroniser avec un serveur qui pourrait avoir raté un check-in.
+#[derive(Serialize, Default)]
+pub struct StateSnapshot {
+    pub local_users: Vec<LocalUser>,
+    pub admin_members: Vec<String>,
+    pub persistence: Vec<PersistenceEntry>,
 }
 
 /// Réponse de `GET /api/agents/pending` — interrogée par la boucle persistante

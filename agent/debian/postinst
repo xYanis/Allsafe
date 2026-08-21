@@ -3,7 +3,17 @@
 # agent/deploy/README.md). `|| true` : ne fait jamais échouer l'installation du paquet
 # si systemd est absent (défensif, pas attendu sur ce parc mais pas de raison de bloquer
 # dpkg pour ça).
+#
+# `restart` explicite après `enable` (19/08/2026, bug réel constaté : incident 0.1.5) —
+# `enable --now` ne redémarre PAS un service déjà actif (systemd traite `start` sur une
+# unit déjà démarrée comme un no-op). Lors d'une simple mise à jour du paquet (le cas
+# courant), le binaire sur disque est remplacé mais le processus déjà en mémoire continue
+# de tourner sur l'ancien inode — l'agent restait bloqué sur l'ancienne version tant que
+# personne ne redémarrait le service ou ne rebootait le poste, sans que rien ne le signale
+# (`agent_version` en base ne bouge jamais). `restart` couvre les deux cas (install neuve
+# comme mise à jour) sans distinction à faire ici.
 set -e
 systemctl daemon-reload || true
-systemctl enable --now allsafe-agent.service || true
+systemctl enable allsafe-agent.service || true
+systemctl restart allsafe-agent.service || true
 exit 0

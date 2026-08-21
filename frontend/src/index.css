@@ -24,6 +24,39 @@
   --text-muted:    #57606a;
   --text-faint:    #8c959f;
 }
+/* Neutre (21/08/2026, demande explicite ; base repassée en gris FONCÉ le même jour, 2e demande
+   explicite — la 1re version était un gris clair) — quasi monochrome gris, pensé pour une
+   présentation professionnelle en salle de réunion : les couleurs de module/badges restent
+   inchangées ailleurs (cf. CLAUDE.md/plan), mais diluées à seulement 14-28% dans ce fond gris
+   foncé via tintedCard() (cardStyle.js), le rendu général reste "majoritairement gris" sans y
+   toucher. Zinc (Tailwind) plutôt qu'un gris neutre pur : même famille que --border-subtle
+   d'origine, cohérent avec le reste de la palette de l'app. */
+:root[data-theme="neutral"] {
+  --bg-app:        #18181b;
+  --bg-card:       #232326;
+  --bg-secondary:  #2a2a2e;
+  --border:        #3f3f46;
+  --border-subtle: #302f34;
+  --text-primary:  #f4f4f5;
+  --text-secondary:#d4d4d8;
+  --text-muted:    #a1a1aa;
+  --text-faint:    #71717a;
+}
+/* Cyberpunk (21/08/2026, demande explicite) — noir profond à dominante violette, néons façon
+   Night City. Bordures/textes restent volontairement sobres (violet-gris discret) : le néon
+   est réservé aux quelques accents ci-dessous (--brand/--accent-blue) et aux couleurs de
+   module déjà en place ailleurs, sinon plus rien ne ressort dans l'interface. */
+:root[data-theme="cyberpunk"] {
+  --bg-app:        #05050a;
+  --bg-card:       #0d0d16;
+  --bg-secondary:  #14141f;
+  --border:        #2a2a3d;
+  --border-subtle: #1c1c28;
+  --text-primary:  #f5f5fa;
+  --text-secondary:#c9c9e0;
+  --text-muted:    #7d7d9e;
+  --text-faint:    #55556e;
+}
 
 /* Identité de marque CBR — un seul jeu de tokens au lieu du même à plat recopié en dur dans
    Layout/Home/Login/WelcomeOverlay/ProtectedRoute (5 fichiers avant cette centralisation).
@@ -60,10 +93,56 @@
   --brand-grad: linear-gradient(155deg, #ffffff 0%, #f6f1e0 55%, #ede4c8 100%);
   --brand-glow: rgba(138, 106, 0, 0.22);
 }
+/* Neutre — logo/wordmark en gris ardoise clair, glow assorti au lieu de l'or (base repassée en
+   gris foncé, demande explicite : bascule du mécanisme "tuile claire + glyphe foncé" de light
+   vers "tuile foncée + glyphe clair" de dark/cyberpunk ci-dessous — même logique de contraste,
+   suit juste le nouveau fond sombre). */
+:root[data-theme="neutral"] {
+  --brand: #d4d4d8;
+  --brand-dark: #a1a1aa;
+  --brand-text-grad: linear-gradient(100deg, #f4f4f5 0%, #d4d4d8 35%, #a1a1aa 65%, #d4d4d8 100%);
+  --brand-icon: var(--brand);
+  --brand-grad: linear-gradient(155deg, #3f3f46 0%, #2a2a2e 55%, #18181b 100%);
+  --brand-glow: rgba(212, 212, 216, 0.22);
+  --accent-blue: #a1a1aa;
+}
+/* Cyberpunk (rebaptisé "Néon" côté UI, 21/08/2026) — jaune sur tuile noire + glow magenta :
+   clin d'œil jaune/magenta Night City, sans retoucher CbrMark.jsx (déjà 100% piloté par ces
+   variables). --accent-blue devient cyan — hérité par tous les boutons pleins qui l'utilisent
+   déjà (ex. "Analyser" sur Dashboard.jsx/Vulnerabilities.jsx). Adouci (21/08/2026, retour
+   utilisateur — "trop flashy") : cyan/jaune moins saturés au max, glow réduit d'un tiers.
+   `!important` sur les cartes n'existe pas ici, mais toutes ces valeurs sont partagées par un
+   grand nombre de composants — les retoucher ICI suffit à calmer "le reste des composants". */
+:root[data-theme="cyberpunk"] {
+  --brand: #e8d312;
+  --brand-dark: #4a4600;
+  --brand-text-grad: linear-gradient(100deg, #f5edb0 0%, #e8d312 35%, #d94d85 65%, #e8d312 100%);
+  --brand-icon: #e8d312;
+  --brand-grad: linear-gradient(155deg, #1a1a2e 0%, #0d0d16 55%, #000000 100%);
+  --brand-glow: rgba(217, 77, 133, 0.3);
+  --accent-blue: #2dd4e8;
+}
 html, body, #root {
   background-color: var(--bg-app);
   color: var(--text-primary);
   height: 100%;
+}
+
+/* Cyberpunk — scanlines subtiles sur tout le fond applicatif (ambiance CRT/Night City),
+   21/08/2026, demande explicite. `pointer-events: none` : ne gêne jamais le clic. Opacité
+   volontairement infime (lignes blanches à 2,5%) : une texture, jamais une gêne de lecture. */
+:root[data-theme="cyberpunk"] body::before {
+  content: "";
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(255,255,255,0.025) 0px, rgba(255,255,255,0.025) 1px, transparent 1px, transparent 3px);
+  animation: cyberpunk-scan 9s linear infinite;
+}
+@keyframes cyberpunk-scan {
+  from { background-position: 0 0; }
+  to   { background-position: 0 300px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-theme="cyberpunk"] body::before { animation: none; }
 }
 
 /* Rotation périodique du logo — liée au composant `CbrLogoTile` lui-même
@@ -159,6 +238,63 @@ html, body, #root {
 :root[data-theme="light"] input[type="time"],
 :root[data-theme="light"] select {
   color-scheme: light;
+}
+/* dark, pas light (21/08/2026, suite au passage de Neutre en base gris foncé — sinon le popup
+   natif du navigateur reste blanc sur un fond d'app désormais sombre). */
+:root[data-theme="neutral"] input[type="date"],
+:root[data-theme="neutral"] input[type="datetime-local"],
+:root[data-theme="neutral"] input[type="time"],
+:root[data-theme="neutral"] select {
+  color-scheme: dark;
+}
+:root[data-theme="cyberpunk"] input[type="date"],
+:root[data-theme="cyberpunk"] input[type="datetime-local"],
+:root[data-theme="cyberpunk"] input[type="time"],
+:root[data-theme="cyberpunk"] select {
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Identité forte par thème (21/08/2026, demande explicite — "zero limite tu peux
+   changer", "absolument tout", après retour "pas assez de changement") : au-delà des
+   couleurs, la SILHOUETTE et la TYPOGRAPHIE changent structurellement. Volontairement
+   large (sélecteurs par attribut `[class*=...]`, `*`) plutôt que fichier par fichier —
+   c'est justement le seul moyen de couvrir les ~180 fichiers de pages sans les
+   retoucher un par un (cf. commentaire modules.js). Aucune couleur sémantique
+   (sévérité/criticité/ping/statut) n'est touchée ici : ces composants n'utilisent
+   pas ces classes utilitaires de coin/ombre partagées, juste leurs propres badges.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Neutre — présentation pro : coins nets, ZÉRO ombre/lueur nulle part, titres en serif
+   (rupture nette avec le mono "tech" utilisé partout ailleurs par défaut). */
+:root[data-theme="neutral"] * {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+:root[data-theme="neutral"] [class*="rounded-2xl"],
+:root[data-theme="neutral"] [class*="rounded-xl"],
+:root[data-theme="neutral"] [class*="rounded-lg"] {
+  border-radius: 3px !important;
+}
+:root[data-theme="neutral"] h1,
+:root[data-theme="neutral"] h2,
+:root[data-theme="neutral"] h3 {
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+/* Cyberpunk — panneau HUD : boutons/nav en mono capitales espacées (le mono existait déjà
+   sur les seuls titres de PageHero ; étendu ici à tout élément interactif). Pas appliqué aux
+   champs de saisie/tableaux : la donnée doit rester lisible/alignée, seule la "chrome"
+   change. Grille de fond du hero et halo déjà boostés plus haut (cf. .hero-grid/.home-glow). */
+:root[data-theme="cyberpunk"] button,
+:root[data-theme="cyberpunk"] .home-tile p,
+:root[data-theme="cyberpunk"] h1,
+:root[data-theme="cyberpunk"] h2 {
+  font-family: var(--font-mono);
+}
+:root[data-theme="cyberpunk"] button {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 /* `color-scheme` seul insuffisant sur Chrome (17/08/2026, confirmé par capture d'écran
    utilisateur — popup toujours blanc malgré la règle ci-dessus) : Chrome ne dérive pas
@@ -337,6 +473,14 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   background: var(--nav); transform: translateY(-50%);
 }
 .nav-item.active-nav.nav-item-collapsed::before { display: none; }
+/* Thèmes (21/08/2026, demande explicite) — Neutre : liseré actif sans lueur, discret.
+   Cyberpunk : liseré néon qui déborde en glow, libellés en capitales espacées (façon HUD). */
+:root[data-theme="cyberpunk"] .nav-item.active-nav::before {
+  box-shadow: 0 0 4px 1px var(--nav), 0 0 9px 2px color-mix(in srgb, var(--nav) 40%, transparent);
+}
+:root[data-theme="cyberpunk"] .nav-item span {
+  letter-spacing: 0.02em;
+}
 @media (hover: hover) and (pointer: fine) {
   .nav-item:not(.active-nav):hover {
     background: color-mix(in srgb, var(--nav) 13%, transparent);
@@ -533,36 +677,87 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   opacity: 0.5;
 }
 :root[data-theme="light"] .hero-grid { opacity: 0.35; }
+/* Neutre (21/08/2026, demande explicite) — présentation pro, zéro décoration : ni halo ni
+   trame de points, juste le contenu. */
+:root[data-theme="neutral"] .hero-grid,
+:root[data-theme="neutral"] .home-glow { display: none; }
+/* Cyberpunk — grille plus marquée, façon "réticule HUD". */
+:root[data-theme="cyberpunk"] .hero-grid { opacity: 0.8; }
 
-/* Fond + bordure déjà teintés de la couleur du module au repos (léger dégradé
-   + liseré coloré à faible opacité) — avant, un simple --bg-card gris identique
-   pour les 7 tuiles ne laissait deviner l'identité du module qu'au survol.
-   --tile est injectée en style inline par tuile (cf. Home.jsx). */
-.home-tile {
+/* Relief + tilt 3D réutilisables pour toute grille de tuiles cliquables (21/08/2026, demande
+   explicite — "tuiles en 3D", étendu depuis Home à Dashboard cf. utils/tilt3d.js). Réservé à
+   cyberpunk (21/08/2026 : essayé un temps sur dark/light/neutre aussi, revenu en arrière au
+   retour utilisateur — "beaucoup trop") : aucun style par défaut sur `.tile-3d` elle-même,
+   tout est posé dans le bloc `:root[data-theme="cyberpunk"]` ci-dessous, pour ne plus RIEN
+   laisser fuiter sur les 3 autres thèmes (un premier essai avait laissé un léger biseau par
+   défaut ici, visible même hors cyberpunk — bug corrigé). Classe générique découplée du
+   fond/bordure (laissés à la charge de chaque page — `.home-tile` ci-dessous pour Home,
+   `style={CARD}`/tintedCard pour Dashboard) pour rester composable partout où une grille de
+   tuiles existe. */
+.tile-3d {
   position: relative; z-index: 1; overflow: hidden;
-  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 18%, var(--bg-card)), var(--bg-card) 70%);
-  border: 1px solid color-mix(in srgb, var(--tile) 32%, var(--border));
   transition: transform 240ms var(--ease-out), border-color 240ms var(--ease-out),
               box-shadow 240ms var(--ease-out), background 240ms var(--ease-out);
   will-change: transform;
 }
-.home-tile:active { transform: scale(0.98); }
+/* Biseau simulé par deux ombres internes (même idiome que le carré d'icône de PageHero.jsx —
+   highlight clair en haut, ombre sombre en bas) + glow externe teinté module + flou verre dépoli,
+   par-dessus le fond/bordure néon déjà posés par la page (`--tile` : couleur du module, injectée
+   en style inline par tuile). */
+:root[data-theme="cyberpunk"] .tile-3d {
+  box-shadow:
+    0 0 24px -10px color-mix(in srgb, var(--tile) 65%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -16px 20px -14px rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+}
+:root[data-theme="cyberpunk"] .tile-3d:active { transform: scale(0.98); }
 
-/* TEST — tilt 3D des tuiles (18/08/2026, à l'essai, pas encore validé) : la grille porte la
-   perspective (`.home-tiles-grid`) plutôt que chaque tuile individuellement — un seul contexte
-   3D partagé par toutes, plus simple qu'un wrapper par tuile. rotateX/rotateY posés en style
-   inline par Home.jsx (suivi souris, cf. handleTileMove) — la transition CSS sur `transform`
-   est coupée pendant le suivi (sinon effet "élastique" en retard sur le curseur) et rétablie au
-   `mouseleave` pour que le retour à plat soit animé. Glare : dégradé radial qui suit le curseur
-   via --mx/--my (mêmes coordonnées que le tilt), teinté dans la couleur du module (--tile, pas
-   du blanc pur — demande explicite, plus cohérent avec le reste de la tuile déjà teintée) +
-   un peu de blanc pour garder l'effet "reflet". Overlay purement décoratif au-dessus du contenu. */
-.home-tiles-grid { perspective: 1000px; }
-.home-tile-glare {
+/* Tilt 3D à la souris, réservé à cyberpunk (21/08/2026 : essayé un temps sur dark/light aussi,
+   revenu en arrière au retour utilisateur — "beaucoup trop", cf. commentaire `.tile-3d`
+   ci-dessus). La grille porte la perspective (`.tile-3d-grid`) plutôt que chaque tuile
+   individuellement — un seul contexte 3D partagé par toutes, plus simple qu'un wrapper par
+   tuile ; posée sur les 4 thèmes, inoffensive sans transform 3D actif dessous. rotateX/rotateY
+   posés en style inline par la page (suivi souris, cf. utils/tilt3d.js::tiltMouseMove) — la
+   transition CSS sur `transform` est coupée pendant le suivi (sinon effet "élastique" en retard
+   sur le curseur) et rétablie au `mouseleave` pour que le retour à plat soit animé. Glare :
+   dégradé radial qui suit le curseur via --mx/--my (mêmes coordonnées que le tilt), teinté dans
+   la couleur du module (--tile, pas du blanc pur — demande explicite, plus cohérent avec le
+   reste de la tuile déjà teintée) + un peu de blanc pour garder l'effet "reflet". Overlay
+   purement décoratif au-dessus du contenu. */
+.tile-3d-grid { perspective: 1000px; }
+/* Rétréci + éclairci en 3 passes (21/08/2026, retour utilisateur répété — "grosse tache" à
+   chaque essai) : rayon 35% → 20% → 12% → 7%, mélange blanc 30% → 12% → 8% → 5%, opacité max
+   1 → 0.5 → 0.35 → 0.2 — reflet à peine visible plutôt qu'un aplat coloré. */
+.tile-3d-glare {
   position: absolute; inset: 0; z-index: 2; pointer-events: none;
-  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--tile) 55%, white 30%), transparent 35%);
+  background: radial-gradient(circle at var(--mx, 50%) var(--my, 50%), color-mix(in srgb, var(--tile) 35%, white 5%), transparent 7%);
   opacity: 0;
   transition: opacity 240ms var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  /* Cyberpunk uniquement : sans tilt actif sur les autres thèmes, --mx/--my ne sont jamais
+     posées, un survol y ferait apparaître un reflet figé au centre plutôt qu'un suivi de souris. */
+  :root[data-theme="cyberpunk"] .tile-3d:hover .tile-3d-glare { opacity: 0.2; }
+}
+
+/* Fond + bordure déjà teintés de la couleur du module au repos (léger dégradé
+   + liseré coloré à faible opacité) — avant, un simple --bg-card gris identique
+   pour les 7 tuiles ne laissait deviner l'identité du module qu'au survol.
+   --tile est injectée en style inline par tuile (cf. Home.jsx). Relief/tilt 3D : cf. `.tile-3d`
+   ci-dessus, toujours posée en plus de `.home-tile` sur l'élément (cf. Home.jsx). */
+.home-tile {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 18%, var(--bg-card)), var(--bg-card) 70%);
+  border: 1px solid color-mix(in srgb, var(--tile) 32%, var(--border));
+}
+/* Neutre — tuile plate, sans dégradé ni lueur (présentation pro). */
+:root[data-theme="neutral"] .home-tile {
+  background: var(--bg-card);
+  border: 1px solid color-mix(in srgb, var(--tile) 20%, var(--border));
+}
+:root[data-theme="cyberpunk"] .home-tile {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--tile) 18%, var(--bg-card)), var(--bg-card) 68%);
+  border: 1px solid color-mix(in srgb, var(--tile) 38%, var(--border));
 }
 
 /* Survol (18/08/2026, demande explicite) : le MOUVEMENT reste confiné à l'icône (scale +
@@ -586,7 +781,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
     animation: home-icon-hover 600ms var(--ease-out) forwards;
     background: color-mix(in srgb, var(--tile) 28%, transparent);
   }
-  .home-tile:hover .home-tile-glare { opacity: 1; }
 }
 
 /* Sélection d'un module (18/08/2026, demande explicite) : jusqu'ici `navigate()` partait
@@ -612,9 +806,9 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .home-enter, .home-enter-left, .home-enter-right, .home-logo, .home-glow { animation: none; opacity: 1; transform: none; }
-  .home-tile { transform: none; }
+  .tile-3d { transform: none; }
   .home-tile:hover .home-icon { animation: none; }
-  .home-tile-glare { display: none; }
+  .tile-3d-glare { display: none; }
   .home-tile-selected { transform: none; }
   .home-exit { animation: none; }
 }

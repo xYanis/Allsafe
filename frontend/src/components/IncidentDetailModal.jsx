@@ -19,6 +19,8 @@ import { milestoneStatus, MILESTONE_LABELS } from '../utils/nis2Countdown.js'
 import { MODULES } from '../constants/modules.js'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { isFakeId, buildFakeIncidentTimeline, anonymizeValidator } from '../utils/fakeData.js'
 
 const MILESTONES = ['early_warning', 'incident_notification', 'final_report']
 const MODULE_COLOR = MODULES.incidents.color
@@ -76,7 +78,7 @@ function incidentSteps(incident) {
 // Pièces jointes PDF du rapport final — 5 Mo max chacune (cf. backend/services/
 // incident_attachments.py pour la validation faisant foi ; la vérif ici n'est qu'un
 // confort UX, pas une garantie de sécurité).
-function AttachmentsSection({ incidentId }) {
+function AttachmentsSection({ incidentId, maskFilenames }) {
   const { names: ANALYSTS } = useAnalysts()
   const [attachments, setAttachments] = useState([])
   const [uploadedBy, setUploadedBy] = useState('')
@@ -123,7 +125,7 @@ function AttachmentsSection({ incidentId }) {
         <div key={a.id} className="flex items-center justify-between text-xs gap-2">
           <a href={incidentAttachmentDownloadUrl(incidentId, a.id)} target="_blank" rel="noopener noreferrer"
             className="hover:underline truncate" style={{ color: MODULE_COLOR }}>
-            📎 {a.filename} <span style={{ color: 'var(--text-faint)' }}>({(a.size_bytes / 1024).toFixed(0)} Ko)</span>
+            📎 {maskFilenames ? 'piece-jointe.pdf' : a.filename} <span style={{ color: 'var(--text-faint)' }}>({(a.size_bytes / 1024).toFixed(0)} Ko)</span>
           </a>
           <button onClick={() => handleDelete(a.id)} className="flex-shrink-0" style={{ color: 'var(--text-faint)' }} title="Retirer">✕</button>
         </div>
@@ -154,7 +156,16 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
   // Suppression réservée admin côté serveur (03/08/2026, audit sécurité) — masqué ici
   // pour ne pas laisser un compte analyst se heurter à un 403 après confirmation.
   const { user } = useAuth()
-  const canDelete = user?.role === 'admin'
+  const { isAnonymous } = usePresentation()
+  const isFake = isFakeId(incident.id)
+  const canDelete = user?.role === 'admin' && !isFake
+  // Incident réel affiché en mode Présentation (21/08/2026, retour utilisateur) : le titre/
+  // description/noms affichés ci-dessus viennent déjà d'un `incident` anonymisé par la page
+  // appelante (Incidents.jsx::anonymizeIncident) — restait la chronologie, récupérée ici par un
+  // 2e appel API sur l'id réel, avec des `author`/pièces jointes en clair. `author` masqué à la
+  // volée ; `notes` (justification libre) laissée telle quelle — pas de liste de vrais actifs
+  // sous la main ici pour y appliquer redactText, cf. utils/fakeData.js::redactText.
+  const maskReal = isAnonymous && !isFake
   const [entries, setEntries] = useState([])
   const [loadingTimeline, setLoadingTimeline] = useState(true)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
@@ -162,9 +173,11 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
   const [viewMilestone, setViewMilestone] = useState(null)
 
   function loadTimeline() {
+    // Incident de démonstration (mode Présentation) : pas d'appel API, construite côté client.
+    if (isFake) { setEntries(buildFakeIncidentTimeline(incident)); setLoadingTimeline(false); return }
     setLoadingTimeline(true)
     incidentTimeline(incident.id)
-      .then(r => setEntries(r.data.entries))
+      .then(r => setEntries(maskReal ? r.data.entries.map(e => ({ ...e, author: e.author ? anonymizeValidator(e.author) : e.author })) : r.data.entries))
       .catch(() => setEntries([]))
       .finally(() => setLoadingTimeline(false))
   }
@@ -224,7 +237,7 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
                   style={{ background: 'rgba(248,81,73,0.12)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>
                   🚨 Rattaché à la crise « {incident.crisis_title} »
                 </button>
-              ) : (
+              ) : !isFake && (
                 <button onClick={() => setActionModal('escalate')}
                   className="mt-1.5 text-xs px-1.5 py-0.5 rounded font-medium"
                   style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
@@ -253,7 +266,7 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
             <div className="rounded-xl p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Notification NIS 2</p>
-                {!incident.requires_notification ? (
+                {isFake ? null : !incident.requires_notification ? (
                   <button onClick={() => setActionModal('qualify')} className="text-xs px-2.5 py-1 rounded-lg font-medium"
                     style={{ background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
                     Qualifier à notifier
@@ -288,14 +301,16 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
                           ) : (
                             <span className="flex items-center gap-2">
                               <span style={{ color: s.color }}>{s.label}{dueAt ? ` (${new Date(dueAt).toLocaleString('fr-FR')})` : ''}</span>
-                              <button onClick={() => setActionModal(m)} className="px-2 py-0.5 rounded font-medium flex-shrink-0"
-                                style={{ background: 'var(--bg-card)', color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
-                                Marquer envoyé
-                              </button>
+                              {!isFake && (
+                                <button onClick={() => setActionModal(m)} className="px-2 py-0.5 rounded font-medium flex-shrink-0"
+                                  style={{ background: 'var(--bg-card)', color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
+                                  Marquer envoyé
+                                </button>
+                              )}
                             </span>
                           )}
                         </div>
-                        {m === 'final_report' && sentAt && <AttachmentsSection incidentId={incident.id} />}
+                        {m === 'final_report' && sentAt && <AttachmentsSection incidentId={incident.id} maskFilenames={maskReal} />}
                       </div>
                     )
                   })}
@@ -313,7 +328,9 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
             <div>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Historique</p>
-                <button onClick={() => setActionModal('note')} className="text-xs" style={{ color: 'var(--text-muted)' }}>+ Ajouter une note</button>
+                {!isFake && (
+                  <button onClick={() => setActionModal('note')} className="text-xs" style={{ color: 'var(--text-muted)' }}>+ Ajouter une note</button>
+                )}
               </div>
               <IncidentTimeline entries={entries} loading={loadingTimeline} />
             </div>
@@ -327,10 +344,12 @@ export default function IncidentDetailModal({ incident, onClose, onEdit, onUpdat
                 Supprimer
               </button>
             )}
-            <button onClick={onEdit} className="text-xs px-3 py-2 rounded-lg font-medium"
-              style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              Modifier
-            </button>
+            {!isFake && (
+              <button onClick={onEdit} className="text-xs px-3 py-2 rounded-lg font-medium"
+                style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                Modifier
+              </button>
+            )}
           </div>
         </div>
       </div>

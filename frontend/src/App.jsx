@@ -39,6 +39,7 @@ import { PresentationProvider } from './contexts/PresentationContext.jsx'
 import { AnalystProvider } from './contexts/AnalystContext.jsx'
 import { AnalystPreferenceProvider } from './contexts/AnalystPreferenceContext.jsx'
 import { GuidePreferenceProvider } from './contexts/GuidePreferenceContext.jsx'
+import { DashboardLayoutProvider } from './contexts/DashboardLayoutContext.jsx'
 import { AuthProvider } from './contexts/AuthContext.jsx'
 
 function ConnectionTracker() {
@@ -64,6 +65,7 @@ export default function App() {
     <AnalystProvider>
     <AnalystPreferenceProvider>
     <GuidePreferenceProvider>
+    <DashboardLayoutProvider>
     <ThemeProvider>
       <BrowserRouter>
         <ConnectionTracker />
@@ -119,6 +121,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </ThemeProvider>
+    </DashboardLayoutProvider>
     </GuidePreferenceProvider>
     </AnalystPreferenceProvider>
     </AnalystProvider>

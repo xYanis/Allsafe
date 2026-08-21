@@ -17,6 +17,28 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
+**Dernière session : 21/08/2026 (suite 2)** — 4 thèmes visuels (Sombre/Clair/Neutre/Néon) +
+Dashboard personnalisable + audit complet du mode Présentation. Détail : `docs/HISTORIQUE.md`.
+
+- **4 thèmes** (`ThemeContext.jsx`) : Neutre (gris quasi monochrome, présentation pro) et
+  Cyberpunk/**Néon** (néons/scanlines/tilt 3D, palette bleu/vert/jaune) en plus de Sombre/Clair —
+  couleurs de module (`constants/modules.js`) et styles de carte/hero réactifs au thème. Néon
+  adouci en fin de session (retour utilisateur — "trop flashy").
+- **Dashboard personnalisable** (`constants/dashboardLayout.js`/`DashboardLayoutContext.jsx`
+  nouveaux) : KPI + barre de Filtres + les 7 blocs de contenu dans une seule grille réordonnable/
+  redimensionnable (24 colonnes, 5 tailles), boutons ◀/▶ en plus du glisser-déposer natif (retour
+  utilisateur — le drag seul était "compliqué"), `gridAutoFlow: dense` pour éviter les trous, 3
+  dispositions prédéfinies + reset rapide.
+- **Audit mode Présentation** : cause racine trouvée (Incidents/Crises/Veille/Audits ajoutaient
+  les fake data à la suite des vraies lignes SANS les anonymiser) — corrigé partout, plus
+  `AuditDetail.jsx`, `AdministrationSecurity.jsx` (Utilisateurs/Analystes/Services/Rôles),
+  `Documentation.jsx` (Gouvernance, aucune couverture avant), sélecteurs d'actifs des formulaires
+  de création, export CSV `RapportVeille.jsx`.
+- **Point ouvert** : pas de vérification visuelle navigateur (aucun Playwright/Chromium
+  disponible) — repose sur compilation propre + retours utilisateur en test manuel.
+
+---
+
 **Dernière session : 21/08/2026 (suite)** — Ping agent + correctif mise à jour Windows MSI.
 
 - **Ping agent** (pull model — Allsafe ne contacte jamais l'agent) : `ping_requested_at` posé

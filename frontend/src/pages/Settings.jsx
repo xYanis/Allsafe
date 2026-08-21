@@ -6,6 +6,8 @@ import { useAuth } from '../contexts/AuthContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
 import { useGuidePreference } from '../contexts/GuidePreferenceContext.jsx'
+import { useDashboardLayout } from '../contexts/DashboardLayoutContext.jsx'
+import { DASHBOARD_PRESETS } from '../constants/dashboardLayout.js'
 import { changeEmail, changePassword, integrationsStatus, mySessions, revokeMySession, scanPolicies, updateScanPolicy, runScanPolicyNow } from '../api/client.js'
 import PageHero from '../components/PageHero.jsx'
 import PasswordInput from '../components/PasswordInput.jsx'
@@ -16,6 +18,45 @@ import { tintedCard } from '../utils/cardStyle.js'
 
 const CARD = tintedCard(MODULES.parametres.color)
 const TEXT_INPUT = { background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }
+
+// 4 thèmes (21/08/2026, demande explicite) — aperçu miniature (fond/carte/bordure/accent)
+// plutôt qu'un simple libellé, pour juger d'un coup d'œil avant de basculer. `swatch` recopie
+// à la main les tokens posés dans index.css (pas de lecture dynamique des CSS vars ici : ce
+// sont précisément les valeurs DES AUTRES thèmes qu'on veut prévisualiser, pas celles du
+// thème actif).
+const THEME_OPTIONS = [
+  { id: 'dark', label: 'Sombre', desc: 'Fond sombre, accents vifs — thème par défaut', swatch: { bg: '#0d1117', card: '#161b22', border: '#30363d', accent: '#1f6feb' } },
+  { id: 'light', label: 'Clair', desc: 'Fond clair, contraste doux', swatch: { bg: '#f6f8fa', card: '#ffffff', border: '#d0d7de', accent: '#1f6feb' } },
+  { id: 'neutral', label: 'Neutre', desc: 'Gris quasi monochrome — présentation professionnelle', swatch: { bg: '#f4f4f5', card: '#ffffff', border: '#d4d4d8', accent: '#52525b' } },
+  // Libellé "Néon" (21/08/2026, demande explicite, temporaire) — id interne resté "cyberpunk"
+  // (data-theme, constants/modules.js, index.css : des dizaines de sélecteurs/clés à retoucher
+  // pour un simple changement de libellé affiché, aucun intérêt). Seul le texte visible change.
+  { id: 'cyberpunk', label: 'Néon', desc: 'Néons sur noir profond, en retenue', swatch: { bg: '#05050a', card: '#0d0d16', border: '#2a2a3d', accent: '#2dd4e8' } },
+]
+
+function ThemeSwatchCard({ option, active, onClick }) {
+  return (
+    <button onClick={onClick}
+      className="text-left rounded-xl p-3 transition-colors"
+      style={{
+        background: 'var(--bg-secondary)',
+        border: `1px solid ${active ? MODULES.parametres.color : 'var(--border)'}`,
+        boxShadow: active ? `0 0 0 1px ${MODULES.parametres.color}` : 'none',
+      }}>
+      <div className="rounded-lg overflow-hidden mb-2" style={{ background: option.swatch.bg, border: `1px solid ${option.swatch.border}`, height: 44 }}>
+        <div className="h-full flex items-center gap-1.5 px-2">
+          <div className="flex-1 h-6 rounded" style={{ background: option.swatch.card, border: `1px solid ${option.swatch.border}` }} />
+          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: option.swatch.accent }} />
+        </div>
+      </div>
+      <p className="text-xs font-semibold flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+        {option.label}
+        {active && <span style={{ color: MODULES.parametres.color }}>✓</span>}
+      </p>
+      <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>{option.desc}</p>
+    </button>
+  )
+}
 
 function fmtDate(iso) {
   if (!iso) return '—'
@@ -38,6 +79,8 @@ const SECTION_ICON_PATHS = {
   security: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z',
   sessions: 'M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25',
   integrations: 'M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244',
+  // Même glyphe que le PageHero du Dashboard lui-même (Dashboard.jsx) — identité cohérente.
+  dashboard: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z',
 }
 
 function SectionIcon({ name }) {
@@ -78,13 +121,23 @@ function Switch({ checked, onChange, ariaLabel }) {
 // pas une carte par réglage comme l'ancienne version empilée.
 export default function Settings() {
   const navigate = useNavigate()
-  const { isDark, toggle } = useTheme()
+  const { theme, isDark, setTheme } = useTheme()
   const { isAnonymous, toggle: toggleAnonymous } = usePresentation()
+  const { applyPreset: applyDashboardPreset, setEditMode: setDashboardEditMode } = useDashboardLayout()
   const { user, logout, refresh } = useAuth()
   const { names: analystNames } = useAnalysts()
   const { preferredAnalyst, setPreferredAnalyst } = useAnalystPreference()
   const { guidesHidden, setGuidesHidden } = useGuidePreference()
-  const [section, setSection] = useState('presentation')
+  // Persisté en sessionStorage (21/08/2026) — corrige un bug réel : passer sur Neutre/Cyberpunk
+  // recharge la page entière (cf. ThemeContext.jsx::setTheme, nécessaire pour que les couleurs
+  // de module se répercutent), ce qui remettait cet onglet à "Présentation" par défaut à
+  // chaque bascule au lieu de rester sur "Apparence". sessionStorage (pas localStorage) :
+  // un onglet fermé/rouvert doit repartir de Présentation, seul un reload doit le préserver.
+  const [section, setSectionState] = useState(() => sessionStorage.getItem('settings_section') || 'presentation')
+  function setSection(next) {
+    sessionStorage.setItem('settings_section', next)
+    setSectionState(next)
+  }
 
   // Modification du compte (14/08/2026, demande utilisateur) — jusqu'ici seule la
   // déconnexion était possible depuis cette section. Deux formulaires indépendants
@@ -210,7 +263,8 @@ export default function Settings() {
 
   const SECTIONS = [
     { key: 'presentation', label: 'Présentation', desc: isAnonymous ? 'Anonyme activé' : 'Données réelles', icon: 'presentation' },
-    { key: 'appearance',   label: 'Apparence',    desc: isDark ? 'Mode sombre' : 'Mode clair', icon: 'appearance' },
+    { key: 'appearance',   label: 'Apparence',    desc: THEME_OPTIONS.find(o => o.id === theme)?.label || theme, icon: 'appearance' },
+    { key: 'dashboard',    label: 'Tableau de bord', desc: 'Blocs, tailles, dispositions', icon: 'dashboard' },
     ...(user ? [{ key: 'account', label: 'Compte', desc: user.full_name, icon: 'account' }] : []),
     ...(user ? [{ key: 'sessions', label: 'Sessions', desc: 'Appareils connectés', icon: 'sessions' }] : []),
     { key: 'integrations', label: 'Intégrations', desc: 'Sources externes', icon: 'integrations' },
@@ -280,14 +334,13 @@ export default function Settings() {
 
           {section === 'appearance' && (
             <div className="space-y-5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Thème</p>
-                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    {isDark ? 'Mode sombre' : 'Mode clair'}
-                  </p>
+              <div>
+                <p className="font-semibold text-sm mb-3" style={{ color: 'var(--text-primary)' }}>Thème</p>
+                <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
+                  {THEME_OPTIONS.map(opt => (
+                    <ThemeSwatchCard key={opt.id} option={opt} active={theme === opt.id} onClick={() => setTheme(opt.id)} />
+                  ))}
                 </div>
-                <Switch checked={isDark} onChange={toggle} ariaLabel="Basculer le thème" />
               </div>
               <div className="flex items-center justify-between gap-4 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
                 <div>
@@ -299,6 +352,52 @@ export default function Settings() {
                   </p>
                 </div>
                 <Switch checked={!guidesHidden} onChange={() => setGuidesHidden(v => !v)} ariaLabel="Afficher ou masquer les guides d'aide" />
+              </div>
+            </div>
+          )}
+
+          {section === 'dashboard' && (
+            <div className="space-y-5">
+              <div>
+                <p className="font-semibold text-sm mb-1" style={{ color: 'var(--text-primary)' }}>Disposition</p>
+                <p className="text-xs mb-3" style={{ color: 'var(--text-muted)' }}>
+                  Ordre et taille des blocs du Dashboard (Findings d'audit, Certificats SSL, Taux
+                  de correction, Graphiques, les 3 tableaux de vulnérabilités).
+                </p>
+                <div className="grid gap-2.5" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+                  {Object.entries(DASHBOARD_PRESETS).map(([key, preset]) => (
+                    <button key={key} onClick={() => applyDashboardPreset(key)}
+                      className="text-left rounded-xl p-3 transition-colors"
+                      style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                      {/* Aperçu miniature de la disposition — mini-blocs à la taille relative
+                          de chaque widget (cf. constants/dashboardLayout.js::SIZE_SPAN),
+                          même esprit que ThemeSwatchCard mais en formes plutôt qu'en couleurs. */}
+                      <div className="grid gap-1 mb-2" style={{ gridTemplateColumns: 'repeat(6, 1fr)', height: 36 }}>
+                        {preset.order.map(id => (
+                          <div key={id} style={{
+                            gridColumn: `span ${preset.sizes[id] === 'third' ? 2 : preset.sizes[id] === 'half' ? 3 : 6}`,
+                            background: `${MODULES.parametres.color}33`, borderRadius: 3,
+                          }} />
+                        ))}
+                      </div>
+                      <p className="text-xs font-semibold" style={{ color: 'var(--text-primary)' }}>{preset.label}</p>
+                      <p className="text-[11px] mt-0.5 leading-snug" style={{ color: 'var(--text-muted)' }}>{preset.desc}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-4 pt-5" style={{ borderTop: '1px solid var(--border)' }}>
+                <div>
+                  <p className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Personnaliser en direct</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    Glisser-déposer et tailles par bloc, directement sur la page
+                  </p>
+                </div>
+                <button onClick={() => { setDashboardEditMode(true); navigate('/dashboard') }}
+                  className="px-4 py-2 text-sm font-medium rounded-lg flex-shrink-0"
+                  style={{ background: MODULES.cybervuln.color, color: '#fff' }}>
+                  ⠿ Personnaliser sur le Dashboard
+                </button>
               </div>
             </div>
           )}

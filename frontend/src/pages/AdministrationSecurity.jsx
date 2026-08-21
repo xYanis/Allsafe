@@ -13,7 +13,7 @@ import {
   services as fetchServices, createService, updateService, deleteService,
   windowsAppMappings as fetchWindowsAppMappings, createWindowsAppMapping, updateWindowsAppMapping, deleteWindowsAppMapping,
 } from '../api/client.js'
-import { anonymizeConnection, anonymizeUserConnection } from '../utils/fakeData.js'
+import { anonymizeConnection, anonymizeUserConnection, anonymizeRoleHolder, anonymizeValidator } from '../utils/fakeData.js'
 import PageLoader from '../components/PageLoader.jsx'
 import DeclareIncidentButton from '../components/DeclareIncidentButton.jsx'
 import UserFormModal from '../components/UserFormModal.jsx'
@@ -544,7 +544,32 @@ function DatabaseTab() {
 }
 
 // ─── Onglet Utilisateurs ────────────────────────────────────────────────────────
-function UsersTab() {
+// Anonymise un compte/une demande réels pour l'affichage (21/08/2026, retour utilisateur —
+// "il manque beaucoup de fake data un peu partout") : `full_name`/`email` d'un vrai compte
+// employé restaient en clair, seul ConnectionsTab était couvert sur cette page. Réutilise
+// anonymizeRoleHolder (déjà utilisé pour Services/Rôles) — même pool de noms fictifs, cohérent
+// dans toute l'app. Jamais utilisé pour construire un payload de mutation (modifier/supprimer
+// continuent de lire l'objet réel, cf. displayUsers usage plus bas).
+function anonymizeAccountLike(u) {
+  if (!u) return u
+  const fake = anonymizeRoleHolder({ id: u.id, name: u.full_name, email: u.email })
+  return { ...u, full_name: fake.name, email: fake.email }
+}
+
+// Registre « Rôles » (organigramme) — même anonymizeRoleHolder que CrisisRoadmap.jsx/
+// IncidentRoadmap.jsx, jamais branché sur cette page (Services/Rôles/ServiceOrgChartModal) avant
+// ce correctif. Seedé sur le NOM (pas l'id du rôle) pour que la même personne réelle garde le
+// même nom fictif partout où elle apparaît (titulaire d'un poste ici, "rapporte à" ailleurs) —
+// contrairement à AnalystsTab/UsersTab (1 id = 1 compte), une même personne peut être référencée
+// par plusieurs postes différents.
+function anonymizeRole(r) {
+  if (!r) return r
+  const holder = anonymizeRoleHolder({ name: r.name, email: r.email })
+  const reportsTo = r.reports_to_name ? anonymizeRoleHolder({ name: r.reports_to_name }).name : r.reports_to_name
+  return { ...r, name: holder.name, email: holder.email, reports_to_name: reportsTo }
+}
+
+function UsersTab({ isAnonymous }) {
   const { user: me, refresh: refreshAuth } = useAuth()
   const [list, setList] = useState(null)
   const [formModal, setFormModal] = useState(null) // null | 'new' | user object
@@ -605,17 +630,20 @@ function UsersTab() {
 
   if (!list) return <Loader />
 
+  const displayList = isAnonymous ? list.map(anonymizeAccountLike) : list
+  const displayResetRequests = isAnonymous ? (resetRequests || []).map(anonymizeAccountLike) : resetRequests
+
   return (
     <>
       {/* Demandes « mot de passe oublié » (18/08/2026, cf. Login.jsx) — au-dessus de la
           liste des comptes : ce sont des demandes en attente d'action, pas des comptes,
           elles méritent d'être vues avant de faire défiler la liste. */}
-      {resetRequests?.length > 0 && (
+      {displayResetRequests?.length > 0 && (
         <div className="mb-4 rounded-xl p-3 space-y-2" style={{ background: 'rgba(210,153,34,0.08)', border: '1px solid rgba(210,153,34,0.25)' }}>
           <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: '#d29922' }}>
-            {resetRequests.length} demande{resetRequests.length > 1 ? 's' : ''} de mot de passe oublié
+            {displayResetRequests.length} demande{displayResetRequests.length > 1 ? 's' : ''} de mot de passe oublié
           </p>
-          {resetRequests.map(r => (
+          {displayResetRequests.map(r => (
             <div key={r.id} className="flex items-start justify-between gap-3 text-sm rounded-lg px-3 py-2" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
               <div className="min-w-0">
                 <p className="font-medium" style={{ color: 'var(--text-primary)' }}>{r.full_name} <span className="font-normal text-xs" style={{ color: 'var(--text-muted)' }}>({r.email})</span></p>
@@ -649,11 +677,15 @@ function UsersTab() {
         </div>
       )}
 
-      {list.length === 0 ? (
+      {displayList.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun compte.</p>
       ) : (
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-          {list.map(u => (
+          {displayList.map(u => {
+            // Édition : toujours l'objet RÉEL (jamais la copie anonymisée `u`), sinon un
+            // "Enregistrer" sans changement écraserait le vrai nom/email par le nom fictif.
+            const realUser = isAnonymous ? list.find(ru => ru.id === u.id) : u
+            return (
             <div key={u.id} className="py-3 flex items-start justify-between gap-4 flex-wrap">
               <div className="min-w-[220px]">
                 <div className="flex items-center gap-2 mb-1">
@@ -683,7 +715,7 @@ function UsersTab() {
                   style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   title="Invalider toutes les sessions actives de ce compte"
                 >Déconnecter partout</button>
-                <button onClick={() => setFormModal(u)}
+                <button onClick={() => setFormModal(realUser)}
                   className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
                   style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                 >Modifier</button>
@@ -693,7 +725,8 @@ function UsersTab() {
                 >Supprimer</button>
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       )}
 
@@ -721,7 +754,7 @@ function UsersTab() {
 // déclaré par, jalon envoyé par...) — distinct des comptes de connexion ci-dessus
 // (onglet Utilisateurs). Gestion réservée admin (30/07/2026, déplacé depuis Paramètres
 // où n'importe quel compte pouvait auparavant l'éditer).
-function AnalystsTab() {
+function AnalystsTab({ isAnonymous }) {
   const { analysts, refresh } = useAnalysts()
   const [formModal, setFormModal] = useState(null) // null | 'new' | analyst object
   const [deleteTarget, setDeleteTarget] = useState(null)
@@ -764,9 +797,12 @@ function AnalystsTab() {
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun analyste — ajoutez-en un ci-dessus.</p>
       ) : (
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+          {/* Noms réels masqués à l'affichage (21/08/2026, retour utilisateur) via
+              anonymizeValidator — édition toujours sur l'objet réel `a` (jamais le nom masqué),
+              sinon "Enregistrer" sans changement écraserait le vrai nom par le nom fictif. */}
           {analysts.map(a => (
             <div key={a.id} className="py-3 flex items-center justify-between gap-3">
-              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{a.name}</p>
+              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{isAnonymous ? anonymizeValidator(a.name) : a.name}</p>
               <div className="flex gap-1.5 flex-shrink-0">
                 <button onClick={() => setFormModal(a)}
                   className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
@@ -792,7 +828,7 @@ function AnalystsTab() {
       {deleteTarget && (
         <ConfirmModal
           title="Supprimer cet analyste ?"
-          message={<>Supprimer définitivement « <strong>{deleteTarget.name}</strong> » du registre ? Il ne sera plus proposé dans les menus déroulants d'attribution. Cette action est irréversible.</>}
+          message={<>Supprimer définitivement « <strong>{isAnonymous ? anonymizeValidator(deleteTarget.name) : deleteTarget.name}</strong> » du registre ? Il ne sera plus proposé dans les menus déroulants d'attribution. Cette action est irréversible.</>}
           confirmLabel="Supprimer"
           onConfirm={confirmDelete}
           onClose={() => setDeleteTarget(null)}
@@ -809,7 +845,7 @@ function AnalystsTab() {
 // carte liste directement ses postes rattachés (31/07/2026) — le rattachement se fait toujours
 // côté formulaire Rôle (le service est optionnel sur un poste, pas l'inverse), cette vue-ci
 // n'est qu'un miroir en lecture pour ne pas devoir naviguer vers l'onglet Rôles pour vérifier.
-function ServicesTab() {
+function ServicesTab({ isAnonymous }) {
   const [svcs, setSvcs] = useState(null)
   const [roles, setRoles] = useState([])
   const [chartTarget, setChartTarget] = useState(null) // service dont l'organigramme est ouvert
@@ -838,6 +874,8 @@ function ServicesTab() {
 
   if (svcs === null) return <Loader />
 
+  const displayRoles = isAnonymous ? roles.map(anonymizeRole) : roles
+
   return (
     <>
       <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>
@@ -863,7 +901,7 @@ function ServicesTab() {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {svcs.map(s => {
-            const attached = roles.filter(r => r.service_id === s.id)
+            const attached = displayRoles.filter(r => r.service_id === s.id)
             return (
               <div key={s.id} className="rounded-2xl p-4" style={{ background: 'var(--bg-secondary)', border: `1px solid ${s.color}59` }}>
                 <div className="flex items-center gap-3 mb-3">
@@ -917,7 +955,7 @@ function ServicesTab() {
         />
       )}
       {chartTarget && (
-        <ServiceOrgChartModal service={chartTarget} roles={roles} onClose={() => setChartTarget(null)} />
+        <ServiceOrgChartModal service={chartTarget} roles={displayRoles} onClose={() => setChartTarget(null)} />
       )}
     </>
   )
@@ -946,7 +984,7 @@ function initials(name) {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase()
 }
 
-function OrganizationRolesTab() {
+function OrganizationRolesTab({ isAnonymous }) {
   const { list: roles, error, setError, load } = useLoadList(
     fetchOrganizationRoles, 'Impossible de charger les rôles — le serveur a peut-être renvoyé une erreur.'
   )
@@ -954,6 +992,10 @@ function OrganizationRolesTab() {
     useCrudModals({ createFn: createOrganizationRole, updateFn: updateOrganizationRole, deleteFn: deleteOrganizationRole, load, setError })
 
   if (roles === null) return <Loader />
+
+  // Édition/suppression restent sur l'objet réel (`setFormModal(r)`/`setDeleteTarget(r)` plus
+  // bas utilisent `r` de `roles`, jamais `displayRoles`) — seul l'affichage est masqué.
+  const displayRoles = isAnonymous ? roles.map(anonymizeRole) : roles
 
   return (
     <>
@@ -978,8 +1020,9 @@ function OrganizationRolesTab() {
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun rôle — ajoutez-en un ci-dessus.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {roles.map(r => {
+          {displayRoles.map(r => {
             const color = roleColor(r)
+            const realRole = isAnonymous ? roles.find(rr => rr.id === r.id) : r
             return (
               <div key={r.id} className="rounded-2xl p-4"
                 style={{ background: 'var(--bg-secondary)', border: `1px solid ${r.service_color ? `${color}59` : 'var(--border)'}` }}>
@@ -1009,7 +1052,7 @@ function OrganizationRolesTab() {
                   </p>
                 )}
                 <div className="flex gap-1.5 mt-3">
-                  <button onClick={() => setFormModal(r)}
+                  <button onClick={() => setFormModal(realRole)}
                     className="text-xs px-2.5 py-1 rounded-lg transition-colors font-medium flex-1"
                     style={{ background: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
                   >Modifier</button>
@@ -1219,13 +1262,13 @@ export default function AdministrationSecurity() {
           {tab === 'connections' ? (
             <ConnectionsTab isAnonymous={isAnonymous} />
           ) : tab === 'users' ? (
-            <UsersTab />
+            <UsersTab isAnonymous={isAnonymous} />
           ) : tab === 'analysts' ? (
-            <AnalystsTab />
+            <AnalystsTab isAnonymous={isAnonymous} />
           ) : tab === 'services' ? (
-            <ServicesTab />
+            <ServicesTab isAnonymous={isAnonymous} />
           ) : tab === 'roles' ? (
-            <OrganizationRolesTab />
+            <OrganizationRolesTab isAnonymous={isAnonymous} />
           ) : tab === 'windows-mappings' ? (
             <WindowsAppMappingsTab />
           ) : (

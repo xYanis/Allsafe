@@ -9,6 +9,8 @@ import IncidentDetailModal from '../components/IncidentDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { FAKE_INCIDENTS, anonymizeIncident, anonymizeAsset } from '../utils/fakeData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -58,6 +60,7 @@ export default function Incidents() {
   const [detailIncident, setDetailIncident] = useState(null)
   const [editIncident, setEditIncident] = useState(null)
   const [error, setError] = useState('')
+  const { isAnonymous } = usePresentation()
 
   useEffect(() => {
     fetchAssets().then(r => {
@@ -141,6 +144,13 @@ export default function Incidents() {
   }
 
   const totalPages = Math.ceil(data.total / PER_PAGE)
+  // Les vraies lignes sont anonymisées (21/08/2026, retour utilisateur — restaient jusqu'ici
+  // affichées en clair, seules des lignes FAKE_INCIDENTS s'y ajoutaient) avant d'y ajouter les
+  // fake data, seulement en 1re page sans filtre — un filtre server-side ne les retrouverait pas
+  // (pas de logique de filtrage côté client dupliquée pour si peu).
+  const anonymizedItems = isAnonymous ? data.items.map(i => anonymizeIncident(i, assetList)) : data.items
+  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...FAKE_INCIDENTS] : anonymizedItems
+  const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   if (loading && data.items.length === 0 && noFilterActive) {
     return <PageLoader />
@@ -221,7 +231,7 @@ export default function Incidents() {
               {loading && (
                 <tr><td colSpan={7} className="px-4 py-12 text-center"><PageLoader size="sm" /></td></tr>
               )}
-              {!loading && data.items.length === 0 && (
+              {!loading && displayItems.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucun incident</p>
@@ -229,7 +239,7 @@ export default function Incidents() {
                   </td>
                 </tr>
               )}
-              {!loading && data.items.map(inc => (
+              {!loading && displayItems.map(inc => (
                 <tr key={inc.id} onClick={() => setDetailIncident(inc)} className="cursor-pointer"
                   style={{ borderBottom: '1px solid var(--border-subtle)' }}
                   onMouseEnter={e => e.currentTarget.style.background = `${MODULE_COLOR}0a`}
@@ -281,7 +291,7 @@ export default function Incidents() {
       </div>
 
       {createModal && (
-        <IncidentFormModal initial={createModal} assetList={assetList} onSave={handleCreate} onClose={() => setCreateModal(null)} />
+        <IncidentFormModal initial={createModal} assetList={displayAssetList} onSave={handleCreate} onClose={() => setCreateModal(null)} />
       )}
       {detailIncident && !editIncident && (
         <IncidentDetailModal
@@ -293,7 +303,7 @@ export default function Incidents() {
         />
       )}
       {editIncident && (
-        <IncidentFormModal initial={editIncident} assetList={assetList} onSave={handleEdit} onClose={() => setEditIncident(null)} />
+        <IncidentFormModal initial={editIncident} assetList={displayAssetList} onSave={handleEdit} onClose={() => setEditIncident(null)} />
       )}
     </div>
   )

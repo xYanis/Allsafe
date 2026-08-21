@@ -17,6 +17,8 @@ import { AUDIT_TYPES, AUDIT_METHODOLOGIES, AUDIT_STATUSES } from '../components/
 import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { isFakeId, FAKE_AUDITS, FAKE_AUDIT_FINDINGS, anonymizeAudit, anonymizeAuditFinding, anonymizeAsset } from '../utils/fakeData.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
 
 const MODULE_COLOR = MODULES.securite.color
 const CARD = tintedCard(MODULE_COLOR)
@@ -174,7 +176,16 @@ export default function AuditDetail() {
   // sécurité) — masqué ici pour ne pas laisser un compte analyst se heurter à un 403
   // après confirmation.
   const { user } = useAuth()
-  const canDelete = user?.role === 'admin'
+  const { isAnonymous } = usePresentation()
+  const isFake = isFakeId(id)
+  // Un audit RÉEL reste entièrement fonctionnel en mode Présentation (édition, findings,
+  // mandat...) — seul l'AFFICHAGE est masqué (21/08/2026, retour utilisateur : cette page ne
+  // gérait jusqu'ici que les audits de démonstration via isFakeId, un audit réel s'ouvrait en
+  // clair). Les handlers de mutation (saveEdit, handleCreateFinding...) continuent de lire/écrire
+  // sur `audit`/`findings` (les vraies données) — ne jamais leur passer les versions `display*`
+  // ci-dessous sous peine d'écraser un vrai enregistrement avec du texte anonymisé/fictif.
+  const maskReal = isAnonymous && !isFake
+  const canDelete = user?.role === 'admin' && !isFake
   const cached = auditDetailCache[id]
   const [audit, setAudit] = useState(() => cached?.audit ?? null)
   const [findings, setFindings] = useState(() => cached?.findings ?? [])
@@ -197,6 +208,16 @@ export default function AuditDetail() {
   const [reportLoading, setReportLoading] = useState(false)
 
   const load = useCallback(() => {
+    // Audit de démonstration (mode Présentation) : n'existe pas en base, résolu côté client.
+    if (isFake) {
+      const a = FAKE_AUDITS.find(x => x.id === id)
+      if (!a) { setError('Audit introuvable.'); setLoading(false); return }
+      const findingsData = FAKE_AUDIT_FINDINGS[id] || []
+      setAudit(a); setFindings(findingsData); setAttachments([])
+      setSummary(a.executive_summary || '')
+      setLoading(false)
+      return
+    }
     setLoading(true)
     Promise.all([getAudit(id), auditFindings(id), auditAttachments(id)])
       .then(([a, f, att]) => {
@@ -292,6 +313,24 @@ export default function AuditDetail() {
 
   function handleOpenReport() {
     if (reportOpen) { setReportOpen(false); return }
+    // Audit de démonstration OU audit réel en mode Présentation (21/08/2026, retour
+    // utilisateur — le 2e cas appelait jusqu'ici le vrai `getAuditReport`, renvoyant le rapport
+    // en clair) : rapport reconstruit côté client depuis les données déjà masquées à l'affichage
+    // (mêmes ingrédients que services/audit_report.py — titre, périmètre, synthèse, findings —
+    // pas d'appel API).
+    if (isFake || maskReal) {
+      const lines = [
+        `# ${displayAudit.title}`, '',
+        `**Type** : ${AUDIT_TYPES.find(t => t.value === displayAudit.type)?.label || displayAudit.type} — **Référentiel** : ${displayAudit.referential || 'non précisé'}`, '',
+        '## Périmètre', displayAudit.scope || 'Non précisé.', '',
+        '## Synthèse exécutive', displayAudit.executive_summary || 'Non rédigée.', '',
+        '## Findings',
+        ...displayFindings.map(f => `- **[${f.severity}]** ${f.title} — ${FINDING_STATUS_LABELS[f.status] || f.status}`),
+      ]
+      setReportText(lines.join('\n'))
+      setReportOpen(true)
+      return
+    }
     setReportLoading(true)
     getAuditReport(id).then(r => { setReportText(r.data.summary || ''); setReportOpen(true) }).finally(() => setReportLoading(false))
   }
@@ -307,31 +346,43 @@ export default function AuditDetail() {
   }
 
   const isAuthorized = !!audit.authorized_by
-  const unavailableAssetList = assetList.filter(a => !audit.asset_ids.includes(a.id))
+  // `display*` : copies purement pour l'affichage (texte libre/noms redigés via redactText/
+  // anonymizeValidator, cf. utils/fakeData.js) — mêmes ids/statuts/dates que les vraies données,
+  // jamais utilisées pour construire un payload de mutation (cf. note plus haut).
+  const displayAudit = maskReal ? anonymizeAudit(audit, assetList) : audit
+  const displayFindings = maskReal ? findings.map(f => anonymizeAuditFinding(f, assetList)) : findings
+  const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
+  const displayAttachments = maskReal ? attachments.map(a => ({ ...a, filename: 'mandat.pdf' })) : attachments
+  const unavailableAssetList = displayAssetList.filter(a => !audit.asset_ids.includes(a.id))
   const flagged = audit.status === 'termine' && findings.some(f => (f.status === 'ouvert') || (['corrige', 'risque_accepte'].includes(f.status) && !f.retested_at))
 
   return (
     <div className="p-6 space-y-5">
       <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-        <Link to="/audits" style={{ color: MODULE_COLOR }}>Audits</Link> / {audit.title}
+        <Link to="/audits" style={{ color: MODULE_COLOR }}>Audits</Link> / {displayAudit.title}
       </div>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{audit.title}</h1>
+          <h1 className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{displayAudit.title}</h1>
           <p className="text-sm mt-0.5" style={{ color: 'var(--text-muted)' }}>
             {AUDIT_TYPES.find(t => t.value === audit.type)?.label} · {audit.referential || 'Référentiel non précisé'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isAuthorized && (
+          {isAuthorized && !isFake && (
             <select value={audit.status} onChange={e => changeStatus(e.target.value)}
               className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={field}>
               {AUDIT_STATUSES.filter(s => s.value !== 'cadrage' && s.value !== 'autorise').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               {audit.status === 'autorise' && <option value="autorise">Autorisé</option>}
             </select>
           )}
-          <button onClick={startEdit} className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
+          {isAuthorized && isFake && (
+            <span className="text-xs px-2.5 py-1 rounded-lg font-medium" style={field}>{AUDIT_STATUSES.find(s => s.value === audit.status)?.label || audit.status}</span>
+          )}
+          {!isFake && (
+            <button onClick={startEdit} className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
+          )}
           {canDelete && (
             <button onClick={() => setDeleteAuditModal(true)} className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>Supprimer</button>
           )}
@@ -399,51 +450,55 @@ export default function AuditDetail() {
           <div className="mt-3 space-y-2 text-sm">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--text-muted)' }}>Périmètre</p>
-              <p style={{ color: 'var(--text-secondary)' }}>{audit.scope}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>{displayAudit.scope}</p>
             </div>
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--text-muted)' }}>Règles d'engagement</p>
-              <p style={{ color: 'var(--text-secondary)' }}>{audit.rules_of_engagement}</p>
+              <p style={{ color: 'var(--text-secondary)' }}>{displayAudit.rules_of_engagement}</p>
             </div>
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              Autorisé par <strong style={{ color: 'var(--text-secondary)' }}>{audit.authorized_by}</strong> le {new Date(audit.authorized_at).toLocaleDateString('fr-FR')} — champs verrouillés.
+              Autorisé par <strong style={{ color: 'var(--text-secondary)' }}>{displayAudit.authorized_by}</strong> le {new Date(audit.authorized_at).toLocaleDateString('fr-FR')} — champs verrouillés.
             </p>
           </div>
-          <MandateCard auditId={id} attachments={attachments} onUploaded={a => setAttachments(x => [...x, a])} />
+          {!isFake && <MandateCard auditId={id} attachments={displayAttachments} onUploaded={a => setAttachments(x => [...x, a])} />}
         </div>
       )}
 
       <div style={CARD} className="p-6">
         <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Actifs ciblés</h2>
         <div className="flex flex-wrap gap-1.5 mt-3">
-          {audit.asset_names.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Aucun actif rattaché.</p>}
+          {displayAudit.asset_names.length === 0 && <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Aucun actif rattaché.</p>}
           {audit.asset_ids.map((aid, i) => (
             <span key={aid} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-              {audit.asset_names[i]}
-              <button onClick={() => handleRemoveAsset(aid)} style={{ color: 'var(--text-muted)' }}>×</button>
+              {displayAudit.asset_names[i]}
+              {!isFake && <button onClick={() => handleRemoveAsset(aid)} style={{ color: 'var(--text-muted)' }}>×</button>}
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-2 mt-3">
-          <select value={addAssetId} onChange={e => setAddAssetId(e.target.value)} className="text-xs rounded-lg px-2.5 py-1.5 outline-none" style={field}>
-            <option value="">Ajouter un actif…</option>
-            {unavailableAssetList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
-          <button onClick={handleAddAsset} disabled={!addAssetId} className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Ajouter</button>
-        </div>
+        {!isFake && (
+          <div className="flex items-center gap-2 mt-3">
+            <select value={addAssetId} onChange={e => setAddAssetId(e.target.value)} className="text-xs rounded-lg px-2.5 py-1.5 outline-none" style={field}>
+              <option value="">Ajouter un actif…</option>
+              {unavailableAssetList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+            <button onClick={handleAddAsset} disabled={!addAssetId} className="text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Ajouter</button>
+          </div>
+        )}
       </div>
 
       <div style={CARD} className="overflow-hidden">
         <div className="px-6 py-4 flex items-center justify-between flex-wrap gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
-          <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Findings ({findings.length})</h2>
-          <button onClick={() => setFindingModal(null)} disabled={!isAuthorized}
-            title={!isAuthorized ? "Autoriser l'audit avant de saisir un finding" : undefined}
-            className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40"
-            style={{ background: MODULE_COLOR, color: MODULES.securite.dark }}>
-            + Ajouter un finding
-          </button>
+          <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Findings ({displayFindings.length})</h2>
+          {!isFake && (
+            <button onClick={() => setFindingModal(null)} disabled={!isAuthorized}
+              title={!isAuthorized ? "Autoriser l'audit avant de saisir un finding" : undefined}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40"
+              style={{ background: MODULE_COLOR, color: MODULES.securite.dark }}>
+              + Ajouter un finding
+            </button>
+          )}
         </div>
-        {findings.length === 0 ? (
+        {displayFindings.length === 0 ? (
           <p className="px-6 py-8 text-sm text-center" style={{ color: 'var(--text-muted)' }}>
             {isAuthorized ? 'Aucun finding saisi.' : 'Findings verrouillés tant que l’audit n’est pas autorisé.'}
           </p>
@@ -458,10 +513,16 @@ export default function AuditDetail() {
                 </tr>
               </thead>
               <tbody>
-                {findings.map(f => (
+                {/* `f` = finding déjà anonymisé pour l'affichage. `realFinding` = objet réel
+                    correspondant (même id) passé aux actions d'édition — jamais `f` directement,
+                    sous peine d'enregistrer du texte anonymisé/fictif comme vraie valeur au
+                    prochain "Enregistrer" (cf. note maskReal en tête de fichier). */}
+                {displayFindings.map(f => {
+                  const realFinding = maskReal ? findings.find(rf => rf.id === f.id) : f
+                  return (
                   <tr key={f.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="px-4 py-3"><SeverityBadge value={f.severity} /></td>
-                    <td className="px-4 py-3 cursor-pointer font-medium" style={{ color: 'var(--text-primary)' }} onClick={() => setFindingModal(f)}>{f.title}</td>
+                    <td className={`px-4 py-3 font-medium ${isFake ? '' : 'cursor-pointer'}`} style={{ color: 'var(--text-primary)' }} onClick={() => !isFake && setFindingModal(realFinding)}>{f.title}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{f.affected_asset_name || '—'}</td>
                     <td className="px-4 py-3 text-xs">
                       {f.cve_id ? <Link to={`/vulnerabilities?cve=${f.cve_id}`} style={{ color: MODULE_COLOR }}>{f.cve_id}</Link> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
@@ -472,15 +533,20 @@ export default function AuditDetail() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        <button onClick={() => setFindingModal(f)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
-                        <DeclareIncidentButton sourceType="audit_finding" sourceId={f.id} label="Déclarer un incident" />
+                        {!isFake && (
+                          <>
+                            <button onClick={() => setFindingModal(realFinding)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
+                            <DeclareIncidentButton sourceType="audit_finding" sourceId={f.id} label="Déclarer un incident" />
+                          </>
+                        )}
                         {canDelete && (
-                          <button onClick={() => setDeleteFinding(f)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>Suppr.</button>
+                          <button onClick={() => setDeleteFinding(realFinding)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.3)' }}>Suppr.</button>
                         )}
                       </div>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -490,7 +556,7 @@ export default function AuditDetail() {
       <div style={CARD} className="p-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Synthèse exécutive</h2>
-          {!summaryEdit && <button onClick={() => setSummaryEdit(true)} className="text-xs" style={{ color: MODULE_COLOR }}>Modifier</button>}
+          {!summaryEdit && !isFake && <button onClick={() => setSummaryEdit(true)} className="text-xs" style={{ color: MODULE_COLOR }}>Modifier</button>}
         </div>
         {summaryEdit ? (
           <div className="mt-3 space-y-2">
@@ -501,7 +567,7 @@ export default function AuditDetail() {
             </div>
           </div>
         ) : (
-          <p className="text-sm mt-2" style={{ color: audit.executive_summary ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{audit.executive_summary || 'Non rédigée.'}</p>
+          <p className="text-sm mt-2" style={{ color: audit.executive_summary ? 'var(--text-secondary)' : 'var(--text-muted)' }}>{displayAudit.executive_summary || 'Non rédigée.'}</p>
         )}
       </div>
 
@@ -527,7 +593,7 @@ export default function AuditDetail() {
         <AuditFindingModal
           auditId={id}
           finding={findingModal}
-          assetList={assetList}
+          assetList={displayAssetList}
           onClose={() => setFindingModal(false)}
           onSaved={findingModal ? handleUpdateFinding : handleCreateFinding}
         />

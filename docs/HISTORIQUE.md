@@ -4072,3 +4072,99 @@ existant sur le runner.
 **Point ouvert** : les binaires agent reconstruits (`agent/dist/*.deb`/`*.msi`, v0.1.3, avec le fix de
 ports) restent locaux, pas encore redéployés sur les postes déjà enrôlés.
 
+#### 21/08/2026 (suite 2) — 4 thèmes visuels + Dashboard personnalisable + audit complet du mode Présentation
+
+**1. Système de 4 thèmes** (`ThemeContext.jsx` étendu de sombre/clair à `dark`/`light`/`neutral`/
+`cyberpunk`, demande explicite — "un vrai thème différent, pas juste une couleur qui change") :
+- **Neutre** : nuances de gris quasi monochromes (présentation pro), aplats sans ombre/dégradé
+  (`tintedCard()`, `PageHero.jsx`), coins resserrés, `.hero-grid`/`.home-glow` masqués.
+- **Cyberpunk** (rebaptisé **Néon** côté UI en fin de session, demande explicite, id interne
+  `cyberpunk` inchangé — trop de sélecteurs à retoucher pour un simple changement de libellé) :
+  néons/scanlines/tuiles à coins coupés (`clip-path`), tilt 3D à la souris (`utils/tilt3d.js`,
+  nouveau), police mono capitales. Palette resserrée sur 3 familles bleu/vert/jaune reliées par
+  nuances (demande explicite), puis adoucie une 2e fois en fin de session (retour utilisateur —
+  "trop flashy" sur le bouton Analyser et les composants environnants) : `--accent-blue`
+  `#00f0ff`→`#2dd4e8`, `--brand`/`--brand-glow` désaturés, les 9 couleurs de module réduites,
+  glows de carte/hero/nav réduits d'un tiers.
+- Modules colorés via `THEME_COLORS` dans `constants/modules.js`, résolu une fois à l'import
+  (localStorage lu de façon synchrone) — dark/light partagent le même jeu (bascule instantanée),
+  neutre/cyberpunk déclenchent un rechargement complet en entrant/sortant (~180 fichiers
+  consomment `MODULE_COLOR` comme constante de module, hors composant).
+- Bug corrigé en cours de route : bascule vers Neutre/Cyberpunk renvoyait sur Paramètres >
+  Présentation au lieu de garder l'onglet ouvert (state local `section` non persisté à travers le
+  rechargement déclenché par le changement de thème — fix : `sessionStorage`).
+
+**2. Dashboard personnalisable** (Paramètres > Tableau de bord + édition en direct sur la page) :
+- Grille unique à 24 colonnes (`constants/dashboardLayout.js`, `contexts/DashboardLayoutContext.jsx`
+  nouveaux) couvrant KPI + barre de Filtres + les 7 blocs de contenu (findings d'audit, certificats
+  SSL, taux de correction, graphiques, 3 tableaux de vulnérabilités) — un seul registre `order`/
+  `sizes`, pas deux grilles séparées : essayé d'abord séparément (KPI dans sa propre grille 8
+  colonnes), revenu en arrière suite au retour utilisateur ("je ne peux pas bouger les tuiles sous
+  la barre de filtre au-dessus") — `order` CSS ne réordonne qu'entre enfants d'un même conteneur.
+  5 tailles disponibles (1/8, 1/4, 1/3, 1/2, plein) pour toute tuile.
+- Réordonnancement en CSS pur (`order: order.indexOf(id)`) sur des wrappers `<Widget>` — le JSX
+  de chaque bloc reste physiquement à sa place dans le fichier, seule sa position visuelle change
+  (pas d'extraction risquée sur un fichier de 3000+ lignes).
+- Drag-and-drop HTML5 natif + boutons ◀/▶ ajoutés en complément (retour utilisateur — "pour
+  bouger entre eux c'est compliqué", le drag-and-drop natif est peu fiable) : échangent la tuile
+  avec sa voisine immédiate dans `order`, plus prévisible qu'un glisser-déposer pixel-précis.
+  `gridAutoFlow: 'dense'` ajouté après coup (autre retour — tuiles "qui bloquent"/se chevauchent
+  mal) : sans lui, une tuile pleine largeur entre deux tuiles étroites laisse un trou au lieu que
+  les suivantes le comblent.
+- 3 dispositions prédéfinies (Par défaut/Vue compacte/Priorité corrections) + bouton reset rapide
+  directement sur la page en mode édition.
+- Bouton "Personnaliser" initialement un pavé texte "⠿ Personnaliser" desservant l'alignement de
+  la barre d'actions du Dashboard (retour utilisateur — "le bouton est gros alors qu'une icône
+  suffisait") : remplacé par un bouton carré icône seule (crayon/coche), même gabarit que les
+  autres boutons de la PageHero.
+
+**3. Audit complet de la couverture du mode Présentation** (retour utilisateur — "il manque
+beaucoup de fake data un peu partout, fait un tour complet") : audit délégué à un agent Explore
+(lecture seule), corrections faites main. Cause racine identifiée : plusieurs pages ajoutaient les
+`FAKE_*` à la suite des vraies lignes SANS jamais les anonymiser (`[...data.items, ...FAKE_X]`),
+contrairement au bon pattern déjà en place sur Assets/Agents/Vulnérabilités
+(`anonymizeAsset`/`anonymizeAgent`/`anonymizeVuln`). Corrections :
+- Nouvelles fonctions `anonymizeIncident`/`anonymizeCrisis`/`anonymizeAudit`/
+  `anonymizeAuditFinding`/`anonymizeWatchItem`/`anonymizeDocument` (`utils/fakeData.js`), texte
+  libre passé par `redactText` (substitution des hostnames/noms réels connus), noms d'analystes
+  par `anonymizeValidator` (déterministe, sans avoir besoin de connaître le nom réel à l'avance).
+  Appliquées dans `Incidents.jsx`/`Crises.jsx`/`Watch.jsx`/`Audits.jsx` avant l'ajout des `FAKE_*`.
+- `IncidentDetailModal.jsx`/`CrisisDetailModal.jsx` : la chronologie et les pièces jointes qu'ils
+  récupèrent eux-mêmes par l'id réel (2e appel API, indépendant du parent) étaient encore en
+  clair — auteur des entrées masqué via `anonymizeValidator`, noms de fichiers de pièces jointes
+  génériques en mode Présentation.
+- `AuditDetail.jsx` : ne gérait que les audits `demo-*` via `isFakeId` ; un audit réel s'ouvrait
+  entièrement en clair (périmètre, RoE, mandataire, findings, mandat PDF, rapport généré). Ajout
+  d'un garde-fou explicite (`maskReal = isAnonymous && !isFake`) partout où l'affichage lit
+  `audit`/`findings` — les handlers de mutation (édition, findings, statut) continuent eux de lire
+  les vraies données non masquées, jamais les copies d'affichage, pour ne jamais écraser une
+  vraie valeur par du texte anonymisé/fictif au prochain "Enregistrer".
+- `AdministrationSecurity.jsx` : seul l'onglet Connexions était couvert. Utilisateurs/Analystes/
+  Services/Rôles (+ `ServiceOrgChartModal.jsx`) affichaient noms/emails réels en clair — masqués
+  via `anonymizeRoleHolder`/`anonymizeValidator`, même garde-fou "édition sur l'objet réel" que
+  ci-dessus. Onglet Correspondances Windows laissé tel quel (app↔CPE, pas de donnée nominative).
+- `Documentation.jsx` (Gouvernance) : aucune couverture avant ce correctif. Nom de fichier réel/
+  auteur/note masqués à l'affichage ; le contenu réel du PDF/image, lui, est bloqué à la source
+  dans `DocumentPreviewModal.jsx` (aperçu + téléchargement désactivés) plutôt qu'"anonymisé" — un
+  texte libre arbitraire ne peut pas être redigé de façon fiable comme un champ structuré.
+  `type.name` (PSSI, Charte...) laissé en clair — catégorie de gouvernance, pas une donnée
+  nominative.
+- Sélecteurs d'actifs des formulaires de création (Incidents/Audits/AuditDetail/Watch) : passaient
+  la liste d'actifs réelle non anonymisée — corrigés pour utiliser la même liste anonymisée que le
+  reste de la page (pattern déjà correct sur Reports.jsx/Vulnerabilities.jsx/Dashboard.jsx).
+- Export CSV de `RapportVeille.jsx` contournait complètement l'anonymisation (aucun appel à
+  `redactText`, contrairement à `Reports.jsx`/`RapportIncidents.jsx`) — corrigé.
+
+**Vérifié** : compilation (`docker compose logs frontend`, aucune erreur après chaque étape ; une
+trace d'erreur ponctuelle dans les logs s'est avérée être un état intermédiaire périmé, confirmé
+via fetch direct du module transformé par Vite) et santé des deux services (`/api/health` 200,
+frontend 200). **Pas de vérification visuelle en navigateur** — aucun outil Playwright/Chromium
+disponible dans cet environnement (tenté puis abandonné), tout repose sur la relecture de code et
+les retours de l'utilisateur en test manuel.
+
+**Point ouvert** : le dépôt a un très grand nombre de fichiers marqués modifiés dans `git status`
+sur l'ensemble de l'arborescence (backend/agent/config compris), pour l'essentiel de simples
+changements de fin de ligne (CRLF/LF) sans changement de contenu — pas causé par cette session,
+déjà présent au démarrage. Seuls les fichiers réellement touchés par cette session ont été
+committés ici, le reste laissé non indexé.
+

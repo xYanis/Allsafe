@@ -1,9 +1,12 @@
-import { useState } from 'react'
-import { exportWatch } from '../api/client.js'
+import { useState, useEffect } from 'react'
+import { exportWatch, assets as fetchAssets } from '../api/client.js'
 import WeeklyArchives from '../components/WeeklyArchives.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { useAnalysts } from '../contexts/AnalystContext.jsx'
+import { redactText } from '../utils/fakeData.js'
 
 const CARD = tintedCard(MODULES.rapports.color)
 
@@ -33,6 +36,13 @@ export default function RapportVeille() {
   const [selThemes, setSelThemes] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const { isAnonymous } = usePresentation()
+  const { names: ANALYSTS } = useAnalysts()
+  // Ne sert qu'à l'anonymisation du CSV exporté (redactText a besoin de savoir quels
+  // hostnames/noms réels chercher/remplacer, cf. Reports.jsx qui suit le même principe) — pas
+  // de sélecteur d'actifs sur cette page, contrairement à Reports.jsx/RapportIncidents.jsx.
+  const [realAssetList, setRealAssetList] = useState([])
+  useEffect(() => { fetchAssets().then(r => setRealAssetList(r.data || [])).catch(() => {}) }, [])
 
   function toggleTheme(val) {
     setSelThemes(s => s.includes(val) ? s.filter(x => x !== val) : [...s, val])
@@ -45,7 +55,14 @@ export default function RapportVeille() {
       const params = {}
       if (selThemes.length) params.themes = selThemes.join(',')
       const r = await exportWatch(params)
-      const blob = new Blob([r.data], { type: 'text/csv;charset=utf-8;' })
+      let blob = new Blob([r.data], { type: 'text/csv;charset=utf-8;' })
+      // Export anonymisé en mode Présentation (21/08/2026, retour utilisateur — ce bouton
+      // téléchargeait jusqu'ici le vrai registre en clair, seul Reports.jsx/RapportIncidents.jsx
+      // avaient ce garde-fou).
+      if (isAnonymous) {
+        const text = await blob.text()
+        blob = new Blob([redactText(text, realAssetList, ANALYSTS)], { type: 'text/csv;charset=utf-8;' })
+      }
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href = url
@@ -63,7 +80,7 @@ export default function RapportVeille() {
     <div className="p-6 space-y-6">
       <PageHero
         icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-        title="Rapport Veille" color="#a371f7"
+        title="Rapport Veille" color={MODULES.rapports.color}
         subtitle="Rapports hebdomadaires et export CSV du registre — traçabilité auditable NIS 2"
       />
 

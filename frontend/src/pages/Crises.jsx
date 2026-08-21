@@ -1,11 +1,13 @@
 import { useEffect, useState, useCallback } from 'react'
-import { crises as fetchCrises, createCrisis } from '../api/client.js'
+import { crises as fetchCrises, createCrisis, assets as fetchAssets } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import CrisisFormModal from '../components/CrisisFormModal.jsx'
 import CrisisDetailModal from '../components/CrisisDetailModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { FAKE_CRISES, anonymizeCrisis } from '../utils/fakeData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
@@ -36,6 +38,13 @@ export default function Crises() {
   const [createModal, setCreateModal] = useState(false)
   const [detailCrisis, setDetailCrisis] = useState(null)
   const [error, setError] = useState('')
+  const [assetList, setAssetList] = useState([])
+  const { isAnonymous } = usePresentation()
+
+  // Ne sert qu'à l'anonymisation du texte libre (titre/description peuvent mentionner un
+  // hostname réel, cf. anonymizeCrisis/redactText) — CrisisFormModal n'a pas de sélecteur
+  // d'actifs, contrairement à IncidentFormModal/AuditFormModal.
+  useEffect(() => { fetchAssets().then(r => setAssetList(r.data || [])).catch(() => {}) }, [])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -65,6 +74,9 @@ export default function Crises() {
     setDetailCrisis(created)
     load()
   }
+
+  const anonymizedItems = isAnonymous ? data.items.map(c => anonymizeCrisis(c, assetList)) : data.items
+  const displayItems = isAnonymous && !statusFilter && !search ? [...anonymizedItems, ...FAKE_CRISES] : anonymizedItems
 
   if (loading && data.items.length === 0 && !statusFilter && !search) {
     return <PageLoader />
@@ -115,7 +127,7 @@ export default function Crises() {
               {loading && (
                 <tr><td colSpan={5} className="px-4 py-12 text-center"><PageLoader size="sm" /></td></tr>
               )}
-              {!loading && data.items.length === 0 && (
+              {!loading && displayItems.length === 0 && (
                 <tr>
                   <td colSpan={5} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucune crise</p>
@@ -123,7 +135,7 @@ export default function Crises() {
                   </td>
                 </tr>
               )}
-              {!loading && data.items.map(c => (
+              {!loading && displayItems.map(c => (
                 <tr key={c.id} onClick={() => setDetailCrisis(c)} className="cursor-pointer"
                   style={{ borderBottom: '1px solid var(--border-subtle)' }}
                   onMouseEnter={e => e.currentTarget.style.background = `${MODULE_COLOR}0a`}

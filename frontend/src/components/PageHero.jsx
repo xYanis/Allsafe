@@ -10,10 +10,20 @@
 // — une texture immobile ne consomme pas le même "budget delight" qu'un mouvement.
 import { useTheme } from '../contexts/ThemeContext.jsx'
 
-const CARD_SHAPE = { border: '1px solid var(--border)', borderRadius: '16px' }
+// Rayon/décor réactifs au thème (21/08/2026, demande explicite) — Neutre : plat et net
+// (présentation pro, sans lueur ni dégradé). Cyberpunk : lueur/glow renforcés (panneau HUD).
+const CYBERPUNK_CLIP = 'polygon(20px 0, 100% 0, 100% calc(100% - 20px), calc(100% - 20px) 100%, 0 100%, 0 20px)'
+const CARD_SHAPE_BY_THEME = {
+  neutral:   { border: '1px solid var(--border)', borderRadius: '2px' },
+  cyberpunk: { border: '1px solid var(--border)', borderRadius: 0, clipPath: CYBERPUNK_CLIP },
+}
+const CARD_SHAPE_DEFAULT = { border: '1px solid var(--border)', borderRadius: '16px' }
 
 export default function PageHero({ icon, title, subtitle, color, children }) {
-  const { isDark } = useTheme()
+  const { isDark, theme } = useTheme()
+  const CARD_SHAPE = CARD_SHAPE_BY_THEME[theme] || CARD_SHAPE_DEFAULT
+  const isNeutral = theme === 'neutral'
+  const isCyberpunk = theme === 'cyberpunk'
   // Titre en dégradé de la couleur du module (même esprit que --brand-text-grad
   // sur Login/Home) plutôt qu'une teinte diluée dans le texte : la 1re version
   // (color-mix à 60% avec --text-primary) restait trop proche du gris pour se
@@ -33,13 +43,24 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
   // sous la trame de points (peinte après elle dans le DOM, même pile z-index) pour un effet
   // "spot lumineux traversant un grillage" plutôt qu'un aplat plat. Statique comme le reste du
   // hero (cf. note de tête de fichier) : une simple forme, jamais de pulsation/déplacement.
-  const glowOpacity = isDark ? 0.4 : 0.22
+  // Adouci (21/08/2026, retour utilisateur — "trop flashy") : glow/mélanges cyberpunk réduits.
+  const glowOpacity = isCyberpunk ? 0.5 : isNeutral ? 0 : isDark ? 0.4 : 0.22
+  // Police par thème (21/08/2026, demande explicite — "polices différentes", pas juste la
+  // couleur du texte) : serif pour Neutre (feel rapport/audit imprimé, rompt avec le mono
+  // "tech" utilisé partout ailleurs), mono capitales espacées pour Cyberpunk (déjà en place,
+  // poussé plus loin), var(--font-mono) inchangé en dark/light (identité d'origine).
+  const titleFont = isNeutral ? "Georgia, 'Times New Roman', serif" : 'var(--font-mono)'
   return (
     <div className="relative px-4 py-3 flex flex-wrap items-center justify-between gap-3" style={{
       ...CARD_SHAPE,
-      background: `linear-gradient(135deg, color-mix(in srgb, ${color} 14%, var(--bg-card)), var(--bg-card) 65%)`,
-      borderColor: `color-mix(in srgb, ${color} 28%, var(--border))`,
-      boxShadow: isDark ? 'inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
+      background: isNeutral
+        ? 'var(--bg-card)'
+        : `linear-gradient(135deg, color-mix(in srgb, ${color} ${isCyberpunk ? 15 : 14}%, var(--bg-card)), var(--bg-card) 65%)`,
+      borderColor: `color-mix(in srgb, ${color} ${isNeutral ? 16 : isCyberpunk ? 32 : 28}%, var(--border))`,
+      boxShadow: isCyberpunk
+        ? `0 0 0 1px color-mix(in srgb, ${color} 28%, transparent), 0 0 30px -8px color-mix(in srgb, ${color} 50%, transparent), inset 0 1px 0 rgba(255,255,255,0.05)`
+        : isNeutral ? 'none'
+        : isDark ? 'inset 0 1px 0 rgba(255,255,255,0.05)' : 'none',
     }}>
       {/* Décor (lueur + trame de points) isolé dans son propre wrapper clippé
           (18/08/2026, cf. audit) — auparavant l'`overflow-hidden` était posé sur le
@@ -75,13 +96,17 @@ export default function PageHero({ icon, title, subtitle, color, children }) {
           </svg>
         </div>
         <div className="min-w-0">
-          <h1 className="text-xl font-extrabold tracking-tight flex items-center gap-2 flex-wrap" style={{
+          <h1 className="text-xl font-extrabold flex items-center gap-2 flex-wrap" style={{
             backgroundImage: titleGrad,
             WebkitBackgroundClip: 'text',
             backgroundClip: 'text',
             color: 'transparent',
-            fontFamily: 'var(--font-mono)',
-            textShadow: isDark ? `0 0 26px color-mix(in srgb, ${color} 40%, transparent)` : 'none',
+            fontFamily: titleFont,
+            letterSpacing: isCyberpunk ? '0.04em' : isNeutral ? '0' : '-0.01em',
+            textTransform: isCyberpunk ? 'uppercase' : 'none',
+            textShadow: isCyberpunk
+              ? `0 0 22px color-mix(in srgb, ${color} 50%, transparent)`
+              : isDark ? `0 0 26px color-mix(in srgb, ${color} 40%, transparent)` : 'none',
           }}>
             {title}
           </h1>

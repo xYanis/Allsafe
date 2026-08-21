@@ -29,6 +29,9 @@ import {
 } from '../utils/fakeData.js'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
+import { useTiltEnabled, tiltMouseMove, tiltMouseEnter, tiltMouseLeave } from '../utils/tilt3d.js'
+import { useDashboardLayout } from '../contexts/DashboardLayoutContext.jsx'
+import { WIDGET_LABELS, SIZE_SPAN, SIZE_LABELS, LOCKED_WIDGETS } from '../constants/dashboardLayout.js'
 
 const CARD = tintedCard(CYBERVULN_CARD_TINT)
 // Style "filtre actif" (17/08/2026) — même formule que CVEs.jsx/Vulnerabilities.jsx, couleur du
@@ -634,9 +637,16 @@ function SslCertificatesCard() {
   )
 }
 
-function KpiCard({ label, value, sub, color }) {
+// Relief + tilt 3D (21/08/2026, demande explicite — 2e usage après Home.jsx, cf. utils/tilt3d.js
+// et index.css § .tile-3d) : `--tile` reprend la couleur déjà passée pour la valeur elle-même,
+// pas une nouvelle prop — les 4 KPI sont déjà chacun dans leur propre teinte.
+function KpiCard({ label, value, sub, color, tiltEnabled }) {
   return (
-    <div style={CARD} className="p-5">
+    <div style={{ ...CARD, '--tile': color || 'var(--text-muted)' }} className="p-5 tile-3d"
+      onMouseMove={tiltEnabled ? tiltMouseMove : undefined}
+      onMouseEnter={tiltEnabled ? tiltMouseEnter : undefined}
+      onMouseLeave={tiltEnabled ? tiltMouseLeave : undefined}>
+      <span className="tile-3d-glare" aria-hidden="true" />
       <p className="text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>{label}</p>
       <p className="text-3xl font-bold mt-2" style={{ color: color || 'var(--text-primary)' }}>{value ?? '—'}</p>
       {sub && <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>{sub}</p>}
@@ -644,6 +654,88 @@ function KpiCard({ label, value, sub, color }) {
   )
 }
 
+// Dashboard personnalisable (21/08/2026, demande explicite) — enveloppe une tuile (KPI, barre de
+// Filtres ou bloc de contenu) dans la grille réordonnable/redimensionnable. Réordonnancement en
+// CSS pur (`order`, cf. constants/dashboardLayout.js) plutôt qu'en réécrivant l'ordre du JSX : le
+// contenu de chaque tuile reste exactement là où il est déjà écrit dans le fichier (accès direct
+// au state/handlers du composant Dashboard, aucune extraction risquée sur un fichier de cette
+// taille) — seule sa position VISUELLE change. Drag-and-drop HTML5 natif (pas de nouvelle
+// dépendance, cf. plan). Registre unique pour KPI + Filtres + blocs (21/08/2026, revenu sur un
+// 1er essai à deux composants/deux grilles séparées — retour utilisateur : impossible de
+// déplacer une tuile de part et d'autre de la barre de Filtres, `order` CSS ne jouant qu'entre
+// enfants d'un même conteneur). "Filtres" est verrouillé (LOCKED_WIDGETS) : ni draggable, ni
+// redimensionnable lui-même, mais reste une cible de dépôt valide pour les autres tuiles.
+function Widget({ id, children }) {
+  const { order, sizes, editMode, setWidgetSize, reorder, moveWidget } = useDashboardLayout()
+  const [dragOver, setDragOver] = useState(false)
+  const size = sizes[id] || 'full'
+  const locked = LOCKED_WIDGETS.includes(id)
+  const idx = order.indexOf(id)
+
+  function handleDragStart(e) {
+    e.dataTransfer.setData('text/plain', id)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  function handleDragOver(e) {
+    e.preventDefault()
+    setDragOver(true)
+  }
+  function handleDrop(e) {
+    e.preventDefault()
+    setDragOver(false)
+    const fromId = e.dataTransfer.getData('text/plain')
+    if (fromId) reorder(fromId, id)
+  }
+
+  return (
+    <div
+      style={{ gridColumn: `span ${SIZE_SPAN[size]}`, order: order.indexOf(id) }}
+      draggable={editMode && !locked}
+      onDragStart={editMode && !locked ? handleDragStart : undefined}
+      onDragOver={editMode ? handleDragOver : undefined}
+      onDragLeave={editMode ? () => setDragOver(false) : undefined}
+      onDrop={editMode ? handleDrop : undefined}
+    >
+      {editMode && (
+        <div className="flex items-center justify-between gap-2 mb-2 px-3 py-1.5 rounded-lg text-xs"
+          style={{ background: 'rgba(88,166,255,0.1)', border: '1px dashed rgba(88,166,255,0.35)', cursor: locked ? 'default' : 'grab' }}>
+          <span style={{ color: 'var(--text-secondary)' }}>{locked ? '🔒' : '⠿'} {WIDGET_LABELS[id]}</span>
+          {!locked && (
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Boutons ◀/▶ (21/08/2026, retour utilisateur — "pour bouger entre eux c'est
+                  compliqué") : alternative fiable au glisser-déposer, échange juste la tuile
+                  avec sa voisine immédiate. Grisés en butée (1re/dernière position). */}
+              <div className="flex gap-1">
+                <button onClick={() => moveWidget(id, -1)} disabled={idx <= 0}
+                  title="Déplacer avant"
+                  className="w-5 h-5 flex items-center justify-center rounded text-[11px] font-semibold transition-colors disabled:opacity-30"
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>‹</button>
+                <button onClick={() => moveWidget(id, 1)} disabled={idx >= order.length - 1}
+                  title="Déplacer après"
+                  className="w-5 h-5 flex items-center justify-center rounded text-[11px] font-semibold transition-colors disabled:opacity-30"
+                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>›</button>
+              </div>
+              <div className="flex gap-1">
+                {['eighth', 'quarter', 'third', 'half', 'full'].map(s => (
+                  <button key={s} onClick={() => setWidgetSize(id, s)}
+                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold transition-colors"
+                    style={size === s
+                      ? { background: '#58a6ff', color: '#fff' }
+                      : { background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+                    {SIZE_LABELS[s]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ outline: dragOver ? '2px dashed #58a6ff' : 'none', outlineOffset: 2, borderRadius: 12 }}>
+        {children}
+      </div>
+    </div>
+  )
+}
 
 // Cache module (pas du state React) qui survit au démontage/remontage du composant —
 // Dashboard.jsx est entièrement redémonté à chaque navigation (pas de keep-alive de route,
@@ -657,7 +749,9 @@ let dashboardCache = null
 
 export default function Dashboard() {
   const { isAnonymous } = usePresentation()
+  const { editMode, setEditMode, resetToDefault } = useDashboardLayout()
   const { user } = useAuth()
+  const tiltEnabled = useTiltEnabled()
   const [kpis, setKpis] = useState(() => dashboardCache?.kpis ?? null)
   const [openVulns, setOpenVulns] = useState(() => dashboardCache?.openVulns ?? [])
   const [patchedVulns, setPatchedVulns] = useState(() => dashboardCache?.patchedVulns ?? [])
@@ -1702,10 +1796,44 @@ export default function Dashboard() {
     <div className="p-6 space-y-6">
       <PageHero
         icon="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"
-        title="Dashboard" color="#f85149"
+        title="Dashboard" color={MODULES.cybervuln.color}
         subtitle="Vue d'ensemble de la posture de sécurité"
       >
         <div className="flex items-start gap-2">
+          {/* Dashboard personnalisable (21/08/2026, demande explicite) — bascule le mode
+              édition en direct sur la page (poignées de drag + boutons de taille par bloc,
+              cf. Widget ci-dessus). Disposition persistée en localStorage
+              (DashboardLayoutContext.jsx), dispositions prédéfinies dans Paramètres. */}
+          <button onClick={() => setEditMode(m => !m)}
+            title={editMode ? 'Terminer la personnalisation' : 'Personnaliser le dashboard'}
+            className="p-2 rounded-lg transition-colors flex-shrink-0"
+            style={editMode
+              ? { background: '#58a6ff', color: '#fff' }
+              : { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+            {editMode ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+            )}
+          </button>
+          {/* Réinitialiser la disposition (21/08/2026, retour utilisateur — "remettre les dispos
+              de base" pendant les tests) : accès direct depuis la page plutôt que de repasser
+              par Paramètres > Tableau de bord à chaque fois. N'efface rien de définitif —
+              ré-applique juste le preset "Par défaut" (cf. constants/dashboardLayout.js). */}
+          {editMode && (
+            <button onClick={resetToDefault}
+              title="Réinitialiser la disposition (ordre et tailles d'origine)"
+              className="p-2 rounded-lg transition-colors flex-shrink-0"
+              style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          )}
           <MatchingCveButton onDone={() => { refreshStats() }} onToast={pushToast} />
           <PatchCheckRunButton selectedAssetIds={selectedAssetIds} onToast={pushToast} />
           <NotificationHistory />
@@ -1970,134 +2098,59 @@ export default function Dashboard() {
         )
       })()}
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KpiCard label="Actifs exposés"
-          value={displayKpis?.exposed_assets}
-          color="#fb8f44"
-          // `assets_to_configure` (07/08/2026) : le dashboard ne compte par défaut
-          // que les actifs "entièrement configurés" (au moins un scan SSH/WinRM
-          // réussi, cf. services/stats.py) — sans ce rappel, "sur 3 actifs" serait
-          // pris pour tout le parc plutôt que pour la fraction déjà vérifiée.
-          // Absent (undefined) dès qu'un filtre "Actifs" explicite est actif
-          // (le concept ne s'applique qu'au périmètre par défaut).
-          sub={displayKpis ? [
-            `sur ${displayKpis.total_assets} actifs`,
-            displayKpis.assets_to_configure > 0 ? `(${displayKpis.assets_to_configure} à configurer)` : null,
-          ].filter(Boolean).join(' ') : undefined} />
-        <KpiCard label="Vulns ouvertes"
-          value={openCount}
-          color="var(--text-primary)" />
-        <KpiCard label="En attente d'un patch"
-          value={`${awaitingRate}%`}
-          color="#d29922"
-          sub={`${assetScopedAwaiting.length} vuln${assetScopedAwaiting.length !== 1 ? 's' : ''} bloquée${assetScopedAwaiting.length !== 1 ? 's' : ''}`} />
-        <KpiCard label="Taux de correction global"
-          value={`${patchRate}%`}
-          color={patchRateColor}
-          sub={patchRate === 100 ? 'Excellent' : patchRate >= 80 ? 'Bon' : patchRate >= 50 ? 'À améliorer' : 'Critique'} />
-      </div>
+      {/* Grille unique réordonnable/redimensionnable — KPI, Filtres et blocs de contenu
+          (21/08/2026, demande explicite : pouvoir déplacer une tuile de part et d'autre de la
+          barre de Filtres, impossible avec des grilles séparées). 24 colonnes — 1/8=3, 1/4=6,
+          1/3=8, 1/2=12, plein=24 (cf. Widget plus haut, registre dans constants/dashboardLayout.js).
+          "Filtres" fait partie de la grille mais reste verrouillé (LOCKED_WIDGETS) : les autres
+          tuiles peuvent être déposées avant/après lui, lui ne bouge/redimensionne jamais. */}
+      {/* `gridAutoFlow: 'dense'` (21/08/2026, retour utilisateur — tuiles "qui bloquent"/se
+          superposent mal) : sans lui, une tuile pleine largeur placée entre deux tuiles plus
+          étroites laisse un trou dans la ligne (l'algorithme de placement par défaut n'avance
+          jamais en arrière) au lieu de laisser les tuiles suivantes reboucher l'espace libre. */}
+      <div className="grid gap-4 tile-3d-grid" style={{ gridTemplateColumns: 'repeat(24, 1fr)', gridAutoFlow: 'dense' }}>
+        <Widget id="kpiExposedAssets">
+          <KpiCard label="Actifs exposés"
+            value={displayKpis?.exposed_assets}
+            color="#fb8f44"
+            tiltEnabled={tiltEnabled}
+            // `assets_to_configure` (07/08/2026) : le dashboard ne compte par défaut
+            // que les actifs "entièrement configurés" (au moins un scan SSH/WinRM
+            // réussi, cf. services/stats.py) — sans ce rappel, "sur 3 actifs" serait
+            // pris pour tout le parc plutôt que pour la fraction déjà vérifiée.
+            // Absent (undefined) dès qu'un filtre "Actifs" explicite est actif
+            // (le concept ne s'applique qu'au périmètre par défaut).
+            sub={displayKpis ? [
+              `sur ${displayKpis.total_assets} actifs`,
+              displayKpis.assets_to_configure > 0 ? `(${displayKpis.assets_to_configure} à configurer)` : null,
+            ].filter(Boolean).join(' ') : undefined} />
+        </Widget>
+        <Widget id="kpiOpenVulns">
+          <KpiCard label="Vulns ouvertes"
+            value={openCount}
+            color="var(--text-primary)"
+            tiltEnabled={tiltEnabled} />
+        </Widget>
+        <Widget id="kpiAwaitingFix">
+          <KpiCard label="En attente d'un patch"
+            value={`${awaitingRate}%`}
+            color="#d29922"
+            tiltEnabled={tiltEnabled}
+            sub={`${assetScopedAwaiting.length} vuln${assetScopedAwaiting.length !== 1 ? 's' : ''} bloquée${assetScopedAwaiting.length !== 1 ? 's' : ''}`} />
+        </Widget>
+        <Widget id="kpiPatchRate">
+          <KpiCard label="Taux de correction global"
+            value={`${patchRate}%`}
+            color={patchRateColor}
+            tiltEnabled={tiltEnabled}
+            sub={patchRate === 100 ? 'Excellent' : patchRate >= 80 ? 'Bon' : patchRate >= 50 ? 'À améliorer' : 'Critique'} />
+        </Widget>
 
-      <AuditFindingsCard />
-      <SslCertificatesCard />
-
-      {/* Taux de correction par sévérité */}
-      <div style={CARD} className="p-5">
-        <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Taux de correction par sévérité</h2>
-        <div className="flex flex-col gap-3">
-          {[
-            { key: 'critical', label: 'CRITICAL', color: '#f85149', bg: 'rgba(248,81,73,0.08)', border: 'rgba(248,81,73,0.2)' },
-            { key: 'high',     label: 'HIGH',     color: '#fb8f44', bg: 'rgba(251,143,68,0.08)', border: 'rgba(251,143,68,0.2)' },
-            { key: 'medium',   label: 'MEDIUM',   color: '#d29922', bg: 'rgba(210,153,34,0.08)', border: 'rgba(210,153,34,0.2)' },
-            { key: 'low',      label: 'LOW',      color: '#58a6ff', bg: 'rgba(88,166,255,0.08)', border: 'rgba(88,166,255,0.2)' },
-          ].map(({ key, label, color, bg, border }) => {
-            const s = displayKpis?.severity_rates?.[key]
-            const rate = s?.rate ?? 0
-            const patched = s?.patched ?? 0
-            const total = s?.total ?? 0
-            const done = rate === 100
-            const textColor = done ? '#3fb950' : color
-            const rowBg = done ? 'rgba(63,185,80,0.08)' : bg
-            const rowBorder = done ? 'rgba(63,185,80,0.25)' : border
-            const barColor = done ? '#3fb950' : rate >= 80 ? '#3fb950' : rate >= 50 ? '#d29922' : color
-            return (
-              <div key={key} style={{ background: rowBg, border: `1px solid ${rowBorder}`, borderRadius: 8 }} className="px-4 py-3">
-                <div className="flex items-center gap-4">
-                  <span className="text-xs font-bold uppercase tracking-wider w-16 flex-shrink-0" style={{ color: textColor }}>
-                    {done ? '✓ ' : ''}{label}
-                  </span>
-                  <div className="flex-1">
-                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
-                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${rate}%`, background: barColor }} />
-                    </div>
-                  </div>
-                  <span className="text-sm font-bold tabular-nums min-w-[3rem] text-right flex-shrink-0" style={{ color: barColor }}>{rate}%</span>
-                  <span className="text-xs tabular-nums min-w-[5.5rem] text-right flex-shrink-0" style={{ color: done ? '#3fb950' : 'var(--text-muted)' }}>{patched}/{total}</span>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-
-      {/* Graphiques */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div style={CARD} className="p-5">
-          <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Répartition des vulnérabilités ouvertes</h2>
-          {sevChartData.length === 0
-            ? <p className="text-sm text-center py-16" style={{ color: 'var(--text-muted)' }}>Aucune donnée</p>
-            : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={sevChartData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="45%"
-                    innerRadius={52}
-                    outerRadius={78}
-                  >
-                    {sevChartData.map(entry => (
-                      <Cell key={entry.name} fill={SEV_COLORS[entry.name] || '#8b949e'} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={TOOLTIP_STYLE}
-                    itemStyle={{ color: 'var(--text-primary)' }}
-                    labelStyle={{ color: 'var(--text-muted)', display: 'none' }}
-                  />
-                  <Legend
-                    wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
-                    formatter={value => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            )
-          }
-        </div>
-
-        <div style={CARD} className="p-5">
-          <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Actifs les plus exposés</h2>
-          {topAssets.length === 0
-            ? <p className="text-sm text-center py-16" style={{ color: 'var(--text-muted)' }}>Aucune donnée</p>
-            : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={topAssets} layout="vertical" margin={{ left: 8, right: 16 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={{ stroke: 'var(--border)' }} />
-                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={{ stroke: 'var(--border)' }} />
-                  <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(88,166,255,0.05)' }} />
-                  <Bar dataKey="count" fill="var(--accent-blue)" name="Vulns" radius={[0, 4, 4, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )
-          }
-        </div>
-      </div>
-
-      {/* Filtres */}
-      <div style={{ ...CARD, padding: '12px 20px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        {/* Filtres — verrouillé (LOCKED_WIDGETS) : reste en une seule ligne pleine largeur,
+            mais peut désormais se retrouver n'importe où dans l'ordre choisi par l'utilisateur
+            (21/08/2026, demande explicite) plutôt que figé juste après les KPI. */}
+        <Widget id="filtres">
+        <div style={{ ...CARD, padding: '12px 20px', display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
         <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Filtres</span>
         {/* `selected={selectedAssetIds}` — PAS `effectiveAssetIds` (bug réel corrigé
             11/08/2026, signalé par l'utilisateur : "le bouton tout décoché ne
@@ -2181,8 +2234,120 @@ export default function Dashboard() {
             style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}
           >Réinitialiser</button>
         )}
-      </div>
+        </div>
+        </Widget>
 
+        <Widget id="auditFindings"><AuditFindingsCard /></Widget>
+        <Widget id="sslCertificates"><SslCertificatesCard /></Widget>
+        <Widget id="patchRateBySeverity">
+      <div style={CARD} className="p-5">
+        <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Taux de correction par sévérité</h2>
+        <div className="flex flex-col gap-3">
+          {[
+            { key: 'critical', label: 'CRITICAL', color: '#f85149', bg: 'rgba(248,81,73,0.08)', border: 'rgba(248,81,73,0.2)' },
+            { key: 'high',     label: 'HIGH',     color: '#fb8f44', bg: 'rgba(251,143,68,0.08)', border: 'rgba(251,143,68,0.2)' },
+            { key: 'medium',   label: 'MEDIUM',   color: '#d29922', bg: 'rgba(210,153,34,0.08)', border: 'rgba(210,153,34,0.2)' },
+            { key: 'low',      label: 'LOW',      color: '#58a6ff', bg: 'rgba(88,166,255,0.08)', border: 'rgba(88,166,255,0.2)' },
+          ].map(({ key, label, color, bg, border }) => {
+            const s = displayKpis?.severity_rates?.[key]
+            const rate = s?.rate ?? 0
+            const patched = s?.patched ?? 0
+            const total = s?.total ?? 0
+            const done = rate === 100
+            const textColor = done ? '#3fb950' : color
+            const rowBg = done ? 'rgba(63,185,80,0.08)' : bg
+            const rowBorder = done ? 'rgba(63,185,80,0.25)' : border
+            const barColor = done ? '#3fb950' : rate >= 80 ? '#3fb950' : rate >= 50 ? '#d29922' : color
+            return (
+              <div key={key} style={{ background: rowBg, border: `1px solid ${rowBorder}`, borderRadius: 8 }} className="px-4 py-3">
+                <div className="flex items-center gap-4">
+                  <span className="text-xs font-bold uppercase tracking-wider w-16 flex-shrink-0" style={{ color: textColor }}>
+                    {done ? '✓ ' : ''}{label}
+                  </span>
+                  <div className="flex-1">
+                    <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(0,0,0,0.15)' }}>
+                      <div className="h-full rounded-full transition-all duration-700" style={{ width: `${rate}%`, background: barColor }} />
+                    </div>
+                  </div>
+                  <span className="text-sm font-bold tabular-nums min-w-[3rem] text-right flex-shrink-0" style={{ color: barColor }}>{rate}%</span>
+                  <span className="text-xs tabular-nums min-w-[5.5rem] text-right flex-shrink-0" style={{ color: done ? '#3fb950' : 'var(--text-muted)' }}>{patched}/{total}</span>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+        </Widget>
+
+        <Widget id="charts">
+      {/* Graphiques — relief + tilt 3D comme les KPI ci-dessus (21/08/2026, demande explicite),
+          `--tile` reprend CYBERVULN_CARD_TINT (pas de couleur individuelle ici, contrairement
+          aux KpiCard). */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 tile-3d-grid">
+        <div style={{ ...CARD, '--tile': CYBERVULN_CARD_TINT }} className="p-5 tile-3d"
+          onMouseMove={tiltEnabled ? tiltMouseMove : undefined}
+          onMouseEnter={tiltEnabled ? tiltMouseEnter : undefined}
+          onMouseLeave={tiltEnabled ? tiltMouseLeave : undefined}>
+          <span className="tile-3d-glare" aria-hidden="true" />
+          <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Répartition des vulnérabilités ouvertes</h2>
+          {sevChartData.length === 0
+            ? <p className="text-sm text-center py-16" style={{ color: 'var(--text-muted)' }}>Aucune donnée</p>
+            : (
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={sevChartData}
+                    dataKey="value"
+                    nameKey="name"
+                    cx="50%"
+                    cy="45%"
+                    innerRadius={52}
+                    outerRadius={78}
+                  >
+                    {sevChartData.map(entry => (
+                      <Cell key={entry.name} fill={SEV_COLORS[entry.name] || '#8b949e'} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={TOOLTIP_STYLE}
+                    itemStyle={{ color: 'var(--text-primary)' }}
+                    labelStyle={{ color: 'var(--text-muted)', display: 'none' }}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+                    formatter={value => <span style={{ color: 'var(--text-secondary)' }}>{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            )
+          }
+        </div>
+
+        <div style={{ ...CARD, '--tile': CYBERVULN_CARD_TINT }} className="p-5 tile-3d"
+          onMouseMove={tiltEnabled ? tiltMouseMove : undefined}
+          onMouseEnter={tiltEnabled ? tiltMouseEnter : undefined}
+          onMouseLeave={tiltEnabled ? tiltMouseLeave : undefined}>
+          <span className="tile-3d-glare" aria-hidden="true" />
+          <h2 className="text-sm font-semibold mb-4" style={{ color: 'var(--text-secondary)' }}>Actifs les plus exposés</h2>
+          {topAssets.length === 0
+            ? <p className="text-sm text-center py-16" style={{ color: 'var(--text-muted)' }}>Aucune donnée</p>
+            : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={topAssets} layout="vertical" margin={{ left: 8, right: 16 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={{ stroke: 'var(--border)' }} />
+                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} axisLine={{ stroke: 'var(--border)' }} />
+                  <Tooltip contentStyle={TOOLTIP_STYLE} cursor={{ fill: 'rgba(88,166,255,0.05)' }} />
+                  <Bar dataKey="count" fill="var(--accent-blue)" name="Vulns" radius={[0, 4, 4, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            )
+          }
+        </div>
+      </div>
+        </Widget>
+
+        <Widget id="openVulns">
       {/* Vulnérabilités à traiter */}
       <div style={CARD} className="overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -2501,7 +2666,9 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+        </Widget>
 
+        <Widget id="awaitingFix">
       {/* Vulnérabilités en attente d'un patch correctif */}
       <div style={CARD} className="overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -2638,7 +2805,9 @@ export default function Dashboard() {
           </div>
         )}
       </div>
+        </Widget>
 
+        <Widget id="patchedVulns">
       {/* Vulnérabilités traitées */}
       <div style={CARD} className="overflow-hidden">
         <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -2813,6 +2982,8 @@ export default function Dashboard() {
             </table>
           </div>
         )}
+      </div>
+        </Widget>
       </div>
 
       {analysisModal && <AnalysisModal data={analysisModal} onClose={() => setAnalysisModal(null)} />}

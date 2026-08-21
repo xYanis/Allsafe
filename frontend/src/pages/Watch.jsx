@@ -14,6 +14,8 @@ import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { FAKE_WATCH_ITEMS, isFakeId, anonymizeWatchItem, anonymizeAsset } from '../utils/fakeData.js'
 
 const WATCH_ACCENT = '#58a6ff'
 
@@ -375,6 +377,7 @@ export default function Watch() {
   const [profileOnly,   setProfileOnly]   = useState(false)
   const [showProfile,   setShowProfile]   = useState(false)
   const [profileCount,  setProfileCount]  = useState(0)   // nb de termes configurés
+  const { isAnonymous } = usePresentation()
 
   // Sources "fuite de données" à exclure (natives + personnalisées) — résolu
   // dynamiquement pour qu'une source ajoutée via Fuite de données disparaisse
@@ -517,6 +520,19 @@ export default function Watch() {
 
       if (Object.keys(payload).length === 0) { setModal(null); return }
 
+      // Item de démonstration (mode Présentation) : pas d'appel API (n'existe pas en
+      // base) — mutation directe du jeu fictif, il n'est jamais persisté nulle part.
+      if (isFakeId(modal.id)) {
+        const fake = FAKE_WATCH_ITEMS.find(w => w.id === modal.id)
+        if (fake) {
+          Object.assign(fake, payload)
+          if (payload.status && payload.status !== 'new' && !fake.reviewed_at) fake.reviewed_at = new Date().toISOString()
+        }
+        flash('Item mis à jour', 'success')
+        setModal(null)
+        return
+      }
+
       // Traiter une ligne regroupée = traiter tous ses membres (même actu, sources
       // multiples) : la même décision est appliquée à chacun pour que la base reste
       // cohérente et que le groupe ne réapparaisse pas comme « à traiter ».
@@ -532,6 +548,20 @@ export default function Watch() {
 
   const totalPages        = Math.ceil(data.total / perPage)
   const criticalUntreated = kpis?.critical_untreated ?? null
+
+  // Fake data ajoutée seulement en page 1, sans filtre source/thème/SLA/profil actif —
+  // filtrée côté client sur sévérité/statut (les deux chips par défaut) pour rester
+  // cohérente avec la sélection, sans dupliquer tout le filtrage serveur pour si peu.
+  const noExtraFilter = selSources.length === 0 && selThemes.length === 0 && !slaOnly && !profileOnly
+  const fakeWatchItems = FAKE_WATCH_ITEMS.filter(w =>
+    (selSeverities.length === 0 || selSeverities.includes(w.severity)) &&
+    (selStatuses.length === 0 || selStatuses.includes(w.status)))
+  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des fake data —
+  // restaient jusqu'ici en clair (titre/résumé/décision/analyste), seules des lignes
+  // FAKE_WATCH_ITEMS s'y ajoutaient.
+  const anonymizedItems = isAnonymous ? data.items.map(w => anonymizeWatchItem(w, assetList)) : data.items
+  const displayItems = isAnonymous && noExtraFilter && page === 1 ? [...anonymizedItems, ...fakeWatchItems] : anonymizedItems
+  const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   // Couleur de ligne : la mise en avant "item en cours" prime sur les signaux
   // ambiants (SLA dépassé, correspondance profil) — c'est un repère explicite
@@ -731,7 +761,7 @@ export default function Watch() {
               {loading && (
                 <tr><td colSpan={10} className="px-4 py-12 text-center"><PageLoader size="sm" /></td></tr>
               )}
-              {!loading && data.items.length === 0 && (
+              {!loading && displayItems.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucun item de veille</p>
@@ -739,7 +769,7 @@ export default function Watch() {
                   </td>
                 </tr>
               )}
-              {!loading && data.items.map(item => (
+              {!loading && displayItems.map(item => (
                 <tr key={item.id}
                   style={{
                     borderBottom: '1px solid var(--border-subtle)',
@@ -1005,7 +1035,7 @@ export default function Watch() {
                     <span className="ml-2 font-normal" style={{ color: 'var(--text-faint)' }}>(facultatif)</span>
                   </label>
                   <AssetDropdown
-                    assetList={assetList}
+                    assetList={displayAssetList}
                     selected={form.asset_ids}
                     onChange={ids => setForm(f => ({ ...f, asset_ids: ids }))}
                   />

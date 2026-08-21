@@ -7,6 +7,8 @@ import AuditFormModal, { AUDIT_TYPES, AUDIT_STATUSES } from '../components/Audit
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { FAKE_AUDITS, anonymizeAudit, anonymizeAsset } from '../utils/fakeData.js'
 
 const MODULE_COLOR = MODULES.securite.color
 
@@ -47,6 +49,7 @@ export default function Audits() {
   const [page, setPage] = useState(1)
   const [createModal, setCreateModal] = useState(false)
   const [error, setError] = useState('')
+  const { isAnonymous } = usePresentation()
 
   useEffect(() => {
     fetchAssets().then(r => setAssetList([...(r.data || [])].sort((a, b) => a.name.localeCompare(b.name)))).catch(() => {})
@@ -76,6 +79,13 @@ export default function Audits() {
   }
 
   const totalPages = Math.ceil(data.total / PER_PAGE)
+  const noFilterActive = !statusFilter && !typeFilter && !search
+  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des fake data —
+  // restaient jusqu'ici en clair (titre/scope/périmètre/mandataire), seules des lignes
+  // FAKE_AUDITS s'y ajoutaient.
+  const anonymizedItems = isAnonymous ? data.items.map(a => anonymizeAudit(a, assetList)) : data.items
+  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...FAKE_AUDITS] : anonymizedItems
+  const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   if (loading && data.items.length === 0 && !statusFilter && !typeFilter && !search) {
     return <PageLoader />
@@ -130,7 +140,7 @@ export default function Audits() {
               {loading && (
                 <tr><td colSpan={6} className="px-4 py-12 text-center"><PageLoader size="sm" /></td></tr>
               )}
-              {!loading && data.items.length === 0 && (
+              {!loading && displayItems.length === 0 && (
                 <tr>
                   <td colSpan={6} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucun audit</p>
@@ -138,7 +148,7 @@ export default function Audits() {
                   </td>
                 </tr>
               )}
-              {!loading && data.items.map(a => {
+              {!loading && displayItems.map(a => {
                 const flagged = a.status === 'termine' && a.findings_unretested_closed > 0
                 return (
                   <tr key={a.id} onClick={() => navigate(`/audits/${a.id}`)} className="cursor-pointer"
@@ -199,7 +209,7 @@ export default function Audits() {
       </div>
 
       {createModal && (
-        <AuditFormModal assetList={assetList} onClose={() => setCreateModal(false)} onSaved={handleCreate} />
+        <AuditFormModal assetList={displayAssetList} onClose={() => setCreateModal(false)} onSaved={handleCreate} />
       )}
     </div>
   )

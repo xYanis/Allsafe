@@ -15,11 +15,17 @@ function extOf(filename) {
   return i === -1 ? '' : filename.slice(i).toLowerCase()
 }
 
-export default function DocumentPreviewModal({ document, onClose }) {
+// Contenu réel bloqué en mode Présentation (21/08/2026, retour utilisateur — cette modale
+// prévisualisait/téléchargeait le vrai PSSI/Charte/etc. en clair, aucune anonymisation possible
+// sur un PDF/image arbitraire contrairement à du texte structuré) : le nom de fichier/l'auteur
+// affichés viennent déjà d'un `document` masqué par la page appelante (Documentation.jsx), mais
+// l'aperçu et le téléchargement pointent vers le VRAI fichier quel que soit ce texte — bloqués
+// ici explicitement plutôt que de risquer un contenu réel sous un nom de fichier fictif.
+export default function DocumentPreviewModal({ document, onClose, isAnonymous }) {
   const ext = extOf(document.filename)
   const isImage = ext === '.png' || ext === '.jpg' || ext === '.jpeg'
   const isPdf = ext === '.pdf'
-  const previewable = PREVIEWABLE_EXT.has(ext)
+  const previewable = PREVIEWABLE_EXT.has(ext) && !isAnonymous
   const url = documentDownloadUrl(document.id)
 
   return (
@@ -31,11 +37,13 @@ export default function DocumentPreviewModal({ document, onClose }) {
             <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{document.uploaded_by}</p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <a href={url} target="_blank" rel="noopener noreferrer" download={!previewable ? document.filename : undefined}
-              className="text-xs px-3 py-1.5 rounded-lg font-medium"
-              style={{ background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
-              Télécharger
-            </a>
+            {!isAnonymous && (
+              <a href={url} target="_blank" rel="noopener noreferrer" download={!previewable ? document.filename : undefined}
+                className="text-xs px-3 py-1.5 rounded-lg font-medium"
+                style={{ background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
+                Télécharger
+              </a>
+            )}
             <button onClick={onClose} className="p-1.5 rounded-lg" style={{ color: 'var(--text-muted)' }}>
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
             </button>
@@ -43,13 +51,21 @@ export default function DocumentPreviewModal({ document, onClose }) {
         </div>
 
         <div className="flex-1 min-h-0 p-4 flex items-center justify-center overflow-auto" style={{ background: 'var(--bg-secondary)' }}>
-          {isPdf && (
+          {isAnonymous ? (
+            <div className="text-center px-6">
+              <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>🔒 Contenu masqué en mode Présentation</p>
+              <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                Le contenu réel de ce document (texte libre, impossible à anonymiser de façon
+                fiable) n'est ni prévisualisé ni téléchargeable tant que le mode Présentation est actif.
+              </p>
+            </div>
+          ) : isPdf && (
             <iframe src={url} title={document.filename} className="w-full h-full rounded-lg" style={{ border: '1px solid var(--border)', background: '#fff' }} />
           )}
-          {isImage && (
+          {!isAnonymous && isImage && (
             <img src={url} alt={document.filename} className="max-w-full max-h-full rounded-lg object-contain" />
           )}
-          {!previewable && (
+          {!isAnonymous && !previewable && (
             <div className="text-center px-6">
               <p className="text-sm font-medium mb-1" style={{ color: 'var(--text-primary)' }}>Aperçu non disponible pour ce format</p>
               <p className="text-xs" style={{ color: 'var(--text-muted)' }}>

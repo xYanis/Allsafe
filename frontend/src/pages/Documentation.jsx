@@ -12,6 +12,8 @@ import UploadDocumentModal from '../components/UploadDocumentModal.jsx'
 import DocumentPreviewModal from '../components/DocumentPreviewModal.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { anonymizeDocument } from '../utils/fakeData.js'
 
 const MODULE_COLOR = MODULES.documentation.color
 
@@ -152,6 +154,7 @@ export default function Documentation() {
   const [deleteDocTarget, setDeleteDocTarget] = useState(null)
   const [deleteTypeTarget, setDeleteTypeTarget] = useState(null)
   const [error, setError] = useState('')
+  const { isAnonymous } = usePresentation()
 
   function load() {
     Promise.all([fetchDocumentTypes(), fetchDocuments()]).then(([t, d]) => {
@@ -207,6 +210,10 @@ export default function Documentation() {
 
   if (types === null) return <PageLoader />
 
+  const displayDocsByType = isAnonymous
+    ? Object.fromEntries(Object.entries(docsByType).map(([id, docs]) => [id, docs.map(anonymizeDocument)]))
+    : docsByType
+
   return (
     <div className="p-6 space-y-5">
       <PageHero
@@ -236,7 +243,7 @@ export default function Documentation() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {types.map(t => (
-            <DocumentTypeCard key={t.id} type={t} docs={docsByType[t.id] || []} isAdmin={isAdmin}
+            <DocumentTypeCard key={t.id} type={t} docs={displayDocsByType[t.id] || []} isAdmin={isAdmin}
               onUpload={(type, file) => setUploadTarget({ type, file })}
               onDeleteDoc={setDeleteDocTarget} onDeleteType={setDeleteTypeTarget} onPreview={setPreviewTarget} />
           ))}
@@ -251,7 +258,7 @@ export default function Documentation() {
           onConfirm={handleUpload} onClose={() => setUploadTarget(null)} />
       )}
       {previewTarget && (
-        <DocumentPreviewModal document={previewTarget} onClose={() => setPreviewTarget(null)} />
+        <DocumentPreviewModal document={previewTarget} isAnonymous={isAnonymous} onClose={() => setPreviewTarget(null)} />
       )}
       {deleteDocTarget && (
         <ConfirmModal

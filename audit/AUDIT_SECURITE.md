@@ -1841,7 +1841,42 @@ problème ici est la corruption du score numérique, pas les transitions de stat
 | #40 | Forgery `risk_score` hors-bornes | 🟠 |
 | #41 | CSV injection résiduelle — 4 colonnes manquantes | 🟡 |
 
-**État au 21/08/2026** : #38, #39, #40, #41 corrigés en code. `schema_patches.sql` à rejouer.
+**État au 21/08/2026** : #38, #39, #40, #41 corrigés en code. `schema_patches.sql` appliqué en conditions réelles (même session).
+
+---
+
+## Revue du 21/08/2026 (6) — Scan Strix frontend (`frontend/src/`)
+
+> Scan white-box Strix v1.5.3, modèle DeepSeek, ciblé sur `frontend/src/` séparément (le scan global
+> plante en WSL2 — TUI Bubble Tea incompatible avec ce terminal). 1 finding confirmé.
+
+### 🟠 #42 — XSS stocké dans l'export PDF (MEDIUM)
+
+**Où** : `frontend/src/components/ReportMarkdown.jsx::exportPdf`
+
+**Problème** : `exportPdf()` convertit le markdown d'un rapport (incident, audit, archive
+hebdomadaire) en HTML sans échapper les caractères spéciaux, puis l'écrit via `document.write`
+dans un popup same-origin. Un analyste peut insérer `<img src=x onerror=...>` dans un texte de
+rapport (annotations d'incident, résumé d'audit, etc.) — stocké en base, exécuté dans la session
+de tout utilisateur qui exporte ce rapport. CVSS 7.3 (AV:N/AC:L/PR:L/UI:R/S:C/C:H/I:H/A:N,
+CWE-79, Stored XSS) — exfiltration de session et actions en nom d'autrui sur une plateforme NIS 2.
+DOMPurify était déjà installé (`^3.4.12`) mais non utilisé dans ce chemin.
+
+**Correctif** : échapper les caractères spéciaux HTML (`<>&"'`) en amont du parser markdown dans
+`inline()`, puis passer le HTML assemblé dans `DOMPurify.sanitize()` en filet de sécurité.
+
+- [x] Corrigé (21/08/2026) : `import DOMPurify from 'dompurify'` ajouté ; `escapeHtml()` posé
+  avant `colorizeHtml()` dans la fonction `inline` ; `DOMPurify.sanitize()` sur `bodyHtml` avant
+  le `document.write`. La sortie React à l'écran (`renderMd`) est inchangée — elle passe déjà
+  par des nœuds JSX, jamais par `innerHTML`.
+
+### Résumé — Revue du 21/08/2026 (6)
+
+| # | Sujet | Sévérité |
+|---|---|---|
+| #42 | XSS stocké — export PDF `exportPdf()` sans échappement | 🟠 |
+
+**État au 21/08/2026** : #42 corrigé en code.
 
 ---
 
@@ -1864,5 +1899,4 @@ problème ici est la corruption du score numérique, pas les transitions de stat
 - **Redistribution des binaires agent** reconstruits avec les correctifs #13/#18 aux postes
   déjà enrôlés — pas fait automatiquement, à planifier selon le processus habituel
   (`docs/AGENTS.md` § Mise à jour).
-- **`schema_patches.sql` notes** — à rejouer contre la DB (colonnes `user_id` sur les 3 tables
-  notes, drop contrainte `UNIQUE(name)`, nouveau `UNIQUE(name, user_id)`, backfill admin).
+~~**`schema_patches.sql` notes**~~ — appliqué en conditions réelles (21/08/2026, même session).

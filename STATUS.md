@@ -49,8 +49,15 @@ sécurité.
   used_at` enveloppé en `DO $$` conditionnel (colonne déjà droppée) ; seed `note_themes` passé
   de `ON CONFLICT (name)` à `WHERE NOT EXISTS (name)` (ancienne contrainte supprimée).
 
-**⚠️ Strix va être relancé sur tout le projet** — résultats à intégrer dans
-`audit/AUDIT_SECURITE.md` à la prochaine session.
+- **Scan Strix `frontend/src/`** (même session, scan global impossible en WSL2 — TUI crash) :
+  1 finding confirmé. Posture jugée bonne (0 vuln de dépendance, 0 injection DOM évidente hors ce cas).
+
+- **#42 — XSS stocké export PDF** (Medium, corrigé) : `exportPdf()` dans `ReportMarkdown.jsx`
+  convertissait le markdown en HTML sans échappement, puis l'écrivait via `document.write` dans un
+  popup same-origin. Fix : `escapeHtml()` en amont de `colorizeHtml()` dans `inline()` +
+  `DOMPurify.sanitize()` sur `bodyHtml`. DOMPurify était déjà installé (`^3.4.12`).
+
+- **`audit/AUDIT_SECURITE.md`** : revue (6) ajoutée (#42), `schema_patches.sql` notes marqué appliqué.
 
 ---
 

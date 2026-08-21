@@ -13,6 +13,8 @@
 // (CRITICAL/ÉLEVÉ/…) et doit produire une seconde sortie HTML autonome pour
 // l'impression, deux besoins que `marked` ne couvre pas ici.
 
+import DOMPurify from 'dompurify'
+
 // Même échelle que SeverityBadge.jsx (CRITICAL/HIGH/MEDIUM/LOW), étendue aux
 // niveaux de risque global du résumé exécutif (CRITIQUE/ÉLEVÉ/MODÉRÉ/FAIBLE).
 export const SEVERITY_COLORS = {
@@ -160,7 +162,10 @@ export function exportPdf(markdownText) {
   const colorizeHtml = s => s.replace(
     SEVERITY_REGEX, m => `<span style="color:${SEVERITY_COLORS[m]};font-weight:700">${m}</span>`
   )
-  const inline = s => colorizeHtml(s)
+  const escapeHtml = s => s
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+  const inline = s => colorizeHtml(escapeHtml(s))
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
 
@@ -196,7 +201,7 @@ export function exportPdf(markdownText) {
     else htmlParts.push(`<p>${inline(l)}</p>`)
     i++
   }
-  const bodyHtml = htmlParts.join('\n').replace(/(<li>[\s\S]*?<\/li>(\n|<br>)*)+/g, m => `<ul>${m}</ul>`)
+  const bodyHtml = DOMPurify.sanitize(htmlParts.join('\n').replace(/(<li>[\s\S]*?<\/li>(\n|<br>)*)+/g, m => `<ul>${m}</ul>`))
 
   const html = `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
 <title>Rapport CyberVuln — ${date}</title>

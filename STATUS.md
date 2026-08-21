@@ -17,6 +17,43 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
+**Dernière session : 21/08/2026** — Pages d'erreur personnalisées + audit Strix + 4 correctifs de
+sécurité.
+
+- **Pages d'erreur animées** (`frontend/src/pages/ErrorPage.jsx` nouveau,
+  `components/ErrorBoundary.jsx` réécrit) : 404 gris, 403 or, 500 rouge — keyframes injectés via
+  `<style>` (évite le conflit shorthand CSS/`animationDelay`), entrée séquencée code → titre →
+  message → boutons. `App.jsx` route `*` → `<ErrorPage code={404}/>` ; `ProtectedRoute.jsx`
+  redirige vers `<ErrorPage code={403}/>` au lieu de `<Navigate to="/">`.
+
+- **Scan Strix v1.5.3** (white-box, DeepSeek, `backend/` uniquement) : 4 findings confirmés,
+  résultats dans `strix_runs/backend_e1c4/`. Posture globale jugée bonne (0 CVE de dépendance,
+  0 injection SQL/RCE/SSRF exploitable, uploads durcis, CSRF couvert).
+
+- **#38 — BFLA backup** (Medium, corrigé) : `backup.router` passé de `_authed` à `_admin_only`
+  dans `main.py` — tout compte authentifié pouvait déclencher un `pg_dump` superutilisateur.
+
+- **#39 — BOLA notes** (Medium, corrigé) : `user_id` FK ajouté sur `NoteTheme`/`NoteSubject`/
+  `NoteImage` ; contrainte `UNIQUE(name, user_id)` remplace `UNIQUE(name)` global ; backfill vers
+  le 1er admin ; tous les handlers filtrés par `user.id` (404 en accès cross-user). Migration
+  appliquée en conditions réelles.
+
+- **#40 — Forgery `risk_score`** (Medium, corrigé) : `Field(ge=0, le=10)` sur `VulnUpdate.
+  risk_score` (valeurs hors-bornes refusées par Pydantic à l'entrée).
+
+- **#41 — CSV injection résiduelle** (Low, corrigé) : 4 colonnes manquées par le correctif #7
+  du 27/07 (`themes`, actifs concernés dans `watch.py` ; `matched_identities`, `asset_name` dans
+  `reports.py`) enveloppées dans `csv_safe()`.
+
+- **`schema_patches.sql`** rejoué et 2 bugs d'idempotence préexistants corrigés : `UPDATE
+  used_at` enveloppé en `DO $$` conditionnel (colonne déjà droppée) ; seed `note_themes` passé
+  de `ON CONFLICT (name)` à `WHERE NOT EXISTS (name)` (ancienne contrainte supprimée).
+
+**⚠️ Strix va être relancé sur tout le projet** — résultats à intégrer dans
+`audit/AUDIT_SECURITE.md` à la prochaine session.
+
+---
+
 **Dernière session : 19/08/2026 (suite 6)** — Incident réel grave sur `armadasenonches` : mise à jour
 `.exe` (0.1.15 → 0.1.16) rendue "réussie" par la fenêtre graphique, mais `Program Files\Allsafe Agent`
 entièrement vide après coup — plus d'exe, plus de DLL, service disparu. **Rien perdu côté Allsafe**

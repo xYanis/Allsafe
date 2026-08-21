@@ -560,6 +560,10 @@ class Incident(Base):
     # Finding d'audit à l'origine de la déclaration (03/08/2026, module Audits) — même
     # SET NULL que les 3 FK ci-dessus : l'incident survit à la suppression du finding source.
     audit_finding_id   = Column(_UUID(as_uuid=True), ForeignKey("audit_findings.id", ondelete="SET NULL"), nullable=True)
+    # Évènement agent à l'origine de la déclaration (19/08/2026, cf. docs/AGENT_DETECTION.md
+    # § Pont vers Incidents) — même SET NULL que les FK ci-dessus. Escalade toujours manuelle :
+    # aucune catégorie d'AgentSecurityEvent ne crée un incident automatiquement.
+    agent_security_event_id = Column(_UUID(as_uuid=True), ForeignKey("agent_security_events.id", ondelete="SET NULL"), nullable=True)
 
     # Crise regroupant éventuellement cet incident avec d'autres (31/07/2026, cf. Crisis
     # ci-dessous) — SET NULL et non CASCADE : supprimer la crise ne doit pas supprimer les
@@ -1140,6 +1144,12 @@ class Agent(Base):
     # jamais lu que par l'agent lui-même (GET /agents/pending, sondage court côté client) —
     # le serveur n'initie jamais le contact (CLAUDE.md §1). Effacé par le check-in qu'il déclenche.
     pending_scan_requested_at = Column(DateTime(timezone=True))
+    # Ping (21/08/2026) — posé par un admin (POST /agents/{id}/ping ou /agents/ping global),
+    # effacé par le pong de l'agent (POST /agents/pong). `last_pong_ms` = latence totale
+    # admin→agent→serveur (inclut le délai de polling ≤ POLL_INTERVAL).
+    ping_requested_at = Column(DateTime(timezone=True))
+    last_pong_at      = Column(DateTime(timezone=True))
+    last_pong_ms      = Column(Integer)
     # Rapport de coupure (13/08/2026) : dernière coupure réseau connue, déclarée par l'agent
     # à son prochain check-in réussi (services/daemon.rs::DaemonState) — jamais effacé
     # silencieusement, reste visible jusqu'à ce qu'un nouveau rapport le remplace.
@@ -1191,6 +1201,9 @@ class AgentCheckinLog(Base):
     # sans cette capture au bon moment, l'info "ce check-in a-t-il été déclenché par une
     # demande manuelle" est perdue dès que la ligne est écrite.
     on_demand           = Column(Boolean, nullable=False, default=False)
+    # Ping (21/08/2026) — entrée dédiée dans la frise, jamais un vrai check-in (pas de paquets).
+    is_ping             = Column(Boolean, nullable=False, default=False)
+    pong_ms             = Column(Integer)
 
 
 class AgentEnrollmentToken(Base):

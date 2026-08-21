@@ -178,12 +178,23 @@ export const deleteEnrollmentToken = (id) => api.delete(`/agents/enrollment-toke
 export const revokeAgent           = (id) => api.post(`/agents/${id}/revoke`)
 export const deleteAgent           = (id) => api.delete(`/agents/${id}`)
 export const requestAgentScan      = (id) => api.post(`/agents/${id}/request-scan`)
+export const pingAgent             = (id) => api.post(`/agents/${id}/ping`)
+export const cancelPing            = (id) => api.delete(`/agents/${id}/ping`)
+export const pingAllAgents         = ()   => api.post('/agents/ping')
 // Historique des contacts (18/08/2026) — page dédiée par agent.
 export const getAgent              = (id) => api.get(`/agents/${id}`)
 export const agentCheckins         = (id, limit) => api.get(`/agents/${id}/checkins`, { params: { limit } })
 // Historique complet des agents (parc global, y compris supprimés) — badge compteur + liste
 // de la page Sécurité > Agents (cf. routers/agents.py::agents_history).
 export const agentsHistory         = () => api.get('/agents/history')
+
+// Détection d'évènements sensibles côté poste (19/08/2026, cf. docs/AGENT_DETECTION.md) — même
+// schéma d'acquittement que securityEvents/ackSecurityEvent ci-dessus, table séparée
+// (agent_security_events), jamais fusionnée avec le honeypot DB. Page Durcissement + badge nav.
+export const agentSecurityEvents       = (params) => api.get('/agents/security-events', { params })
+export const agentSecurityEventsCount  = () => api.get('/agents/security-events/count')
+export const ackAgentSecurityEvent     = (id, ack_by) => api.post(`/agents/security-events/${id}/ack`, { ack_by })
+export const ackAllAgentSecurityEvents = (ack_by, category) => api.post('/agents/security-events/ack-all', { ack_by, category })
 
 // Analystes (cf. backend/routers/analysts.py) — remplace la liste ANALYSTS codée en dur,
 // alimente les menus déroulants d'attribution (validé par, déclaré par...). Registre

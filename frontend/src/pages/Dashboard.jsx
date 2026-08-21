@@ -4,7 +4,7 @@ import {
   PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts'
-import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, newVulnsSinceCount, assetsLifecycleSince, securityEventsCount, incidentsPendingCount, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates } from '../api/client.js'
+import { stats as fetchStats, vulns as fetchVulns, assets as fetchAssets, updateVuln, analyzeIA, patchCheck, patchCheckStatus, patchCheckRun, syncMatch, syncMatchStatus, bulkPatch, falsePositiveCandidates, bulkFalsePositive, autoBasculeSummary, newVulnsSinceCount, assetsLifecycleSince, securityEventsCount, incidentsPendingCount, assetCompletionSummary, openUnretestedFindingsCount, getVulnOtherInstances, prtgSslCertificates, agentSecurityEventsCount } from '../api/client.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import PageHero from '../components/PageHero.jsx'
 import SeverityBadge from '../components/SeverityBadge.jsx'
@@ -761,6 +761,28 @@ export default function Dashboard() {
   // par ailleurs. Rien à afficher pour "completed"/"running" (déjà couvert par la barre
   // de progression ci-dessous quand un cycle est réellement en cours).
   const [lastCycleInfo, setLastCycleInfo] = useState({ status: null, at: null })
+  // Évènements agent non acquittés (19/08/2026, cf. docs/AGENT_DETECTION.md) — bandeau
+  // persistant distinct du honeypot DB (jamais fusionnés, § Décisions figées de la doc :
+  // "les évènements agent ne partagent pas la bannière rouge du Dashboard avec le honeypot
+  // DB"), couleur cyan (module Inventaire) plutôt que rouge pour rester visuellement distinct.
+  // Ouvert à tout connecté, comme le badge nav Durcissement (le détail/l'acquittement restent
+  // réservés admin sur la page elle-même).
+  const [agentEventsCount, setAgentEventsCount] = useState(0)
+  // Lien direct vers l'actif concerné (19/08/2026, retour utilisateur — "il doit amener à
+  // l'actif concerné et non à la page") — le serveur ne le renseigne que quand un seul actif
+  // porte les criticals en attente (routers/agents.py::security_events_count) ; ambigu (plusieurs
+  // actifs) ou vide, on retombe sur la page Durcissement seule.
+  const [agentEventsAssetId, setAgentEventsAssetId] = useState(null)
+  useEffect(() => {
+    if (isAnonymous) { setAgentEventsCount(0); setAgentEventsAssetId(null); return }
+    let alive = true
+    const load = () => agentSecurityEventsCount()
+      .then(r => { if (alive) { setAgentEventsCount(r.data.unacknowledged || 0); setAgentEventsAssetId(r.data.asset_id || null) } })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [isAnonymous])
   const lastCompletedRef = useRef(null)
   // Total du cycle en cours, pour la barre de progression — capturé au premier tick
   // où une vérification est active, remis à zéro une fois le cycle terminé.
@@ -1832,6 +1854,19 @@ export default function Dashboard() {
               ? ' — voir les logs backend pour le détail, relancez manuellement une fois la cause corrigée.'
               : ' — un nouveau cycle reprend automatiquement là où il s\'est arrêté.'}
           </span>
+        </div>
+      )}
+
+      {/* Évènements agent non acquittés (19/08/2026, cf. docs/AGENT_DETECTION.md) — bandeau
+          persistant distinct du honeypot DB (jamais fusionnés, § Décisions figées de la doc),
+          cyan (module Inventaire) plutôt que rouge pour rester visuellement dissocié. */}
+      {agentEventsCount > 0 && (
+        <div className="text-sm px-4 py-3 rounded-xl flex items-center gap-2"
+          style={{ background: 'rgba(57,197,207,0.1)', color: '#39c5cf', border: '1px solid rgba(57,197,207,0.25)' }}>
+          <span>🛡️</span>
+          <Link to={agentEventsAssetId ? `/durcissement?asset=${agentEventsAssetId}` : '/durcissement'} className="hover:underline">
+            {agentEventsCount} évènement{agentEventsCount > 1 ? 's' : ''} critique{agentEventsCount > 1 ? 's' : ''} détecté{agentEventsCount > 1 ? 's' : ''} par un agent (élévation de privilèges, altération d'audit…)
+          </Link>
         </div>
       )}
 

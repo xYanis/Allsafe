@@ -1,6 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
-import { assets as fetchAssets, runWebHardeningCheck, scanPolicies } from '../api/client.js'
+import { Link, useSearchParams } from 'react-router-dom'
+import {
+  assets as fetchAssets, runWebHardeningCheck, scanPolicies,
+  agentSecurityEvents, ackAgentSecurityEvent, ackAllAgentSecurityEvents, listAgents,
+} from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
@@ -10,8 +13,10 @@ import PageHero from '../components/PageHero.jsx'
 import OsLogo from '../components/OsLogo.jsx'
 import CategoryIcon from '../components/CategoryIcon.jsx'
 import ComplianceChecklist, { complianceSummary } from '../components/ComplianceChecklist.jsx'
+import DeclareIncidentButton from '../components/DeclareIncidentButton.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { useHorizontalWheelScroll } from '../hooks/useHorizontalWheelScroll.js'
 
 // Durcissement (12/08/2026, ex-section "Durcissement / conformité" de la modale de scan
 // d'Assets.jsx, demande utilisateur — "sortir la modal pour en faire un module à part") : vue
@@ -26,6 +31,295 @@ import { tintedCard } from '../utils/cardStyle.js'
 // ComplianceChecklist.jsx — une seule ligne dépliée à la fois.
 const MODULE_HOVER = `${MODULES.inventaire.color}0a`
 const CARD = tintedCard(MODULES.inventaire.color)
+
+// ─── Évènements détectés par les agents (19/08/2026, cf. docs/AGENT_DETECTION.md) ──────────
+// Lecture des journaux d'audit natifs de l'OS + diff d'état entre deux check-ins — l'agent
+// constate, il n'exécute et n'écrit jamais rien sur le poste (même principe de non-intervention
+// que le reste d'Allsafe). Journal séparé du honeypot DB (jamais fusionnés, cf. doc § Modèle de
+// données) : réservé admin comme AdministrationSecurity.jsx > onglet Base de données, même
+// schéma d'acquittement (GET/POST /agents/security-events*).
+const AGENT_EVENT_CATEGORY = {
+  account_created:      { label: 'Compte créé',                color: '#d29922' },
+  privilege_escalation: { label: 'Élévation de privilèges',    color: '#f85149' },
+  account_reactivated:  { label: 'Compte réactivé',             color: '#d29922' },
+  persistence:          { label: 'Nouvelle persistance',       color: '#fb8f44' },
+  suspicious_process:   { label: 'Processus suspect',          color: '#f85149' },
+  audit_tampering:      { label: "Altération de l'audit",      color: '#f85149' },
+  buffer_overflow:      { label: 'Évènements perdus (buffer)', color: '#8b949e' },
+}
+const AGENT_EVENT_SEVERITY = {
+  critical: { label: 'Critique',      color: '#f85149' },
+  warning:  { label: 'Avertissement', color: '#d29922' },
+  info:     { label: 'Info',          color: '#58a6ff' },
+}
+const AGENT_EVENT_SEVERITY_RANK = { critical: 0, warning: 1, info: 2 }
+
+// Tri par criticité (19/08/2026, demande utilisateur) : le plus critique d'abord, quelle que
+// soit la date. À l'intérieur d'une même sévérité, le plus récent d'abord.
+function sortAgentEvents(events) {
+  return [...events].sort((a, b) => {
+    const rankDiff = (AGENT_EVENT_SEVERITY_RANK[a.severity] ?? 3) - (AGENT_EVENT_SEVERITY_RANK[b.severity] ?? 3)
+    if (rankDiff !== 0) return rankDiff
+    return new Date(b.reported_at) - new Date(a.reported_at)
+  })
+}
+
+// Regroupement par catégorie (19/08/2026, retour utilisateur — "je ne peux pas traiter tous
+// les évènements avec une centaine d'agents") : à cette échelle, une liste plate même triée par
+// criticité reste trop longue à dépouiller évènement par évènement. Grouper par catégorie
+// ramène ça à une poignée de lignes (~7 catégories max, cf. docs/AGENT_DETECTION.md) avec un
+// acquittement en masse par groupe — le bon niveau pour du bruit homogène (ex. persistance
+// détectée en rafale au 1er rollout d'un poste), sans perdre l'accès au détail individuel.
+function groupAgentEventsByCategory(events) {
+  const byCategory = new Map()
+  for (const e of events) {
+    if (!byCategory.has(e.category)) byCategory.set(e.category, [])
+    byCategory.get(e.category).push(e)
+  }
+  return [...byCategory.entries()]
+    .map(([category, evs]) => ({
+      category,
+      events: evs,
+      // Noms d'actifs concernés (19/08/2026, demande utilisateur — "il faudrait le nom de
+      // l'actif avant qu'on clique dessus") : affichés directement sur la ligne de groupe,
+      // pas seulement après dépliage — dédoublonnés, un même poste peut porter plusieurs
+      // évènements de la même catégorie.
+      hostnames: [...new Set(evs.map(e => e.hostname))].sort((a, b) => a.localeCompare(b)),
+      worstRank: Math.min(...evs.map(e => AGENT_EVENT_SEVERITY_RANK[e.severity] ?? 3)),
+    }))
+    .sort((a, b) => a.worstRank - b.worstRank || b.events.length - a.events.length)
+}
+
+// Aperçu tronqué d'une liste de noms d'actifs sur la ligne de groupe — la liste complète reste
+// dans le `title` (survol) pour ne pas casser la mise en page à 100 agents.
+function previewHostnames(hostnames, max = 4) {
+  if (hostnames.length <= max) return hostnames.join(', ')
+  return `${hostnames.slice(0, max).join(', ')} +${hostnames.length - max} autre${hostnames.length - max > 1 ? 's' : ''}`
+}
+
+function fmtAgentEventDate(iso) {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  return d.toLocaleDateString('fr-FR') + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+}
+
+// Table partagée par le panneau critique (haut de page) et le détail par actif (ci-dessous,
+// pour tout le reste) — seule la mise en avant visuelle change (`muted`), même logique
+// d'acquittement individuel.
+//
+// `assetByAgentId` (19/08/2026, demande utilisateur — "avec l'actif directement sur ça ligne") :
+// `AgentSecurityEvent.hostname` n'est qu'un instantané du hostname déclaré par l'agent (souvent
+// un nom court, ex. "armadasenonches"), pas forcément identique à `Asset.name`/`Asset.hostname`
+// (FQDN "armadasenonches.aer.loc" observé en conditions réelles) — résoudre via `agent_id` →
+// `GET /agents` (chargé une fois par Durcissement()) plutôt que de comparer des chaînes.
+//
+// `hideAssetColumn` (19/08/2026, demande utilisateur — "l'historique tu devrais le mettre avec
+// l'actif directement") : quand la table est rendue DANS la ligne dépliée d'un actif, répéter
+// son nom sur chaque évènement serait redondant — seul le panneau critique global (plusieurs
+// actifs mélangés) a besoin de cette colonne.
+function AgentEventsTable({ events, onAck, busy, muted, assetByAgentId, hideAssetColumn }) {
+  const headers = hideAssetColumn
+    ? ['Date', 'Catégorie', 'Sévérité', 'Résumé', 'Statut', '']
+    : ['Date', 'Actif', 'Catégorie', 'Sévérité', 'Résumé', 'Statut', '']
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+            {headers.map(h => (
+              <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {events.map(e => {
+            const cat = AGENT_EVENT_CATEGORY[e.category] || { label: e.category, color: 'var(--text-muted)' }
+            const sev = AGENT_EVENT_SEVERITY[e.severity] || AGENT_EVENT_SEVERITY.info
+            const asset = assetByAgentId?.[e.agent_id]
+            return (
+              <tr key={e.id} style={{
+                borderBottom: '1px solid var(--border-subtle)',
+                background: (!muted && !e.acknowledged) ? `${sev.color}0f` : 'transparent',
+                boxShadow: (!muted && !e.acknowledged) ? `inset 3px 0 0 ${sev.color}` : 'none',
+              }}>
+                <td className="px-4 py-2.5 text-xs font-mono whitespace-nowrap" style={{ color: 'var(--text-secondary)' }}>{fmtAgentEventDate(e.reported_at)}</td>
+                {!hideAssetColumn && (
+                  <td className="px-4 py-2.5 text-xs font-medium whitespace-nowrap">
+                    {asset?.id ? (
+                      <Link to={`/durcissement?asset=${asset.id}`} className="hover:underline" style={{ color: 'var(--text-primary)' }} title="Voir le durcissement de cet actif">
+                        {asset.name}
+                      </Link>
+                    ) : (
+                      <span style={{ color: 'var(--text-primary)' }} title="Actif non résolu — agent supprimé ou jamais rattaché">{e.hostname}</span>
+                    )}
+                  </td>
+                )}
+                <td className="px-4 py-2.5 whitespace-nowrap">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: `${cat.color}1a`, color: cat.color, border: `1px solid ${cat.color}55` }}>{cat.label}</span>
+                </td>
+                <td className="px-4 py-2.5 whitespace-nowrap">
+                  <span className="text-xs font-medium px-2 py-0.5 rounded" style={{ background: `${sev.color}1a`, color: sev.color }}>{sev.label}</span>
+                </td>
+                <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--text-secondary)' }}>{e.summary}</td>
+                {/* `persistence` : pas de notion d'acquittement (19/08/2026, retour utilisateur
+                    — sans liste de référence de ce qui est normal sur ce poste, il n'y a rien
+                    à valider). Lecture seule, avec une porte de sortie manuelle vers Incidents
+                    si une ligne précise paraît louche (cf. docs/AGENT_DETECTION.md § Pont vers
+                    Incidents) — jamais de qualification automatique. */}
+                {e.category === 'persistence' ? (
+                  <>
+                    <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--text-faint)' }}>—</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <DeclareIncidentButton sourceType="agent_security_event" sourceId={e.id} />
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {e.acknowledged
+                        ? <span className="text-xs" style={{ color: 'var(--text-muted)' }}>Acquitté{e.ack_by ? ` (${e.ack_by})` : ''}</span>
+                        : <span className="text-xs font-semibold" style={{ color: muted ? 'var(--text-muted)' : sev.color }}>Non acquitté</span>}
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {!e.acknowledged && (
+                        <button onClick={() => onAck(e.id)} disabled={busy}
+                          className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-40"
+                          style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                          Acquitter
+                        </button>
+                      )}
+                    </td>
+                  </>
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// Panneau global — réservé aux évènements CRITICAL (19/08/2026, retour utilisateur : "ne garder
+// que le critique dans l'évènement détectés par les agents"). Tout le reste (warning/info)
+// vit désormais directement sur la ligne dépliée de l'actif concerné, cf. AssetAgentEvents
+// ci-dessous — cohérent avec la règle déjà en place sur les vulnérabilités (CRITICAL = décision
+// humaine centralisée, le reste s'annote au cas par cas là où il vit, CLAUDE.md §1). Devenu un
+// composant contrôlé : `Durcissement()` charge une seule fois évènements + agents et distribue
+// (ici le sous-ensemble critique, à chaque actif le sien) plutôt que de dupliquer le fetch.
+function AgentEventsPanel({ isAdmin, events, assetByAgentId, onAck, onAckAll, onAckCategory, busy, error }) {
+  // Repliée par défaut (19/08/2026, retour utilisateur — "la page devient très chargée") : le
+  // badge nav Durcissement (Layout.jsx) et le bandeau Dashboard alertent déjà de l'existence
+  // d'évènements non acquittés ; cette section n'a besoin de prendre de la place que quand on
+  // vient volontairement la consulter, même logique de dépliage à la demande que les lignes
+  // d'actifs plus bas sur cette page.
+  const [open, setOpen] = useState(false)
+  // Une seule catégorie dépliée à la fois (19/08/2026) — même convention que les lignes
+  // d'actifs dépliables plus bas sur cette page.
+  const [expandedCategory, setExpandedCategory] = useState(null)
+
+  // Réservé admin (route serveur) et masqué s'il n'y a rien à voir — pas de carte vide
+  // permanente pour une fonctionnalité qui ne concerne qu'une poignée de postes à la fois.
+  if (!isAdmin || !events || events.length === 0) return null
+  const unack = events.filter(e => !e.acknowledged)
+  const sorted = sortAgentEvents(events)
+
+  return (
+    <div style={CARD} className="overflow-hidden">
+      {/* `<div>` cliquable plutôt que `<button>` — le bouton « Acquitter tout » est imbriqué
+          dedans, et un bouton dans un bouton est invalide en HTML (même raison que les lignes
+          d'actifs dépliables plus bas sur cette page, `<tr onClick>` et non `<button>`). */}
+      <div onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left cursor-pointer"
+        style={open ? { borderBottom: '1px solid var(--border)' } : {}}>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="flex-shrink-0 transition-transform" style={{ transform: open ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)' }}>›</span>
+          <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>Évènements critiques détectés par les agents</p>
+          {unack.length > 0 && (
+            <span className="text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0" style={{ background: 'rgba(248,81,73,0.15)', color: '#f85149' }}>
+              {unack.length} à traiter
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!open && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{events.length} au total</span>}
+          {unack.length > 0 && (
+            <button onClick={onAckAll} disabled={busy}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40"
+              style={{ background: 'rgba(248,81,73,0.15)', color: '#f85149', border: '1px solid rgba(248,81,73,0.4)' }}>
+              {busy ? '…' : 'Acquitter tout'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {open && (
+      <>
+      <p className="text-xs px-4 pt-3" style={{ color: 'var(--text-muted)' }}>
+        Élévation de privilèges, altération d'audit… — sévérité la plus grave, décision toujours
+        humaine (même règle que le CRITICAL des vulnérabilités). Le reste (comptes créés,
+        processus suspects, persistance…) s'affiche directement dans le détail de chaque actif
+        concerné, plus bas sur cette page.
+      </p>
+
+      {error && (
+        <div className="text-sm px-4 py-3" style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149' }}>{error}</div>
+      )}
+
+      {groupAgentEventsByCategory(sorted).map(g => {
+        const cat = AGENT_EVENT_CATEGORY[g.category] || { label: g.category, color: 'var(--text-muted)' }
+        const isOpen = expandedCategory === g.category
+        return (
+          <Fragment key={g.category}>
+            <div onClick={() => setExpandedCategory(isOpen ? null : g.category)}
+              className="flex items-center justify-between gap-2 px-4 py-2.5 cursor-pointer"
+              style={{ borderBottom: '1px solid var(--border-subtle)', background: isOpen ? MODULE_HOVER : 'transparent' }}
+              onMouseEnter={ev => { if (!isOpen) ev.currentTarget.style.background = MODULE_HOVER }}
+              onMouseLeave={ev => { if (!isOpen) ev.currentTarget.style.background = 'transparent' }}>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="flex-shrink-0 transition-transform text-xs" style={{ transform: isOpen ? 'rotate(90deg)' : 'none', color: 'var(--text-muted)' }}>›</span>
+                  <span className="text-xs font-medium px-2 py-0.5 rounded flex-shrink-0" style={{ background: `${cat.color}1a`, color: cat.color, border: `1px solid ${cat.color}55` }}>{cat.label}</span>
+                  <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>{g.events.length} évènement{g.events.length > 1 ? 's' : ''}</span>
+                </div>
+                {/* Noms des actifs concernés, visibles avant même de déplier le groupe
+                    (19/08/2026, demande utilisateur) — tronqués (title = liste complète). */}
+                <p className="text-xs truncate mt-0.5 pl-5" style={{ color: 'var(--text-faint)' }} title={g.hostnames.join(', ')}>
+                  {previewHostnames(g.hostnames)}
+                </p>
+              </div>
+              <button onClick={e => onAckCategory(g.category, e)} disabled={busy}
+                className="text-xs px-2.5 py-1 rounded-lg font-medium disabled:opacity-40 flex-shrink-0"
+                style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                Acquitter le groupe
+              </button>
+            </div>
+            {isOpen && <AgentEventsTable events={g.events} onAck={onAck} busy={busy} muted={false} assetByAgentId={assetByAgentId} />}
+          </Fragment>
+        )
+      })}
+      </>
+      )}
+    </div>
+  )
+}
+
+// Détail par actif (19/08/2026, retour utilisateur — "l'historique tu devrais le mettre avec
+// l'actif directement") : tout ce qui n'est pas CRITICAL (warning/info, cf. AgentEventsPanel
+// ci-dessus) s'affiche dans la ligne dépliée de l'actif concerné, juste au-dessus du détail de
+// durcissement — le contexte "quel poste" est déjà celui qu'on regarde, pas besoin de répéter
+// son nom sur chaque ligne (`hideAssetColumn`). Masqué s'il n'y a rien pour cet actif.
+function AssetAgentEvents({ events, onAck, busy }) {
+  if (!events || events.length === 0) return null
+  return (
+    <div className="mt-3 rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+      <p className="text-xs font-semibold uppercase tracking-wide px-4 py-2" style={{ background: 'var(--bg-secondary)', color: 'var(--text-muted)' }}>
+        Évènements détectés par l'agent ({events.length})
+      </p>
+      <AgentEventsTable events={sortAgentEvents(events)} onAck={onAck} busy={busy} muted hideAssetColumn />
+    </div>
+  )
+}
 
 function checksFor(asset) {
   // web_compliance (17/08/2026, asset_type="website") : même principe que network_compliance
@@ -119,6 +413,8 @@ export default function Durcissement() {
   // #14) — même schéma que pages/Assets.jsx::isAdmin.
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  // Scroll horizontal à la molette (19/08/2026, retour utilisateur) — cf. useHorizontalWheelScroll.js.
+  const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (durcissementPageCache == null) return []
     return isAnonymous ? [...durcissementPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : durcissementPageCache
@@ -141,9 +437,11 @@ export default function Durcissement() {
   const [osFilter, setOsFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [expandedId, setExpandedId] = useState(null)
-  // { by: null, dir } = ordre par défaut de GET /assets (alphabétique par nom), jusqu'au
-  // premier clic sur un en-tête triable.
-  const [sort, setSort] = useState({ by: null, dir: 'desc' })
+  // Tri par défaut sur "Résumé" décroissant (19/08/2026, retour utilisateur — "met en premier
+  // les actifs configurés à regarder") : `sortValue('summary', ...)` classe par nombre
+  // d'avertissements puis d'indéterminés (cf. plus bas) — un actif non configuré n'a aucun
+  // check donc une valeur de 0, il retombe naturellement en fin de liste sans logique séparée.
+  const [sort, setSort] = useState({ by: 'summary', dir: 'desc' })
   const [searchParams, setSearchParams] = useSearchParams()
   // Bouton "Lancer le scan web" (17/08/2026) — seul déclencheur de POST /assets/web-hardening/run
   // exposé côté UI (l'endpoint existait déjà sans bouton, comme network-protocol-check/
@@ -165,6 +463,75 @@ export default function Durcissement() {
       setPolicyFrequencyByCriticite(map)
     }).catch(() => {})
   }, [])
+
+  // Évènements détectés par les agents (19/08/2026, cf. docs/AGENT_DETECTION.md) — chargé une
+  // seule fois ici plutôt que dans AgentEventsPanel : le sous-ensemble CRITICAL va au panneau
+  // global, le reste (warning/info) va directement sur la ligne dépliée de l'actif concerné
+  // (retour utilisateur — "l'historique tu devrais le mettre avec l'actif directement").
+  const [agentEvents, setAgentEvents] = useState(null)
+  const [assetByAgentId, setAssetByAgentId] = useState({})
+  const [agentEventsBusy, setAgentEventsBusy] = useState(false)
+  const [agentEventsError, setAgentEventsError] = useState('')
+
+  function loadAgentEvents() {
+    Promise.all([agentSecurityEvents({ limit: 200 }), listAgents()])
+      .then(([evRes, agRes]) => {
+        setAgentEvents(evRes.data.events || [])
+        const map = {}
+        for (const a of agRes.data.items || []) {
+          if (a.asset_id) map[a.id] = { id: a.asset_id, name: a.asset_name || a.hostname }
+        }
+        setAssetByAgentId(map)
+        setAgentEventsError('')
+      })
+      .catch(() => { setAgentEvents([]); setAgentEventsError("Impossible de charger les évènements agent — le serveur a peut-être renvoyé une erreur.") })
+  }
+  useEffect(() => { if (isAdmin) loadAgentEvents() }, [isAdmin])
+
+  async function ackAgentEvent(id) {
+    setAgentEventsBusy(true)
+    try { await ackAgentSecurityEvent(id, user?.full_name || 'Administration'); loadAgentEvents() }
+    finally { setAgentEventsBusy(false) }
+  }
+
+  async function ackAllAgentEvents(e) {
+    e.stopPropagation()
+    setAgentEventsBusy(true)
+    try { await ackAllAgentSecurityEvents(user?.full_name || 'Administration'); loadAgentEvents() }
+    finally { setAgentEventsBusy(false) }
+  }
+
+  // Acquittement de masse scopé à une catégorie (routers/agents.py::ack_all_security_events,
+  // filtre `category` ajouté le 19/08/2026) — une seule requête, pas une boucle d'appels
+  // individuels : à l'échelle d'une centaine d'agents, un groupe peut porter des dizaines
+  // d'évènements homogènes.
+  async function ackAgentEventCategory(category, e) {
+    e.stopPropagation()
+    setAgentEventsBusy(true)
+    try { await ackAllAgentSecurityEvents(user?.full_name || 'Administration', category); loadAgentEvents() }
+    finally { setAgentEventsBusy(false) }
+  }
+
+  // CRITICAL au panneau global (décision humaine centralisée, cf. AgentEventsPanel) ; le reste
+  // réparti par actif (`agent_id` → `Asset.id` via assetByAgentId) pour vivre sur sa ligne.
+  const criticalAgentEvents = useMemo(
+    () => (agentEvents || []).filter(e => e.severity === 'critical'),
+    [agentEvents],
+  )
+  // Inclut aussi le CRITICAL (19/08/2026, retour utilisateur — le lien Dashboard "doit amener à
+  // l'actif concerné", pas juste à la page) : le panneau global reste le point de triage
+  // fleet-wide, mais atterrir sur la ligne d'un actif via ce lien doit y montrer l'évènement qui
+  // a déclenché le bandeau, pas une ligne vide.
+  const agentEventsByAssetId = useMemo(() => {
+    const map = {}
+    for (const e of agentEvents || []) {
+      const assetId = assetByAgentId[e.agent_id]?.id
+      if (!assetId) continue
+      if (!map[assetId]) map[assetId] = []
+      map[assetId].push(e)
+    }
+    return map
+  }, [agentEvents, assetByAgentId])
 
   function agentStaleness(asset) {
     if (asset.collection_method !== 'agent' || !asset.last_scan) return null
@@ -283,6 +650,17 @@ export default function Durcissement() {
         subtitle="Conformité CIS-like du parc — compte de service ou agent, lecture seule."
       />
 
+      <AgentEventsPanel
+        isAdmin={isAdmin}
+        events={criticalAgentEvents}
+        assetByAgentId={assetByAgentId}
+        onAck={ackAgentEvent}
+        onAckAll={ackAllAgentEvents}
+        onAckCategory={ackAgentEventCategory}
+        busy={agentEventsBusy}
+        error={agentEventsError}
+      />
+
       <div className="flex flex-wrap items-center gap-2">
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher un actif…"
           className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={filterSelectStyle} />
@@ -320,10 +698,10 @@ export default function Durcissement() {
       </div>
 
       <div style={CARD} className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={tableScrollRef}>
           <table className="w-full text-sm">
             <thead>
-              <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Nom</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>OS</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Catégorie</th>
@@ -377,6 +755,9 @@ export default function Durcissement() {
                       <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                         <td colSpan={5} className="px-4 pb-4 pt-1" style={{ background: 'var(--bg-secondary)' }}>
                           <ComplianceChecklist checks={checks} os={asset.os} assetType={asset.asset_type} maxHeight="420px" />
+                          {isAdmin && (
+                            <AssetAgentEvents events={agentEventsByAssetId[asset.id]} onAck={ackAgentEvent} busy={agentEventsBusy} />
+                          )}
                         </td>
                       </tr>
                     )}

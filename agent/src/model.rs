@@ -111,7 +111,7 @@ pub struct CheckinPayload {
 /// Un évènement du journal natif (Event Log Security / auditd), déjà catégorisé et résumé
 /// côté agent — le serveur ne fait aucune interprétation, juste stockage + dédoublonnage sur
 /// `native_event_id` (cf. `services/agent_detection.py`, backend).
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct SecurityEvent {
     pub category: String,             // cf. docs/AGENT_DETECTION.md § Catégories
     pub severity: String,             // info | warning | critical
@@ -176,4 +176,6 @@ pub struct StateSnapshot {
 #[derive(Deserialize)]
 pub struct PendingResponse {
     pub scan_requested: bool,
+    #[serde(default)]
+    pub ping_requested: bool,
 }

@@ -299,6 +299,8 @@ class TestAllApiRoutesAreProtected:
         }
         non_admin_agent_paths = {
             ("POST", "/api/agents/enroll"), ("POST", "/api/agents/checkin"), ("GET", "/api/agents/pending"),
+            # /pong (21/08/2026) : identité agent (require_agent), pas un endpoint humain.
+            ("POST", "/api/agents/pong"),
         }
 
         for route, method, path in self._api_routes(app):

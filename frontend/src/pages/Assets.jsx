@@ -18,6 +18,7 @@ import PageHero from '../components/PageHero.jsx'
 import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { TYPE_LABELS, merakiModelLabel, assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import { MODULES } from '../constants/modules.js'
+import { useHorizontalWheelScroll } from '../hooks/useHorizontalWheelScroll.js'
 import { formatDisks } from '../utils/hardware.js'
 import { tintedCard } from '../utils/cardStyle.js'
 
@@ -787,6 +788,9 @@ export default function Assets() {
   // cliquer pour rien), même schéma que pages/Agents.jsx::isAdmin.
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  // Scroll horizontal à la molette (19/08/2026, retour utilisateur) — le tableau principal a
+  // trop de colonnes pour tenir sans déborder, cf. useHorizontalWheelScroll.js.
+  const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (assetsPageCache == null) return []
     return isAnonymous ? [...assetsPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : assetsPageCache
@@ -1165,10 +1169,10 @@ export default function Assets() {
       )}
 
       <div style={CARD} className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={tableScrollRef}>
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
               <th className="px-4 py-3">
                 <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} title="Tout sélectionner (actifs visibles)" />
               </th>

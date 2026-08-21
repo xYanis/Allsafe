@@ -109,10 +109,23 @@ fn restrict_permissions(path: &PathBuf) -> Result<()> {
 /// d'historique de conformité à alimenter avec ça, cf. plan §Unité 1). Épargne volontaire
 /// d'une dépendance chrono supplémentaire : `offline_since` en secondes Unix (UTC), pas en
 /// texte RFC3339 — converti côté serveur.
+///
+/// `security_log_cursor`/`system_log_cursor` (21/08/2026, cf. docs/AGENT_DETECTION.md) :
+/// RecordID high-water mark par journal Event Log — `None` = premier run, déclenche
+/// l'initialisation sans backfill (curseur posé au max courant, aucun évènement remonté).
+/// `buffered_events` : évènements en attente d'envoi pendant une coupure réseau, capés
+/// à `daemon::MAX_BUFFER_EVENTS`. `#[serde(default)]` sur les trois : rétrocompatible avec
+/// un `daemon-state.json` écrit avant leur ajout (None / vec![] par défaut).
 #[derive(Serialize, Deserialize, Default)]
 pub struct DaemonState {
     pub offline_since: Option<i64>,
     pub failed_attempts: u32,
+    #[serde(default)]
+    pub security_log_cursor: Option<u64>,
+    #[serde(default)]
+    pub system_log_cursor: Option<u64>,
+    #[serde(default)]
+    pub buffered_events: Vec<crate::model::SecurityEvent>,
 }
 
 fn state_path() -> PathBuf {
@@ -127,26 +140,7 @@ impl DaemonState {
             .unwrap_or_default()
     }
 
-    /// Posé à la première tentative échouée seulement (`offline_since` non écrasé par les
-    /// suivantes) — sinon on perdrait le vrai début de la coupure.
-    pub fn record_failure() {
-        let mut state = Self::load();
-        if state.offline_since.is_none() {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            state.offline_since = Some(now);
-        }
-        state.failed_attempts += 1;
-        let _ = state.save();
-    }
-
-    pub fn clear() {
-        let _ = std::fs::remove_file(state_path());
-    }
-
-    fn save(&self) -> Result<()> {
+    pub fn save(&self) -> Result<()> {
         let path = state_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| format!("création de {}", parent.display()))?;

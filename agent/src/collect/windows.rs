@@ -10,7 +10,7 @@
 
 use crate::model::{
     AuditCoverage, Check, CheckinPayload, Compliance, Detected, Disk, Hardware, LocalUser,
-    Package, PersistenceEntry, StateSnapshot,
+    Package, PersistenceEntry, SecurityEvent, StateSnapshot,
 };
 use std::process::Command;
 use sysinfo::{Disks, Networks, System};
@@ -637,6 +637,347 @@ fn audit_coverage() -> AuditCoverage {
         ("process_auditing".to_string(), process_auditing),
         ("command_line_logging".to_string(), command_line_logging),
     ])
+}
+
+// ─── Lecture du journal natif Windows (21/08/2026, docs/AGENT_DETECTION.md) ──────────────
+// Niveau 2 hybride : l'état diff est collecté dans `state_snapshot()` ci-dessus (serveur
+// compare) ; ce bloc lit le Security + System Event Log pour les catégories éphémères
+// (suspicious_process, audit_tampering) et celles que le diff enrichit (account_created,
+// privilege_escalation, persistence). Même approche `ps_json` que pour le diff, mêmes
+// garde-fous UTF-8 et `Command::new("powershell")` sans passer par cmd.exe.
+
+/// Processus dont l'exécution est à signaler — filtrés à la réception d'un event 4688,
+/// comparaison sur le nom de fichier (sans chemin, sans extension) en minuscules.
+/// Volontairement court : on ne cherche pas à couvrir tous les outils d'attaque (EDR-like
+/// hors scope), juste les plus fréquents sur un parc Windows en conditions réelles.
+const SUSPICIOUS_PROCESS_NAMES: &[&str] = &[
+    "nmap", "masscan", "zmap",
+    "mimikatz",
+    "procdump",
+    "psexec",
+    "wce",
+    "pwdump", "fgdump",
+    "netcat", "ncat",
+    "lazagne",
+    "rubeus",
+    "bloodhound", "sharphound",
+    "crackmapexec",
+    "secretsdump",
+    "responder",
+];
+
+/// Lit le RecordID le plus élevé actuellement dans chaque journal — utilisé pour
+/// l'initialisation sans backfill (premier run : curseur = maintenant, aucun évènement
+/// remonté de l'historique). Retourne `(security_max, system_max)`, 0 si le journal
+/// est vide ou inaccessible.
+fn init_event_cursors() -> (u64, u64) {
+    let script = concat!(
+        "$OutputEncoding = [System.Text.Encoding]::UTF8; ",
+        "$s = try { (Get-WinEvent -LogName Security -MaxEvents 1 -ErrorAction Stop).RecordId } catch { 0 }; ",
+        "$y = try { (Get-WinEvent -LogName System   -MaxEvents 1 -ErrorAction Stop).RecordId } catch { 0 }; ",
+        "[pscustomobject]@{S=[long]$s; Y=[long]$y} | ConvertTo-Json -Compress"
+    );
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .output()
+        .ok();
+    if let Some(out) = out {
+        let text = String::from_utf8_lossy(&out.stdout);
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) {
+            let sec = v["S"].as_u64().unwrap_or(0);
+            let sys = v["Y"].as_u64().unwrap_or(0);
+            return (sec, sys);
+        }
+    }
+    (0, 0)
+}
+
+/// Interroge un journal Event Log via XPath (RecordID > cursor, IDs filtrés) et retourne
+/// les évènements bruts sous forme `(record_id, event_id, time_secs, props)`.
+/// `log_prefix` ("Security" / "System") est inclus dans `native_event_id` pour éviter
+/// une collision entre les espaces de RecordID des deux journaux (contrainte unique serveur
+/// `(agent_id, native_event_id)`, `AgentSecurityEvent`).
+fn query_log_raw(
+    log_name: &str,
+    event_ids: &[u32],
+    cursor: u64,
+) -> (Vec<(u64, u32, i64, Vec<String>)>, u64) {
+    if event_ids.is_empty() {
+        return (vec![], cursor);
+    }
+    let id_filter: String = event_ids
+        .iter()
+        .map(|id| format!("EventID={id}"))
+        .collect::<Vec<_>>()
+        .join(" or ");
+
+    // XPath construit en Rust, passé comme variable PowerShell (guillemets internes dans
+    // les attributs XML sont protégés par les simples quotes PowerShell autour de $xml).
+    // `&gt;` requis dans l'XML pour le comparateur RecordID (>).
+    let script = format!(
+        concat!(
+            "$OutputEncoding = [System.Text.Encoding]::UTF8; ",
+            "$xml = '<QueryList><Query Id=\"0\" Path=\"{log}\">",
+            "<Select Path=\"{log}\">*[System[({ids}) and EventRecordID &gt; {cur}]]",
+            "</Select></Query></QueryList>'; ",
+            // @(...) force le tableau même à 0 ou 1 résultat (même raison que ps_json).
+            // Depth 3 : nécessaire pour sérialiser le tableau imbriqué P=[...].
+            "@(Get-WinEvent -FilterXml $xml -ErrorAction SilentlyContinue | ",
+            "Select-Object RecordId, Id, ",
+            "@{{N='T';E={{[int64](($_.TimeCreated.ToUniversalTime() - [datetime]'1970-01-01').TotalSeconds)}}}}",
+            ", @{{N='P';E={{@($_.Properties | ForEach-Object {{ $_.Value.ToString() }})}}}}) | ",
+            "ConvertTo-Json -Compress -Depth 3"
+        ),
+        log = log_name,
+        ids = id_filter,
+        cur = cursor,
+    );
+
+    let out = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .output()
+        .ok();
+    let text = out.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Array(vec![]));
+    let arr = match json.as_array() {
+        Some(a) => a,
+        None => return (vec![], cursor),
+    };
+
+    let mut events = Vec::new();
+    let mut new_cursor = cursor;
+    for v in arr {
+        let record_id = v["RecordId"].as_u64().unwrap_or(0);
+        let event_id = v["Id"].as_u64().unwrap_or(0) as u32;
+        let time_secs = v["T"].as_i64().unwrap_or(0);
+        let props: Vec<String> = v["P"]
+            .as_array()
+            .map(|a| a.iter().map(|x| x.as_str().unwrap_or("").to_string()).collect())
+            .unwrap_or_default();
+        if record_id > new_cursor {
+            new_cursor = record_id;
+        }
+        events.push((record_id, event_id, time_secs, props));
+    }
+    (events, new_cursor)
+}
+
+fn prop(props: &[String], idx: usize) -> &str {
+    props.get(idx).map(|s| s.as_str()).unwrap_or("")
+}
+
+/// Traduit un évènement brut Security log → `SecurityEvent`. Retourne `None` si
+/// l'évènement est hors périmètre (4688 d'un processus non suspect) ou non reconnu.
+fn map_security_event(record_id: u64, event_id: u32, time_secs: i64, props: &[String]) -> Option<SecurityEvent> {
+    let native_event_id = Some(format!("Security:{record_id}"));
+    let src = Some("windows_security_log".to_string());
+    let ts = Some(time_secs);
+
+    match event_id {
+        // ── Compte créé ──────────────────────────────────────────────────────────────
+        // props: 0=TargetUserName 1=TargetDomainName 2=TargetSid 3=SubjectUserSid
+        //        4=SubjectUserName 5=SubjectDomainName 6=SubjectLogonId
+        4720 => Some(SecurityEvent {
+            category: "account_created".to_string(),
+            severity: "warning".to_string(),
+            summary: format!("Compte local créé : {}", prop(props, 0)),
+            detail: Some(serde_json::json!({
+                "target_user": prop(props, 0),
+                "subject_user": prop(props, 4),
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Compte activé / mot de passe réinitialisé ────────────────────────────────
+        // props: 0=TargetUserName 4=SubjectUserName (même layout pour 4722 et 4724)
+        4722 => Some(SecurityEvent {
+            category: "account_reactivated".to_string(),
+            severity: "info".to_string(),
+            summary: format!("Compte activé : {}", prop(props, 0)),
+            detail: Some(serde_json::json!({
+                "target_user": prop(props, 0),
+                "subject_user": prop(props, 4),
+                "event": "enabled",
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+        4724 => Some(SecurityEvent {
+            category: "account_reactivated".to_string(),
+            severity: "info".to_string(),
+            summary: format!("Mot de passe réinitialisé : {}", prop(props, 0)),
+            detail: Some(serde_json::json!({
+                "target_user": prop(props, 0),
+                "subject_user": prop(props, 4),
+                "event": "password_reset",
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Élévation de privilèges — ajout à un groupe admin ────────────────────────
+        // props: 0=MemberName 1=MemberSid 2=TargetUserName(groupe) 6=SubjectUserName
+        // (4728=global security group, 4732=local, 4756=universal — même layout)
+        4728 | 4732 | 4756 => Some(SecurityEvent {
+            category: "privilege_escalation".to_string(),
+            severity: "critical".to_string(),
+            summary: format!("{} ajouté au groupe {}", prop(props, 0), prop(props, 2)),
+            detail: Some(serde_json::json!({
+                "member": prop(props, 0),
+                "group": prop(props, 2),
+                "subject_user": prop(props, 6),
+                "event_id": event_id,
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Persistance — tâche planifiée ────────────────────────────────────────────
+        // props: 0=SubjectUserSid 1=SubjectUserName 2=SubjectDomainName 3=SubjectLogonId
+        //        4=TaskName 5=TaskContent(XML, très long — ignoré)
+        4698 => Some(SecurityEvent {
+            category: "persistence".to_string(),
+            // `info` (19/08/2026, retour utilisateur) — sans liste de référence de ce qui
+            // est normal sur ce poste, une tâche planifiée créée par une mise à jour
+            // logicielle légitime déclenche exactement le même signal qu'une vraie
+            // persistance malveillante ; forcé en `info` côté serveur de toute façon
+            // (services/agent_detection.py::_native_events), aligné ici pour rester cohérent
+            // avec ce qui sera réellement stocké.
+            severity: "info".to_string(),
+            summary: format!("Tâche planifiée créée : {}", prop(props, 4)),
+            detail: Some(serde_json::json!({
+                "task_name": prop(props, 4),
+                "subject_user": prop(props, 1),
+                "type": "scheduled_task",
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Persistance — service installé (Security log) ────────────────────────────
+        // props: 0=SubjectUserSid 1=SubjectUserName 4=ServiceName 5=ServiceFileName
+        4697 => Some(SecurityEvent {
+            category: "persistence".to_string(),
+            severity: "info".to_string(), // cf. commentaire sur 4698 ci-dessus
+            summary: format!("Service installé : {}", prop(props, 4)),
+            detail: Some(serde_json::json!({
+                "service_name": prop(props, 4),
+                "image_path": prop(props, 5),
+                "subject_user": prop(props, 1),
+                "type": "service",
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Altération de l'audit — journal effacé ───────────────────────────────────
+        // props: 0=SubjectUserSid 1=SubjectUserName 2=SubjectDomainName 3=SubjectLogonId
+        1102 => Some(SecurityEvent {
+            category: "audit_tampering".to_string(),
+            severity: "critical".to_string(),
+            summary: format!("Journal Security effacé par {}\\{}", prop(props, 2), prop(props, 1)),
+            detail: Some(serde_json::json!({
+                "subject_user": prop(props, 1),
+                "subject_domain": prop(props, 2),
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+
+        // ── Processus suspect (4688 — uniquement si audit de création activé) ─────────
+        // props: 0=SubjectUserSid 1=SubjectUserName 5=NewProcessName 8=CommandLine
+        // (CommandLine peut être vide si GPO line-de-commande non activée — on émet
+        // quand même : le nom de processus seul suffit à qualifier le signal).
+        4688 => {
+            let process_path = prop(props, 5);
+            let process_name = process_path
+                .rsplit(['\\', '/'])
+                .next()
+                .unwrap_or(process_path)
+                .to_lowercase();
+            let process_base = process_name.trim_end_matches(".exe");
+            if SUSPICIOUS_PROCESS_NAMES.iter().any(|s| process_base.contains(s)) {
+                Some(SecurityEvent {
+                    category: "suspicious_process".to_string(),
+                    severity: "warning".to_string(),
+                    summary: format!("{} lancé par {}", process_name, prop(props, 1)),
+                    detail: Some(serde_json::json!({
+                        "process_path": process_path,
+                        "subject_user": prop(props, 1),
+                        "cmdline": prop(props, 8),
+                    })),
+                    occurred_at: ts, native_source: src, native_event_id,
+                })
+            } else {
+                None
+            }
+        }
+
+        _ => None,
+    }
+}
+
+/// Traduit un évènement brut System log → `SecurityEvent`.
+/// Seul 7045 (nouveau service) est dans le périmètre MVP.
+/// native_event_id préfixé "System:" pour éviter les collisions de RecordID avec Security.
+fn map_system_event(record_id: u64, event_id: u32, time_secs: i64, props: &[String]) -> Option<SecurityEvent> {
+    let native_event_id = Some(format!("System:{record_id}"));
+    let src = Some("windows_system_log".to_string());
+    let ts = Some(time_secs);
+
+    match event_id {
+        // ── Nouveau service installé (System log) ─────────────────────────────────────
+        // props: 0=ServiceName 1=ServiceFileName/ImagePath 2=ServiceType
+        //        3=ServiceStartType 4=ServiceAccount
+        7045 => Some(SecurityEvent {
+            category: "persistence".to_string(),
+            severity: "info".to_string(), // cf. commentaire sur 4698 ci-dessus
+            summary: format!("Service installé : {}", prop(props, 0)),
+            detail: Some(serde_json::json!({
+                "service_name": prop(props, 0),
+                "image_path": prop(props, 1),
+                "type": "service",
+                "event_id": 7045,
+            })),
+            occurred_at: ts, native_source: src, native_event_id,
+        }),
+        _ => None,
+    }
+}
+
+/// Point d'entrée de la détection journal natif (appelé depuis `daemon.rs::do_checkin`
+/// à chaque cycle, avant la constitution du `CheckinPayload`).
+///
+/// Contrat :
+/// - `(None, None)` → premier run : pose les curseurs au max actuel, retourne `([], sec, sys)`.
+///   Aucun évènement historique remonté — on commence à surveiller maintenant.
+/// - `(Some(s), Some(y))` → retourne les évènements `RecordID > cursor` depuis la dernière
+///   lecture, + les nouveaux curseurs (max RecordID vus ou valeur inchangée si 0 évènement).
+/// - Si un seul curseur est `None` (ne devrait pas arriver), on traite comme premier run
+///   et on réinitialise les deux — plutôt un curseur en avant que des doublons.
+pub fn read_security_events(
+    sec_cursor: Option<u64>,
+    sys_cursor: Option<u64>,
+) -> (Vec<SecurityEvent>, u64, u64) {
+    if sec_cursor.is_none() || sys_cursor.is_none() {
+        let (sec, sys) = init_event_cursors();
+        return (vec![], sec, sys);
+    }
+    let sec_cur = sec_cursor.unwrap();
+    let sys_cur = sys_cursor.unwrap();
+
+    let (sec_raw, new_sec) = query_log_raw(
+        "Security",
+        &[4688, 4720, 4722, 4724, 4728, 4732, 4756, 4698, 4697, 1102],
+        sec_cur,
+    );
+    let (sys_raw, new_sys) = query_log_raw("System", &[7045], sys_cur);
+
+    let mut events: Vec<SecurityEvent> = sec_raw
+        .into_iter()
+        .filter_map(|(rid, eid, ts, props)| map_security_event(rid, eid, ts, &props))
+        .collect();
+    events.extend(
+        sys_raw
+            .into_iter()
+            .filter_map(|(rid, eid, ts, props)| map_system_event(rid, eid, ts, &props)),
+    );
+
+    (events, new_sec, new_sys)
 }
 
 pub fn collect() -> CheckinPayload {

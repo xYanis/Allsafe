@@ -57,8 +57,8 @@ AGENT_DIST_DIR = "/app/agent-dist"
 # poussé par Allsafe dans ce MVP : ces constantes ne servent qu'à comparer côté serveur ce
 # que chaque agent déclare à son dernier check-in (`Agent.agent_version`) pour repérer les
 # postes en retard (`_agent_dict::outdated`, cf. `_current_version_for` ci-dessous).
-CURRENT_AGENT_VERSION_WINDOWS = "0.1.19"
-CURRENT_AGENT_VERSION_LINUX = "0.1.9"
+CURRENT_AGENT_VERSION_WINDOWS = "0.1.21"
+CURRENT_AGENT_VERSION_LINUX = "0.1.10"
 
 
 def _current_version_for(os_: str) -> str:
@@ -179,6 +179,9 @@ def _agent_dict(
         # avant l'ajout de ce champ) — pas encore comparable, jamais annoncé "périmé".
         "outdated": a.agent_version is not None and a.agent_version != _current_version_for(a.os),
         "pending_scan_requested_at": a.pending_scan_requested_at.isoformat() if a.pending_scan_requested_at else None,
+        "ping_requested_at": a.ping_requested_at.isoformat() if a.ping_requested_at else None,
+        "last_pong_at": a.last_pong_at.isoformat() if a.last_pong_at else None,
+        "last_pong_ms": a.last_pong_ms,
         "last_gap_started_at": a.last_gap_started_at.isoformat() if a.last_gap_started_at else None,
         "last_gap_failed_attempts": a.last_gap_failed_attempts,
         "revoked_at": a.revoked_at.isoformat() if a.revoked_at else None,
@@ -504,7 +507,10 @@ async def pending_scan(agent: Agent = Depends(require_agent)):
     """Sondée par `agent/src/daemon.rs` à intervalle court (60s par défaut) — lecture
     seule, le flag n'est effacé qu'au check-in qu'il déclenche (`POST /checkin` ci-
     dessous), jamais ici."""
-    return {"scan_requested": agent.pending_scan_requested_at is not None}
+    return {
+        "scan_requested": agent.pending_scan_requested_at is not None,
+        "ping_requested": agent.ping_requested_at is not None,
+    }
 
 
 @router.post("/{agent_id}/request-scan")
@@ -519,6 +525,68 @@ async def request_scan(agent_id: str, session: AsyncSession = Depends(get_sessio
     agent.pending_scan_requested_at = datetime.now(timezone.utc)
     await session.commit()
     return _agent_dict(agent)
+
+
+# ─── Ping (21/08/2026) ──────────────────────────────────────────────────────
+# Même principe que request-scan : le serveur ne contacte jamais l'agent (CLAUDE.md §1).
+# L'admin pose un flag, l'agent le ramasse à son prochain sondage `GET /pending` (≤5s,
+# cf. daemon.rs::POLL_INTERVAL), répond via `POST /pong`, la latence est enregistrée.
+
+@router.post("/ping")
+async def ping_all_agents(session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin)):
+    """Pose ping_requested_at sur tous les agents actifs en une seule opération."""
+    now = datetime.now(timezone.utc)
+    await session.execute(
+        update(Agent)
+        .where(Agent.status == "enrolled")
+        .values(ping_requested_at=now)
+    )
+    await session.commit()
+    return {"ok": True}
+
+
+@router.post("/{agent_id}/ping")
+async def ping_agent(agent_id: str, session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin)):
+    """Pose ping_requested_at sur un agent individuel."""
+    agent = await session.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent introuvable.")
+    if agent.status != "enrolled":
+        raise HTTPException(409, "Cet agent n'est pas actif.")
+    agent.ping_requested_at = datetime.now(timezone.utc)
+    await session.commit()
+    return _agent_dict(agent)
+
+
+@router.delete("/{agent_id}/ping")
+async def cancel_ping(agent_id: str, session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin)):
+    """Annule un ping en attente (efface ping_requested_at)."""
+    agent = await session.get(Agent, agent_id)
+    if not agent:
+        raise HTTPException(404, "Agent introuvable.")
+    agent.ping_requested_at = None
+    await session.commit()
+    return _agent_dict(agent)
+
+
+@router.post("/pong")
+async def pong(session: AsyncSession = Depends(get_session), agent: Agent = Depends(require_agent)):
+    """Appelé par l'agent quand il voit `ping_requested: true` dans `/pending` — enregistre
+    la latence et efface le flag. Endpoint léger : pas de checkin complet, pas de throttle."""
+    if agent.ping_requested_at is None:
+        return {"ok": True}
+    now = datetime.now(timezone.utc)
+    pong_ms = int((now - agent.ping_requested_at).total_seconds() * 1000)
+    agent.last_pong_ms = pong_ms
+    agent.last_pong_at = now
+    agent.ping_requested_at = None
+    agent.last_seen_at = now
+    session.add(AgentCheckinLog(
+        agent_id=agent.id, checked_in_at=now,
+        is_ping=True, pong_ms=pong_ms, on_demand=False,
+    ))
+    await session.commit()
+    return {"ok": True}
 
 
 # ─── Check-in (agent déjà enrôlé) ───────────────────────────────────────────────
@@ -717,19 +785,43 @@ async def list_security_events(
 
 @router.get("/security-events/count")
 async def security_events_count(session: AsyncSession = Depends(get_session), _user: User = Depends(require_auth)):
-    """Compteur léger pour le badge nav (poll régulier) — exception délibérée à "réservé
-    admin" ci-dessus, même raisonnement que `routers/security.py::events_count`."""
-    unack = await session.scalar(
-        select(func.count()).select_from(AgentSecurityEvent).where(AgentSecurityEvent.acknowledged.is_(False))
-    )
-    latest = await session.scalar(
-        select(func.max(AgentSecurityEvent.reported_at)).where(AgentSecurityEvent.acknowledged.is_(False))
-    )
-    return {"unacknowledged": unack or 0, "latest": latest.isoformat() if latest else None}
+    """Compteur léger pour le badge nav + bandeau Dashboard (poll régulier) — exception
+    délibérée à "réservé admin" ci-dessus, même raisonnement que `routers/security.py::
+    events_count`.
+
+    Recentré sur CRITICAL uniquement (19/08/2026, retour utilisateur — "la notification n'est
+    plus à jour... il affiche 9+") : depuis que warning/info s'affichent directement sur la
+    ligne de leur actif (pages/Durcissement.jsx::AssetAgentEvents) plutôt que dans une file
+    globale à traiter, ce compteur ne doit plus signaler que ce qui exige une décision
+    centralisée — sinon il redevient le bruit de l'ancien "9+" qui comptait tout, y compris ce
+    qui n'est plus jamais poussé comme actionnable."""
+    rows = (await session.execute(
+        select(AgentSecurityEvent).where(
+            AgentSecurityEvent.acknowledged.is_(False),
+            AgentSecurityEvent.severity == "critical",
+        )
+    )).scalars().all()
+    latest = max((r.reported_at for r in rows), default=None)
+
+    # Lien direct vers l'actif concerné (retour utilisateur — "il doit amener à l'actif
+    # concerné et non à la page") — seulement quand c'est sans ambiguïté (un seul actif derrière
+    # les criticals en attente) ; sinon le frontend retombe sur la page Durcissement seule.
+    asset_id = None
+    agent_ids = {r.agent_id for r in rows if r.agent_id}
+    if len(agent_ids) == 1:
+        agent = await session.get(Agent, agent_ids.pop())
+        asset_id = str(agent.asset_id) if agent and agent.asset_id else None
+
+    return {"unacknowledged": len(rows), "latest": latest.isoformat() if latest else None, "asset_id": asset_id}
 
 
 class AgentEventAckPayload(BaseModel):
     ack_by: Optional[str] = None
+    # Acquittement groupé par catégorie (19/08/2026, retour utilisateur — "je ne peux pas
+    # traiter tous les évènements avec une centaine d'agents") : ignoré par l'ack unitaire
+    # ci-dessous, utilisé seulement par ack-all pour scoper la fermeture en masse à une
+    # catégorie (ex. tout le bruit "persistance" du 1er rollout) plutôt que tout le journal.
+    category: Optional[str] = None
 
 
 @router.post("/security-events/{event_id}/ack")
@@ -755,11 +847,15 @@ async def ack_all_security_events(
     data: AgentEventAckPayload,
     session: AsyncSession = Depends(get_session), _admin: User = Depends(require_admin),
 ):
+    """Acquittement en masse — sans `category`, ferme tout le journal non acquitté (bouton
+    « Acquitter tout » de l'en-tête) ; avec `category`, scope la fermeture à une seule
+    catégorie (bouton « Acquitter le groupe » par catégorie sur pages/Durcissement.jsx) —
+    nécessaire à l'échelle d'une centaine d'agents, où fermer un par un n'est plus praticable."""
     now = datetime.now(timezone.utc)
-    res = await session.execute(
-        update(AgentSecurityEvent).where(AgentSecurityEvent.acknowledged.is_(False))
-        .values(acknowledged=True, ack_by=data.ack_by or None, ack_at=now)
-    )
+    q = update(AgentSecurityEvent).where(AgentSecurityEvent.acknowledged.is_(False))
+    if data.category:
+        q = q.where(AgentSecurityEvent.category == data.category)
+    res = await session.execute(q.values(acknowledged=True, ack_by=data.ack_by or None, ack_at=now))
     await session.commit()
     return {"acknowledged": res.rowcount or 0}
 
@@ -809,6 +905,8 @@ async def agent_checkins(
             "gap_started_at": r.gap_started_at.isoformat() if r.gap_started_at else None,
             "gap_failed_attempts": r.gap_failed_attempts,
             "on_demand": r.on_demand,
+            "is_ping": r.is_ping,
+            "pong_ms": r.pong_ms,
         } for r in rows],
     }
 

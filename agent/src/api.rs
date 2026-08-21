@@ -82,7 +82,7 @@ pub async fn enroll(server: &str, token: &str, hostname: &str, os: &str) -> Resu
 /// cf. `routers/agents.py::checkin`). Échec réseau traité comme "rien en attente" par
 /// l'appelant plutôt que de faire remonter l'erreur — un scan à la demande manqué se
 /// rattrape au prochain sondage, pas la peine de faire échouer tout le cycle pour ça.
-pub async fn pending(server: &str, credential: &str) -> Result<bool> {
+pub async fn pending(server: &str, credential: &str) -> Result<PendingResponse> {
     let url = format!("{}/api/agents/pending", server.trim_end_matches('/'));
     let resp = client()?
         .get(&url)
@@ -94,7 +94,24 @@ pub async fn pending(server: &str, credential: &str) -> Result<bool> {
     if !resp.status().is_success() {
         bail!("pending refusé ({})", resp.status());
     }
-    Ok(resp.json::<PendingResponse>().await.context("réponse pending invalide")?.scan_requested)
+    resp.json::<PendingResponse>().await.context("réponse pending invalide")
+}
+
+/// Réponse légère à un ping admin — enregistre la latence côté serveur, efface le flag.
+/// Jamais de throttle, jamais d'inventaire complet (contrairement à `checkin`).
+pub async fn pong(server: &str, credential: &str) -> Result<()> {
+    let url = format!("{}/api/agents/pong", server.trim_end_matches('/'));
+    let resp = client()?
+        .post(&url)
+        .header("X-Agent-Token", credential)
+        .send()
+        .await
+        .with_context(|| format!("POST {url}"))?;
+
+    if !resp.status().is_success() {
+        bail!("pong refusé ({})", resp.status());
+    }
+    Ok(())
 }
 
 pub async fn checkin(server: &str, credential: &str, payload: &CheckinPayload) -> Result<()> {

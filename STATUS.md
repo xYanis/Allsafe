@@ -17,6 +17,32 @@ Volontairement court : ce fichier est chargé à **chaque** session. Le déroul�
 sessions passées est dans `docs/HISTORIQUE.md`, à n'ouvrir que pour retrouver le contexte d'une
 décision. Les détails techniques vivent dans `docs/` (cf. `CLAUDE.md` § Documentation détaillée).
 
+**Dernière session : 21/08/2026 (suite)** — Ping agent + correctif mise à jour Windows MSI.
+
+- **Ping agent** (pull model — Allsafe ne contacte jamais l'agent) : `ping_requested_at` posé
+  sur l'agent, l'agent voit `ping_requested: true` dans `/pending` (POLL_INTERVAL réduit 60 s→5 s),
+  répond via `POST /agents/pong` (latence enregistrée, entrée `AgentCheckinLog.is_ping=True`).
+  Interface : bouton "Ping" individuel par ligne + "Ping tous" dans la PageHero (tous les deux avec
+  confirmation modale), colonne "Ping" dédiée dans le tableau (centrée, séparée des actions),
+  entrée bleue "↩ X ms" dans la frise historique. Cancel ping possible.
+  Versions agent : Windows 0.1.21, Linux 0.1.10.
+
+- **Correctif mise à jour Windows MSI** : l'exe 0.1.19 → 0.1.20 apparaissait réussi mais l'agent
+  restait sur l'ancienne version. Cause : `FileVersion` encodée dans l'exe (`CARGO_PKG_VERSION`
+  immuable entre builds Windows) → Windows Installer comparait des versions identiques → ne
+  remplaçait pas le fichier. Fix : `REINSTALL=ALL REINSTALLMODE=amus` dans la table des propriétés
+  MSI (`agent/wix/main.wxs`) — force le remplacement sans vérification de version.
+
+- **Tests** : `test_agent_ping_guardrails.py` (9 tests — revoked → 409, pong sans ping en attente
+  ignoré, latence, historique) ; `test_auth_guardrails.py` mis à jour (`/pong` dans
+  `non_admin_agent_paths`). 30/30 passent.
+
+- **`COMPOSE_PROJECT_NAME=cybervuln`** ajouté dans `.env` — sans ça, Docker dérivait le nom du
+  projet depuis le chemin du répertoire (long hash WSL2), créant des volumes séparés des vrais
+  `cybervuln_*` à chaque session depuis une autre racine.
+
+---
+
 **Dernière session : 21/08/2026** — Pages d'erreur personnalisées + audit Strix + 4 correctifs de
 sécurité.
 

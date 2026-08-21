@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { securityEventsCount, incidentsPendingCount } from '../api/client.js'
+import { securityEventsCount, incidentsPendingCount, agentSecurityEventsCount } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { canAccessPage } from '../utils/pageAccess.js'
@@ -234,6 +234,22 @@ export default function Layout() {
     return () => { alive = false; clearInterval(t) }
   }, [isAnonymous, hasIncidentsAccess])
 
+  // Badge d'évènements agent (19/08/2026, cf. docs/AGENT_DETECTION.md) sur l'item Durcissement —
+  // même mécanique de poll léger que les badges ci-dessus. Compteur ouvert à tout connecté
+  // (exception délibérée côté serveur, cf. routers/agents.py::security_events_count), même si le
+  // détail/l'acquittement sur la page reste réservé admin.
+  const [agentEventsCount, setAgentEventsCount] = useState(0)
+  useEffect(() => {
+    if (isAnonymous) { setAgentEventsCount(0); return }
+    let alive = true
+    const load = () => agentSecurityEventsCount()
+      .then(r => { if (alive) setAgentEventsCount(r.data.unacknowledged || 0) })
+      .catch(() => {})
+    load()
+    const t = setInterval(load, 30000)
+    return () => { alive = false; clearInterval(t) }
+  }, [isAnonymous])
+
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)')
     const handler = e => setIsDesktop(e.matches)
@@ -319,7 +335,7 @@ export default function Layout() {
                 </p>
               )}
               {group.items.map(item => <NavItem key={item.to} {...item} color={item.color || group.color} collapsed={effectiveCollapsed}
-                badge={item.to === '/settings' ? securityCount : item.to === '/incidents' ? nis2Count : 0} />)}
+                badge={item.to === '/settings' ? securityCount : item.to === '/incidents' ? nis2Count : item.to === '/durcissement' ? agentEventsCount : 0} />)}
             </div>
           ))}
         </nav>

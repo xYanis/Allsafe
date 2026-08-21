@@ -40,9 +40,9 @@ use config::AgentConfig;
 /// `agent/README.md` § Mise à jour, `backend/routers/agents.py::CURRENT_AGENT_VERSION_*`
 /// côté serveur, `wix/main.wxs::Version` côté `.msi`).
 #[cfg(target_os = "windows")]
-pub const RELEASE_VERSION: &str = "0.1.19";
+pub const RELEASE_VERSION: &str = "0.1.21";
 #[cfg(target_os = "linux")]
-pub const RELEASE_VERSION: &str = "0.1.9";
+pub const RELEASE_VERSION: &str = "0.1.10";
 
 #[derive(Parser)]
 #[command(name = "allsafe-agent", version = RELEASE_VERSION, about = "Agent Allsafe (lecture seule) pour postes Windows/Linux")]

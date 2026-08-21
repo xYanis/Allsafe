@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx'
 import {
   listAgents, createEnrollmentToken, listEnrollmentTokens, deleteEnrollmentToken,
   revokeAgent, deleteAgent, assets as fetchAssets, agentLatestVersion, requestAgentScan,
+  pingAgent, pingAllAgents,
 } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -12,6 +13,7 @@ import OsLogo from '../components/OsLogo.jsx'
 import { StatusBadge, VersionBadge, TokenStateBadge, DistroBadge, formatDateTime, contactFreshness, FRESHNESS_COLOR } from '../components/AgentBadges.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { useHorizontalWheelScroll } from '../hooks/useHorizontalWheelScroll.js'
 
 const MODULE_COLOR = MODULES.inventaire.color
 
@@ -391,6 +393,8 @@ let agentsCache = null
 export default function Agents() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  // Scroll horizontal à la molette (19/08/2026, retour utilisateur) — cf. useHorizontalWheelScroll.js.
+  const tableScrollRef = useHorizontalWheelScroll()
   const [agentList, setAgentList] = useState(() => agentsCache?.agentList ?? [])
   const [tokens, setTokens] = useState(() => agentsCache?.tokens ?? [])
   const [assetList, setAssetList] = useState([])
@@ -434,19 +438,39 @@ export default function Agents() {
   // le détecte et pousse un check-in : rien côté serveur ne prévient la page quand c'est fait,
   // il faut redemander la liste pour le voir. Silencieux (pas de `setLoading`, sinon le
   // PageLoader plein écran clignoterait à chaque tick) ; ne tourne QUE tant qu'au moins un
-  // agent a un scan en attente — pas de polling permanent inutile le reste du temps.
+  // agent a un scan ou un ping en attente — pas de polling permanent inutile le reste du temps.
   const hasPendingScan = agentList.some(a => a.pending_scan_requested_at)
+  const hasPendingPing = agentList.some(a => a.ping_requested_at)
   useEffect(() => {
-    if (!hasPendingScan) return
+    if (!hasPendingScan && !hasPendingPing) return
     const id = setInterval(() => {
       listAgents().then(r => {
         const agents = r.data?.items || []
         setAgentList(agents)
         agentsCache = { ...agentsCache, agentList: agents }
       }).catch(() => {})
-    }, 5000)
+    }, 2000)
     return () => clearInterval(id)
-  }, [hasPendingScan])
+  }, [hasPendingScan, hasPendingPing])
+
+  const [globalPingConfirm, setGlobalPingConfirm] = useState(false)
+  const [globalPinging, setGlobalPinging] = useState(false)
+  const [pingConfirm, setPingConfirm] = useState(null)
+  const [pingRowBusy, setPingRowBusy] = useState(null)
+
+  async function handleGlobalPing() {
+    setGlobalPingConfirm(false)
+    setGlobalPinging(true)
+    try { await pingAllAgents(); load() } catch {} finally { setGlobalPinging(false) }
+  }
+
+  async function handleRowPing() {
+    if (!pingConfirm) return
+    const id = pingConfirm.id
+    setPingRowBusy(id)
+    setPingConfirm(null)
+    try { await pingAgent(id); load() } catch {} finally { setPingRowBusy(null) }
+  }
 
   async function handleRequestScan(agentId) {
     await requestAgentScan(agentId)
@@ -503,6 +527,26 @@ export default function Agents() {
         <div className="flex items-center gap-2">
           <DownloadDropdown color={MODULE_COLOR} versionInfo={latestVersionInfo} />
           {isAdmin && (
+            <button
+              onClick={() => setGlobalPingConfirm(true)}
+              disabled={globalPinging}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-opacity"
+              style={{ background: 'rgba(88,166,255,0.15)', color: '#58a6ff', opacity: globalPinging ? 0.6 : 1 }}
+              title="Ping tous les agents actifs"
+            >
+              {globalPinging ? (
+                <svg className="animate-spin" style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
+                </svg>
+              ) : (
+                <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+                </svg>
+              )}
+              Ping tous
+            </button>
+          )}
+          {isAdmin && (
             <button onClick={() => setTokenModal(true)}
               className="px-4 py-2 text-sm font-medium rounded-lg"
               style={{ background: MODULE_COLOR, color: MODULES.inventaire.dark }}>
@@ -519,11 +563,11 @@ export default function Agents() {
       )}
 
       <div className="rounded-2xl overflow-hidden" style={tintedCard(MODULE_COLOR)}>
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={tableScrollRef}>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Hôte', 'OS', 'Distribution', 'Actif lié', 'Version', 'Dernier contact', 'Statut', 'État', ''].map(h => (
+                {['Hôte', 'OS', 'Distribution', 'Actif lié', 'Version', 'Dernier contact', 'Statut', 'État', 'Ping', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{h}</th>
                 ))}
               </tr>
@@ -563,6 +607,28 @@ export default function Agents() {
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap"><StatusBadge value={a.status} /></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><TokenStateBadge status={a.token_status} /></td>
+                  <td className="px-4 py-3 text-center whitespace-nowrap">
+                    {a.ping_requested_at || pingRowBusy === a.id ? (
+                      <span className="inline-flex items-center gap-1 text-xs" style={{ color: '#58a6ff' }}>
+                        <svg className="animate-spin" style={{ width: 10, height: 10 }} viewBox="0 0 24 24" fill="none">
+                          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
+                        </svg>
+                        En attente…
+                      </span>
+                    ) : a.last_pong_ms != null ? (
+                      <span className="text-xs font-medium" title={`Dernier ping : ${new Date(a.last_pong_at).toLocaleString('fr-FR')}`}
+                        style={{ color: '#3fb950' }}>↩ {a.last_pong_ms} ms</span>
+                    ) : isAdmin && a.status === 'enrolled' ? (
+                      <button onClick={() => setPingConfirm(a)}
+                        className="text-xs px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1"
+                        style={{ background: 'rgba(88,166,255,0.1)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.25)' }}>
+                        <svg style={{ width: 10, height: 10 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+                        </svg>
+                        Ping
+                      </button>
+                    ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
+                  </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {isAdmin && a.status === 'enrolled' && !a.pending_scan_requested_at && (
                       <button onClick={() => handleRequestScan(a.id)}
@@ -656,6 +722,22 @@ export default function Agents() {
           message="Ce jeton ne pourra plus être utilisé pour enrôler un agent."
           confirmLabel="Révoquer" busyLabel="Révocation…" color="#f85149"
           onConfirm={handleDeleteToken} onClose={() => setDeleteTokenTarget(null)} />
+      )}
+
+      {globalPingConfirm && (
+        <ConfirmModal
+          title="Ping de tous les agents"
+          message={<>Envoyer un ping à <strong>tous les agents actifs</strong> ? Chacun répondra lors de son prochain sondage (≤ 5 s).</>}
+          confirmLabel="Ping tous" busyLabel="Envoi…" color="#58a6ff"
+          onConfirm={handleGlobalPing} onClose={() => setGlobalPingConfirm(false)} />
+      )}
+
+      {pingConfirm && (
+        <ConfirmModal
+          title="Ping de l'agent"
+          message={<>Envoyer un ping à <strong>{pingConfirm.hostname}</strong> ? L'agent répondra lors de son prochain sondage (≤ 5 s).</>}
+          confirmLabel="Ping" busyLabel="Envoi…" color="#58a6ff"
+          onConfirm={handleRowPing} onClose={() => setPingConfirm(null)} />
       )}
     </div>
   )

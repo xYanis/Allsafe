@@ -56,7 +56,7 @@ export default function IncidentFormModal({ initial, assetList, onSave, onClose 
   const [saving, setSaving] = useState(false)
 
   const isEdit = Boolean(initial?.id)
-  const isPrefilled = !isEdit && Boolean(initial?.security_event_id || initial?.vulnerability_id || initial?.watch_item_id)
+  const isPrefilled = !isEdit && Boolean(initial?.security_event_id || initial?.vulnerability_id || initial?.watch_item_id || initial?.agent_security_event_id)
   const missing = !title.trim() || !reportedBy || !awareAt
 
   async function save() {
@@ -73,6 +73,7 @@ export default function IncidentFormModal({ initial, assetList, onSave, onClose 
         ...(initial?.security_event_id ? { security_event_id: initial.security_event_id } : {}),
         ...(initial?.vulnerability_id ? { vulnerability_id: initial.vulnerability_id } : {}),
         ...(initial?.watch_item_id ? { watch_item_id: initial.watch_item_id } : {}),
+        ...(initial?.agent_security_event_id ? { agent_security_event_id: initial.agent_security_event_id } : {}),
       })
     } finally {
       setSaving(false)
@@ -92,7 +93,7 @@ export default function IncidentFormModal({ initial, assetList, onSave, onClose 
         <div className="p-6 space-y-3 overflow-y-auto">
           {isPrefilled && (
             <p className="text-xs px-2.5 py-1.5 rounded-lg" style={{ background: `${MODULE_COLOR}1a`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}40` }}>
-              Préempli depuis {initial.security_event_id ? 'une alerte de déception' : initial.vulnerability_id ? 'une vulnérabilité' : 'un item de veille'} — vérifiez les champs avant de créer. Rien n'est créé tant que vous ne validez pas.
+              Préempli depuis {initial.security_event_id ? 'une alerte de déception' : initial.vulnerability_id ? 'une vulnérabilité' : initial.agent_security_event_id ? 'un évènement agent' : 'un item de veille'} — vérifiez les champs avant de créer. Rien n'est créé tant que vous ne validez pas.
             </p>
           )}
 

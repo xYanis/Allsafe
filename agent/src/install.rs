@@ -392,9 +392,13 @@ pub async fn apply_update(server: &str) -> Result<()> {
         .unwrap_or(false);
     if self_locking {
         let pid = std::process::id();
+        // REINSTALL=ALL REINSTALLMODE=amus : belt-and-suspenders sur le correctif du WXS
+        // (cf. Property Id="REINSTALL" dans wix/main.wxs) — le MSI embarque déjà ces
+        // propriétés, mais les passer explicitement en argument garantit le forçage même
+        // si l'exe installe un MSI d'une version antérieure au correctif (rollback, test).
         let helper = format!(
             "Wait-Process -Id {pid} -ErrorAction SilentlyContinue; \
-             Start-Process msiexec -ArgumentList '/i','{msi}','/qn','/l*v','{log}' -Wait",
+             Start-Process msiexec -ArgumentList '/i','{msi}','/qn','REINSTALL=ALL','REINSTALLMODE=amus','/l*v','{log}' -Wait",
             msi = tmp.display(),
             log = log.display(),
         );
@@ -420,6 +424,8 @@ pub async fn apply_update(server: &str) -> Result<()> {
         .arg("/i")
         .arg(&tmp)
         .arg("/qn")
+        .arg("REINSTALL=ALL")
+        .arg("REINSTALLMODE=amus")
         .arg("/l*v")
         .arg(&log)
         .stdin(std::process::Stdio::null())

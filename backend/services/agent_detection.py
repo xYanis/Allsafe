@@ -141,7 +141,12 @@ def _diff_state(agent: Agent, previous: "AgentStateSnapshot | None", current: di
         if key not in old_persist:
             label = entry.get("name", key) if isinstance(entry, dict) else key
             events.append(_new_event(
-                agent=agent, category="persistence", severity="warning",
+                # `info` plutôt que `warning` (19/08/2026, retour utilisateur) : sans liste
+                # de référence de ce qui est normal sur ce poste (Niveau 3, hors MVP — cf.
+                # doc § Stratégie), toute nouvelle tâche planifiée/service légitime (mise à
+                # jour logicielle courante) déclenche cette catégorie aussi bien qu'une vraie
+                # persistance malveillante — pas de base pour exiger une validation dessus.
+                agent=agent, category="persistence", severity="info",
                 detection_method="state_diff",
                 summary=f"Nouvelle persistance détectée : {label}", detail={"entry": entry},
             ))
@@ -171,8 +176,13 @@ def _native_events(agent: Agent, raw_events) -> list:
             except (TypeError, ValueError, OverflowError):
                 occurred_at = None
         detail = raw.get("detail")
+        # `persistence` forcée en `info` côté serveur, quelle que soit la sévérité déclarée
+        # par l'agent (19/08/2026, même raison que le state_diff ci-dessus) — évite de devoir
+        # attendre une nouvelle release/redéploiement de l'agent (cf. docs/AGENTS.md § Mise à
+        # jour) pour que les postes déjà enrôlés cessent d'émettre ça en `warning`.
+        severity = "info" if category == "persistence" else (raw.get("severity") or "info")
         out.append(_new_event(
-            agent=agent, category=category, severity=raw.get("severity") or "info",
+            agent=agent, category=category, severity=severity,
             detection_method="native_log", summary=str(summary)[:500],
             detail=detail if isinstance(detail, dict) else {},
             occurred_at=occurred_at,

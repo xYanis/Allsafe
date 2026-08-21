@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { getAgent, agentCheckins, getAsset } from '../api/client.js'
+import { getAgent, agentCheckins, getAsset, pingAgent, cancelPing } from '../api/client.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
+import ConfirmModal from '../components/ConfirmModal.jsx'
 import { StatusBadge, VersionBadge, DistroBadge, formatDateTime, contactFreshness, FRESHNESS_COLOR, FRESHNESS_LABEL } from '../components/AgentBadges.jsx'
 import { MODULES } from '../constants/modules.js'
 import { formatDisks } from '../utils/hardware.js'
@@ -99,6 +100,25 @@ function ScanReliabilityValue({ result }) {
 // (pas de event_type/author/notes ici, juste un check-in daté avec des métriques).
 function CheckinEntry({ item }) {
   const hasGap = Boolean(item.gap_started_at)
+
+  if (item.is_ping) {
+    return (
+      <div className="pl-3" style={{ borderLeft: '2px solid #58a6ff' }}>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium flex items-center gap-1.5" style={{ color: 'var(--text-primary)' }}>
+            Ping
+            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded"
+              style={{ background: 'rgba(88,166,255,0.12)', color: '#58a6ff' }}>
+              ↩ {item.pong_ms != null ? `${item.pong_ms} ms` : 'OK'}
+            </span>
+          </p>
+          <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-faint)' }}>{formatDateTime(item.checked_in_at)}</span>
+        </div>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Réponse de l'agent au ping administrateur</p>
+      </div>
+    )
+  }
+
   return (
     <div className="pl-3" style={{ borderLeft: `2px solid ${hasGap ? '#d29922' : item.on_demand ? '#58a6ff' : 'var(--border)'}` }}>
       <div className="flex items-center justify-between gap-2">
@@ -148,6 +168,41 @@ export default function AgentHistory() {
   const [checkins, setCheckins] = useState(null)
   const [asset, setAsset] = useState(null)
   const [error, setError] = useState('')
+  const [pinging, setPinging] = useState(false)
+  const [pingError, setPingError] = useState('')
+  const [pingConfirm, setPingConfirm] = useState(false)
+
+  const refreshAgent = useCallback(() => {
+    getAgent(id).then(r => setAgent(r.data)).catch(() => {})
+  }, [id])
+
+  const handlePing = useCallback(async () => {
+    setPingConfirm(false)
+    setPinging(true); setPingError('')
+    try {
+      const r = await pingAgent(id)
+      setAgent(r.data)
+      // Polling jusqu'au pong (≤12s) — rafraîchit l'agent pour afficher last_pong_at/ms
+      const deadline = Date.now() + 12_000
+      const poll = setInterval(() => {
+        if (Date.now() > deadline) { clearInterval(poll); setPinging(false); return }
+        getAgent(id).then(r => {
+          setAgent(r.data)
+          if (r.data.last_pong_at && (!agent || r.data.last_pong_at !== agent.last_pong_at)) {
+            clearInterval(poll); setPinging(false)
+          }
+        }).catch(() => {})
+      }, 1000)
+    } catch (e) {
+      setPingError(e?.response?.data?.detail || 'Erreur lors du ping.')
+      setPinging(false)
+    }
+  }, [id, agent])
+
+  const handleCancelPing = useCallback(async () => {
+    try { const r = await cancelPing(id); setAgent(r.data) } catch {}
+    setPinging(false); setPingError('')
+  }, [id])
 
   useEffect(() => {
     let cancelled = false
@@ -205,6 +260,41 @@ export default function AgentHistory() {
         subtitle={agent.asset_name ? `Actif lié : ${agent.asset_name}` : 'Aucun actif lié'}
       >
         <StatusBadge value={agent.status} />
+        {agent.status === 'enrolled' && !pinging && (
+          <button
+            onClick={() => setPingConfirm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+            style={{ background: 'rgba(88,166,255,0.15)', color: '#58a6ff' }}
+          >
+            {/* signal/wifi icon */}
+            <svg style={{ width: 13, height: 13 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+            </svg>
+            Ping
+          </button>
+        )}
+        {agent.status === 'enrolled' && pinging && (
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 text-xs" style={{ color: '#58a6ff' }}>
+              <svg className="animate-spin" style={{ width: 12, height: 12 }} viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
+              </svg>
+              En attente…
+            </span>
+            <button
+              onClick={handleCancelPing}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium"
+              style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149' }}
+            >
+              {/* x-circle icon */}
+              <svg style={{ width: 12, height: 12 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Annuler
+            </button>
+          </div>
+        )}
+        {pingError && <span className="text-xs" style={{ color: '#f85149' }}>{pingError}</span>}
       </PageHero>
 
       <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}>
@@ -218,9 +308,17 @@ export default function AgentHistory() {
         <StatTile label="Distribution"><DistroBadge os={agent.asset_os} version={agent.asset_os_version} /></StatTile>
         <StatTile label="Version agent"><VersionBadge version={agent.agent_version} outdated={agent.outdated} /></StatTile>
         <StatTile label="Enrôlé depuis">{formatDateTime(agent.enrolled_at)}</StatTile>
+        <StatTile label="Dernier ping">
+          {agent.last_pong_at ? (
+            <>
+              <span style={{ color: '#3fb950' }}>↩ {agent.last_pong_ms != null ? `${agent.last_pong_ms} ms` : 'OK'}</span>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>{formatDateTime(agent.last_pong_at)}</p>
+            </>
+          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+        </StatTile>
         <StatTile label="Cycle de scan">
           Toutes les heures
-          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>+ sondage 60s pour un scan à la demande</p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>+ sondage 5s pour scan/ping à la demande</p>
         </StatTile>
         <StatTile label="Prochain scan attendu">
           {nextExpected != null ? formatDateTime(new Date(nextExpected).toISOString()) : '—'}
@@ -343,6 +441,14 @@ export default function AgentHistory() {
           />
         </div>
       </div>
+
+      {pingConfirm && (
+        <ConfirmModal
+          title="Ping de l'agent"
+          message={<>Envoyer un ping à <strong>{agent.hostname}</strong> ? L'agent répondra lors de son prochain sondage (≤ 5 s).</>}
+          confirmLabel="Ping" busyLabel="Envoi…" color="#58a6ff"
+          onConfirm={handlePing} onClose={() => setPingConfirm(false)} />
+      )}
     </div>
   )
 }

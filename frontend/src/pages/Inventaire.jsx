@@ -12,6 +12,7 @@ import { CRITICITE_LABELS } from '../constants/criticite.js'
 import { MODULES } from '../constants/modules.js'
 import { formatDisks } from '../utils/hardware.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { useHorizontalWheelScroll } from '../hooks/useHorizontalWheelScroll.js'
 
 // Survol de ligne teinté Inventaire (11/08/2026, tour visuel) — pas de CTA principal coloré sur
 // cette page (les deux boutons d'en-tête, "Scanner tout"/"Exporter en PDF", restent neutres),
@@ -176,6 +177,8 @@ let inventairePageCache = null
 
 export default function Inventaire() {
   const { isAnonymous } = usePresentation()
+  // Scroll horizontal à la molette (19/08/2026, retour utilisateur) — cf. useHorizontalWheelScroll.js.
+  const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (inventairePageCache == null) return []
     return isAnonymous ? [...inventairePageCache.map(anonymizeAsset), ...FAKE_ASSETS] : inventairePageCache
@@ -449,10 +452,10 @@ export default function Inventaire() {
       )}
 
       <div style={CARD} className="overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto" ref={tableScrollRef}>
         <table className="w-full text-sm">
           <thead>
-            <tr style={{ background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Nom', 'Réseau', 'CPU', 'Arch.', 'Cœurs', 'RAM', 'Disques', 'Apps', 'Dernier scan', 'Actions'].map(h => (
                 <th key={h}
                   className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide ${h === 'Réseau' ? 'text-center' : 'text-left'}`}

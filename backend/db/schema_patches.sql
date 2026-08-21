@@ -948,3 +948,19 @@ CREATE TABLE IF NOT EXISTS agent_state_snapshots (
     captured_at   TIMESTAMPTZ
 );
 GRANT SELECT, INSERT, UPDATE, DELETE ON agent_state_snapshots TO cbr_app;
+
+-- Pont Agents → Incidents (19/08/2026, cf. docs/AGENT_DETECTION.md § Pont vers Incidents,
+-- models.py::Incident, routers/incidents.py::prefill_incident) — même SET NULL que
+-- security_event_id/vulnerability_id/watch_item_id/audit_finding_id : l'incident survit à la
+-- suppression de l'évènement source. Escalade toujours manuelle, jamais automatique.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS agent_security_event_id UUID REFERENCES agent_security_events(id) ON DELETE SET NULL;
+
+-- Ping agent (21/08/2026, cf. models.py::Agent, routers/agents.py POST /agents/{id}/ping,
+-- POST /agents/ping, POST /agents/pong) — posé par un admin, effacé par le pong de l'agent.
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS ping_requested_at TIMESTAMPTZ;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_pong_at      TIMESTAMPTZ;
+ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_pong_ms      INTEGER;
+
+-- Ping dans la frise de l'historique des contacts (21/08/2026).
+ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS is_ping  BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS pong_ms  INTEGER;

@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_deps import require_admin
 from database import get_session
-from models import Incident, IncidentTimelineEntry, IncidentNotificationContact, IncidentAttachment, Asset, SecurityEvent, Vulnerability, CVE, WatchItem, Crisis, AuditFinding, Audit
+from models import Incident, IncidentTimelineEntry, IncidentNotificationContact, IncidentAttachment, Asset, SecurityEvent, Vulnerability, CVE, WatchItem, Crisis, AuditFinding, Audit, Agent, AgentSecurityEvent
 from services import nis2_deadlines, incident_report
 from services.incident_timeline import record as record_timeline
 from services.csv_safety import csv_safe
@@ -69,6 +69,7 @@ class IncidentCreate(BaseModel):
     vulnerability_id: Optional[str] = None
     watch_item_id: Optional[str] = None
     audit_finding_id: Optional[str] = None
+    agent_security_event_id: Optional[str] = None
 
 
 class ResponseStepCompletion(BaseModel):
@@ -202,6 +203,7 @@ def _incident_dict(inc: Incident, names: dict[str, str] | None = None, crisis_ti
         "vulnerability_id": str(inc.vulnerability_id) if inc.vulnerability_id else None,
         "watch_item_id": str(inc.watch_item_id) if inc.watch_item_id else None,
         "audit_finding_id": str(inc.audit_finding_id) if inc.audit_finding_id else None,
+        "agent_security_event_id": str(inc.agent_security_event_id) if inc.agent_security_event_id else None,
         "affected_asset_ids": inc.affected_asset_ids or [],
         "affected_asset_names": [names[a] for a in (inc.affected_asset_ids or []) if a in names],
         "completed_response_steps": inc.completed_response_steps or [],
@@ -453,7 +455,32 @@ async def prefill_incident(
             "_audit_title": audit.title if audit else None,
         }
 
-    raise HTTPException(400, "source_type invalide — valeurs : security_event, vulnerability, watch_item, audit_finding")
+    if source_type == "agent_security_event":
+        # Pont Agents → Incidents (19/08/2026, cf. docs/AGENT_DETECTION.md § Pont vers
+        # Incidents) : contrairement aux autres sources, l'app ne prétend jamais elle-même
+        # qu'un évènement agent est un incident (pas d'acquittement/qualification automatique
+        # pour cette catégorie) — c'est justement pour ça que ce bouton existe, pour laisser
+        # l'analyste escalader manuellement une ligne qui lui semble louche.
+        event = await session.get(AgentSecurityEvent, source_id)
+        if not event:
+            raise HTTPException(404, "Évènement agent introuvable")
+        asset_id = None
+        if event.agent_id:
+            agent = await session.get(Agent, event.agent_id)
+            asset_id = str(agent.asset_id) if agent and agent.asset_id else None
+        severity = "critical" if event.severity == "critical" else "major" if event.severity == "warning" else "minor"
+        return {
+            "title": f"Évènement agent — {event.summary}",
+            "description": f"Détecté sur {event.hostname} ({event.os}) — catégorie « {event.category} »"
+                           + (f", source native `{event.native_source}`" if event.native_source else " (diff d'état)") + ".",
+            "category": "intrusion",
+            "severity": severity,
+            "aware_at": (event.occurred_at or datetime.now(timezone.utc)).isoformat(),
+            "affected_asset_ids": [asset_id] if asset_id else [],
+            "agent_security_event_id": str(event.id),
+        }
+
+    raise HTTPException(400, "source_type invalide — valeurs : security_event, vulnerability, watch_item, audit_finding, agent_security_event")
 
 
 # ─── Contacts personnalisés (roadmap) ─────────────────────────────────────────
@@ -561,6 +588,7 @@ async def create_incident(data: IncidentCreate, session: AsyncSession = Depends(
         vulnerability_id=data.vulnerability_id,
         watch_item_id=data.watch_item_id,
         audit_finding_id=data.audit_finding_id,
+        agent_security_event_id=data.agent_security_event_id,
     )
     session.add(inc)
     await session.flush()  # incident.id posé avant l'entrée de timeline (FK)

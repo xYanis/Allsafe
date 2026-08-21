@@ -9,7 +9,7 @@ name = "allsafe-agent"
 # ce n'est pas une coïncidence à vérifier mais une contrainte à maintenir à la main à chaque
 # bump. Windows vit entièrement à part : `wix/main.wxs::Version` + `RELEASE_VERSION` côté
 # Windows — ne JAMAIS bumper ce champ pour un changement Windows seul.
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 description = "Agent Allsafe (lecture seule) pour postes Windows/Linux — complète le scan centralisé SSH/WinRM (cf. CLAUDE.md § non-intervention)."
 license = "Proprietary"

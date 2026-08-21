@@ -13,7 +13,7 @@
   <Product Id="*"
            Name="Allsafe Agent"
            Language="1033"
-           Version="0.1.19.0"
+           Version="0.1.21.0"
            Manufacturer="Allsafe"
            UpgradeCode="F7307503-099E-4424-9611-81DE4739933C">
 
@@ -127,5 +127,19 @@
     <Feature Id="MainFeature" Title="Allsafe Agent" Level="1">
       <ComponentRef Id="MainExecutable" />
     </Feature>
+
+    <!-- Forçage du remplacement de fichiers (21/08/2026, bug récurrent constaté) : la
+         FileVersion embarquée dans l'exe provient de CARGO_PKG_VERSION (version Cargo.toml,
+         partagée Linux/Windows) et n'avance pas au même rythme que la version MSI — Windows
+         Installer compare deux FileVersion identiques et décide de ne pas remplacer l'exe,
+         même si le ProductCode a changé, même si `RemoveExistingProducts` est présent.
+         `REINSTALLMODE=amus` (« a » = toujours copier le fichier quelle que soit la version)
+         court-circuite cette règle. `REINSTALL=ALL` active REINSTALLMODE sur tous les
+         composants du produit. En propriété MSI (pas seulement en argument msiexec) : le
+         correctif s'applique dès que la 0.1.19 télécharge et exécute ce .msi 0.1.20 — la
+         commande msiexec lancée par install.rs n'a pas à changer pour corriger le présent
+         cycle de mise à jour. -->
+    <Property Id="REINSTALL" Value="ALL" />
+    <Property Id="REINSTALLMODE" Value="amus" />
   </Product>
 </Wix>

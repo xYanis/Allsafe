@@ -237,7 +237,7 @@ app.include_router(connections.router,     prefix="/api/connections",     tags=[
 app.include_router(watch.router,           prefix="/api/watch",           tags=["Veille cyber"],           dependencies=[Depends(require_page("/veille", "/fuite-de-donnees"))])
 app.include_router(identities.router,      prefix="/api/identities",      tags=["Surveillance Identités"], dependencies=[Depends(require_page("/surveillance-identites"))])
 app.include_router(security.router,        prefix="/api/security",        tags=["Déception / Sécurité"],   dependencies=_authed)
-app.include_router(backup.router,          prefix="/api/backup",          tags=["Sauvegarde"],             dependencies=_authed)
+app.include_router(backup.router,          prefix="/api/backup",          tags=["Sauvegarde"],             dependencies=_admin_only)
 app.include_router(withsecure.router,      prefix="/api/withsecure",      tags=["WithSecure"],             dependencies=_authed)
 app.include_router(meraki.router,          prefix="/api/meraki",          tags=["Meraki"],                 dependencies=_authed)
 app.include_router(prtg.router,            prefix="/api/prtg",            tags=["PRTG"],                   dependencies=_authed)

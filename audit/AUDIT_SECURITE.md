@@ -1770,7 +1770,80 @@ non vérifiée (nécessite un accès DB réel, cf. ci-dessus).
 
 ---
 
-## Ce qui reste ouvert, tous périmètres confondus (19/08/2026)
+## Revue du 21/08/2026 (5) — Analyse Strix (IA, white-box backend/)
+
+Scan statique AI white-box via **Strix v1.5.3** (DeepSeek) sur `backend/` uniquement.
+8 agents de découverte + passes SAST (semgrep, gitleaks, trivy) — aucune CVE de dépendance,
+aucun RCE, aucune injection SQL/commande. 4 findings confirmés.
+
+### 🟠 #38 — BFLA sauvegardes : tout compte authentifié peut déclencher pg_dump superuser (MEDIUM)
+
+**Où** : `main.py:240` + `routers/backup.py:20-34`
+
+**Problème** : `backup.router` monté avec `_authed` (tout compte connecté) alors que l'intention
+documentée dans `main.py:216-218` le réserve aux admins. Tout analyste peut donc déclencher
+`POST /api/backup/run` (pg_dump complet en superutilisateur `cybervuln` via Celery) et lister
+l'inventaire des sauvegardes (`GET /api/backup/list`). CVSS 5.4 (AV:N/AC:L/PR:L/UI:N).
+
+**Correctif** : une ligne — remplacer `_authed` par `_admin_only` dans `main.py`.
+
+- [x] Corrigé (21/08/2026) : `_admin_only` dans `main.py:240`
+
+### 🟠 #39 — BOLA notes personnelles : aucune propriété par utilisateur (MEDIUM)
+
+**Où** : `routers/notes.py` + `models.py` (`NoteSubject`, `NoteImage`, `NoteTheme`)
+
+**Problème** : le module Notes est documenté « notes personnelles » mais les modèles ne portent
+aucune colonne `user_id` / colonne d'appartenance. Tous les handlers résolvent les objets par ID
+sans filtrer sur l'utilisateur authentifié — tout compte avec accès `/notes` peut lire, modifier
+et supprimer les notes et images de tous les utilisateurs. CVSS 5.4 (AV:N/AC:L/PR:L/UI:N,
+CWE-639).
+
+**Correctif** : ajouter une FK `user_id` sur `NoteSubject`/`NoteImage`/`NoteTheme` (+ patch SQL),
+filtrer toutes les requêtes par l'utilisateur de session. Effort : moyen.
+
+- [ ] **À faire** — nécessite migration DB + refactor handlers
+
+### 🟠 #40 — Forgery `risk_score` hors-bornes (MEDIUM)
+
+**Où** : `routers/vulnerabilities.py:198-203` (`VulnUpdate`)
+
+**Problème** : `risk_score: Optional[float]` sans borne — un compte non-admin peut passer
+`risk_score=999` ou une valeur négative, corrompant le tri du dashboard. CVSS 4.3 (CWE-863).
+
+Note : la possibilité pour un analyste de passer à un état terminal (`patched`/`false_positive`/
+`accepted_risk`) sur des vulns HIGH/MEDIUM/LOW est **intentionnelle** (cf. CLAUDE.md § 1). Le
+problème ici est la corruption du score numérique, pas les transitions de statut.
+
+**Correctif** : `Field(ge=0, le=10)` sur `risk_score`.
+
+- [x] Corrigé (21/08/2026) : `Field(ge=0, le=10)` dans `VulnUpdate`
+
+### 🟡 #41 — Injection de formules CSV : 4 colonnes résiduelles non neutralisées (FAIBLE)
+
+**Où** : `routers/watch.py:433,440` + `routers/reports.py:433,454`
+
+**Problème** : le neutraliseur `csv_safe` (#7, 27/07/2026) couvre la majorité des colonnes mais
+4 ont été oubliées : `themes` et « Actifs concernés » dans l'export veille (`watch.py`),
+`matched_identities` et `asset_name` dans les rapports hebdo (`reports.py`). Une valeur
+`=HYPERLINK(...)` dans un thème ou un nom d'actif atteint un tableur. CVSS 3.5 (CWE-1236).
+
+- [x] Corrigé (21/08/2026) : 4 colonnes enveloppées dans `csv_safe()`
+
+### Résumé — Revue du 21/08/2026 (5)
+
+| # | Sujet | Sévérité |
+|---|---|---|
+| #38 | BFLA backup — tout compte peut déclencher pg_dump | 🟠 |
+| #39 | BOLA notes — aucune propriété par utilisateur | 🟠 |
+| #40 | Forgery `risk_score` hors-bornes | 🟠 |
+| #41 | CSV injection résiduelle — 4 colonnes manquantes | 🟡 |
+
+**État au 21/08/2026** : #38, #40, #41 corrigés en code. #39 reste ouvert (migration DB requise).
+
+---
+
+## Ce qui reste ouvert, tous périmètres confondus (21/08/2026)
 
 - **#5** — `.gitignore` : sans objet aujourd'hui (repo git déjà initialisé avec `.gitignore`
   en place depuis longtemps), entrée gardée pour l'historique.
@@ -1789,3 +1862,5 @@ non vérifiée (nécessite un accès DB réel, cf. ci-dessus).
 - **Redistribution des binaires agent** reconstruits avec les correctifs #13/#18 aux postes
   déjà enrôlés — pas fait automatiquement, à planifier selon le processus habituel
   (`docs/AGENTS.md` § Mise à jour).
+- **#39 — BOLA notes** : nécessite migration DB (`user_id` sur `NoteSubject`/`NoteImage`/
+  `NoteTheme`) + refactor handlers — effort moyen, non encore planifié.

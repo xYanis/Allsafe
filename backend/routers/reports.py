@@ -430,7 +430,7 @@ async def export_weekly_report_csv(report_id: str, session: AsyncSession = Depen
             writer.writerow([report.label, "Périmètre surveillé", csv_safe(row.get("value", "")), row.get("kind", ""), "", "", ""])
         for row in activity.get("leak_matches") or []:
             writer.writerow([
-                report.label, "Fuite correspondante", ", ".join(row.get("matched_identities") or []),
+                report.label, "Fuite correspondante", csv_safe(", ".join(row.get("matched_identities") or [])),
                 csv_safe(row.get("source_label", "")), csv_safe(row.get("title", "")),
                 (row.get("received_at") or "")[:10], csv_safe(row.get("url") or ""),
             ])
@@ -451,7 +451,7 @@ async def export_weekly_report_csv(report_id: str, session: AsyncSession = Depen
             for row in items:
                 writer.writerow([
                     report.label, label,
-                    row.get("cve_id", ""), row.get("severity", ""), row.get("asset_name", ""),
+                    row.get("cve_id", ""), row.get("severity", ""), csv_safe(row.get("asset_name", "")),
                     csv_safe(row.get("validated_by") or ""), csv_safe(row.get("notes") or ""),
                 ])
             # Liste plafonnée à ACTIVITY_ROW_CAP côté génération (cf.

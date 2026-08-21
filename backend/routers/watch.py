@@ -430,14 +430,14 @@ async def export_watch_items(
             csv_safe(w.source_label or w.source),
             csv_safe(w.title),
             csv_safe(w.url or ""),
-            ", ".join(w.themes or []),
+            csv_safe(", ".join(w.themes or [])),
             STATUS_LABELS_FR.get(w.status, w.status),
             w.reviewed_by or "",
             w.reviewed_at.strftime("%Y-%m-%d %H:%M") if w.reviewed_at else "",
             delay_h,
             csv_safe(w.decision or ""),
             w.linked_cve_id or "",
-            ", ".join(names[a] for a in (w.asset_ids or []) if a in names),
+            csv_safe(", ".join(names[a] for a in (w.asset_ids or []) if a in names)),
         ])
 
     # Le BOM UTF-8 est nécessaire pour qu'Excel (notamment en locale FR) détecte

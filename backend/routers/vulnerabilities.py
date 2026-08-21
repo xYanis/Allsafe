@@ -2,7 +2,7 @@ import asyncio
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import load_only
@@ -198,7 +198,7 @@ class VulnCreate(BaseModel):
 class VulnUpdate(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
-    risk_score: Optional[float] = None
+    risk_score: Optional[float] = Field(default=None, ge=0, le=10)
     validated_by: Optional[str] = None
     accepted_risk_until: Optional[datetime] = None  # date de revue obligatoire si status="accepted_risk"
 

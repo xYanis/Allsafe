@@ -594,12 +594,17 @@ CREATE TABLE IF NOT EXISTS note_themes (
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 GRANT SELECT, INSERT, UPDATE, DELETE ON note_themes TO cbr_app;
-INSERT INTO note_themes (id, name, icon, color) VALUES
-    (gen_random_uuid(), 'Cybersécurité', '🛡️', '#f85149'),
-    (gen_random_uuid(), 'Réseau', '🌐', '#58a6ff'),
-    (gen_random_uuid(), 'Système', '💻', '#3fb950'),
-    (gen_random_uuid(), 'IA', '🧠', '#a371f7')
-ON CONFLICT (name) DO NOTHING;
+-- Seed idempotent : WHERE NOT EXISTS car la contrainte unique porte sur (name, user_id)
+-- depuis le 21/08/2026 (user_id IS NULL pour le seed, NULL != NULL dans les index uniques).
+INSERT INTO note_themes (id, name, icon, color)
+SELECT gen_random_uuid(), n.name, n.icon, n.color
+FROM (VALUES
+    ('Cybersécurité', '🛡️', '#f85149'),
+    ('Réseau',        '🌐', '#58a6ff'),
+    ('Système',       '💻', '#3fb950'),
+    ('IA',            '🧠', '#a371f7')
+) AS n(name, icon, color)
+WHERE NOT EXISTS (SELECT 1 FROM note_themes WHERE note_themes.name = n.name);
 
 -- Sujets (fiches de cours, cf. models.py::NoteSubject) — contenu Markdown.
 CREATE TABLE IF NOT EXISTS note_subjects (
@@ -712,7 +717,11 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_gap_failed_attempts INTEGER;
 -- inverse et sans limite à un seul agent.
 ALTER TABLE agent_enrollment_tokens ADD COLUMN IF NOT EXISTS max_uses INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE agent_enrollment_tokens ADD COLUMN IF NOT EXISTS use_count INTEGER NOT NULL DEFAULT 0;
-UPDATE agent_enrollment_tokens SET use_count = 1 WHERE used_at IS NOT NULL AND use_count = 0;
+DO $$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='agent_enrollment_tokens' AND column_name='used_at') THEN
+        UPDATE agent_enrollment_tokens SET use_count = 1 WHERE used_at IS NOT NULL AND use_count = 0;
+    END IF;
+END $$;
 ALTER TABLE agent_enrollment_tokens DROP COLUMN IF EXISTS used_at;
 ALTER TABLE agent_enrollment_tokens DROP COLUMN IF EXISTS used_by_agent_id;
 ALTER TABLE agents ADD COLUMN IF NOT EXISTS enrollment_token_id UUID REFERENCES agent_enrollment_tokens(id) ON DELETE SET NULL;

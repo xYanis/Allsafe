@@ -25,12 +25,18 @@ frontend/dist/
 # Agent Rust
 agent/target/
 agent/dist/
+agent/*.msi
+agent/*.deb
+agent/*.exe
 
 # Caches de build locaux
 .cargo-cache/
 
-# Claude Code — settings.local.json est personnel/local, pas partagé avec l'équipe
-.claude/settings.local.json
+# Claude Code — fichiers locaux, non partagés
+.claude/
+
+# Rapports de scan sécurité — résultats de vulnérabilités, jamais publics
+strix_runs/
 
 # Éditeurs / OS
 .DS_Store

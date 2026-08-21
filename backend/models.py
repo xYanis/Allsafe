@@ -914,11 +914,13 @@ class NoteTheme(Base):
     avec 4 thèmes par défaut (Cybersécurité/Réseau/Système/IA, cf. schema_patches.sql) mais
     ajoutable sans code, même principe que DocumentType/Service. `icon` est un simple emoji
     (cohérent avec le reste de l'app, cf. CLAUDE.md § Style — pas la palette de clés fixes
-    d'icônes SVG utilisée par ServiceIcon.jsx, overkill ici pour un registre personnel)."""
+    d'icônes SVG utilisée par ServiceIcon.jsx, overkill ici pour un registre personnel).
+    `user_id` : propriétaire — les thèmes/sujets/images sont personnels (21/08/2026, #39)."""
     __tablename__ = "note_themes"
 
     id          = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
-    name        = Column(String, nullable=False, unique=True)
+    user_id     = Column(_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    name        = Column(String, nullable=False)
     icon        = Column(String, nullable=False, default='📁')
     color       = Column(String, nullable=False, default='#8b949e')
     created_at  = Column(DateTime(timezone=True), server_default=_sfunc.now())
@@ -928,10 +930,12 @@ class NoteSubject(Base):
     """Sujet (fiche de cours) au sein d'un thème — contenu en Markdown, rendu via
     MarkdownNote.jsx (marked + DOMPurify, déjà utilisé pour les annotations d'analyste) côté
     frontend. `theme_id` CASCADE : supprimer un thème supprime ses sujets, assumé (pas de
-    sujets orphelins à gérer séparément)."""
+    sujets orphelins à gérer séparément). `user_id` dupliqué du thème pour filtrage direct
+    sans jointure (21/08/2026, #39)."""
     __tablename__ = "note_subjects"
 
     id                = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    user_id           = Column(_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     theme_id          = Column(_UUID(as_uuid=True), ForeignKey("note_themes.id", ondelete="CASCADE"), nullable=False, index=True)
     title             = Column(String, nullable=False)
     content_markdown  = Column(Text, nullable=False, default='')
@@ -946,10 +950,12 @@ class NoteImage(Base):
     réel). `subject_id` nullable : une image peut être déposée avant la première sauvegarde
     du sujet (le textarea insère déjà `![...](url)` à l'upload, le sujet n'existe pas encore
     forcément en base à cet instant) — reliée après coup si besoin, sinon reste orpheline
-    sans conséquence (pas de nettoyage automatique pour l'instant, cf. STATUS.md)."""
+    sans conséquence (pas de nettoyage automatique pour l'instant, cf. STATUS.md).
+    `user_id` : propriétaire de l'image, posé à l'upload (21/08/2026, #39)."""
     __tablename__ = "note_images"
 
     id               = Column(_UUID(as_uuid=True), primary_key=True, default=_uuid.uuid4)
+    user_id          = Column(_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     subject_id       = Column(_UUID(as_uuid=True), ForeignKey("note_subjects.id", ondelete="CASCADE"), nullable=True)
     filename         = Column(String, nullable=False)
     stored_filename  = Column(String, nullable=False)

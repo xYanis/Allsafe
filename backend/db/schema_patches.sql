@@ -625,6 +625,28 @@ CREATE TABLE IF NOT EXISTS note_images (
 );
 GRANT SELECT, INSERT, UPDATE, DELETE ON note_images TO cbr_app;
 
+-- Notes personnelles — propriété par utilisateur (21/08/2026, audit #39).
+-- Ajoute `user_id` sur les 3 tables, supprime la contrainte UNIQUE(name) globale sur
+-- note_themes et la remplace par UNIQUE(name, user_id) par utilisateur, puis backfille
+-- les lignes existantes vers le premier compte admin (si des données préexistent).
+ALTER TABLE note_themes  ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE note_subjects ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE note_images   ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS idx_note_themes_user_id   ON note_themes(user_id);
+CREATE INDEX IF NOT EXISTS idx_note_subjects_user_id ON note_subjects(user_id);
+
+-- Passer l'unicité du nom de thème de global à par-utilisateur.
+DO $$ BEGIN
+    ALTER TABLE note_themes DROP CONSTRAINT IF EXISTS note_themes_name_key;
+EXCEPTION WHEN undefined_object THEN NULL; END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS note_themes_name_user_id_key ON note_themes(name, user_id);
+
+-- Backfill : attribue les lignes sans propriétaire au premier compte admin créé.
+UPDATE note_themes   SET user_id = (SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1) WHERE user_id IS NULL;
+UPDATE note_subjects SET user_id = (SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1) WHERE user_id IS NULL;
+UPDATE note_images   SET user_id = (SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1) WHERE user_id IS NULL;
+
 -- Module Agents (12/08/2026, Sécurité > Agents) — agent Rust posé sur les postes Windows/
 -- Linux, complète le scan centralisé SSH/WinRM pour les postes que celui-ci atteint mal.
 -- `collection_method` distingue comment un actif est ACTIVEMENT scanné (service_account =

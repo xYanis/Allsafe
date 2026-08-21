@@ -1802,7 +1802,9 @@ CWE-639).
 **Correctif** : ajouter une FK `user_id` sur `NoteSubject`/`NoteImage`/`NoteTheme` (+ patch SQL),
 filtrer toutes les requêtes par l'utilisateur de session. Effort : moyen.
 
-- [ ] **À faire** — nécessite migration DB + refactor handlers
+- [x] Corrigé (21/08/2026) : `user_id` sur les 3 tables, contrainte `UNIQUE(name, user_id)`
+  (remplace `UNIQUE(name)` global), backfill vers le 1er admin, filtrage dans tous les handlers.
+  404 en cas d'accès cross-user (ne révèle pas l'existence des objets d'autrui).
 
 ### 🟠 #40 — Forgery `risk_score` hors-bornes (MEDIUM)
 
@@ -1839,7 +1841,7 @@ problème ici est la corruption du score numérique, pas les transitions de stat
 | #40 | Forgery `risk_score` hors-bornes | 🟠 |
 | #41 | CSV injection résiduelle — 4 colonnes manquantes | 🟡 |
 
-**État au 21/08/2026** : #38, #40, #41 corrigés en code. #39 reste ouvert (migration DB requise).
+**État au 21/08/2026** : #38, #39, #40, #41 corrigés en code. `schema_patches.sql` à rejouer.
 
 ---
 
@@ -1862,5 +1864,5 @@ problème ici est la corruption du score numérique, pas les transitions de stat
 - **Redistribution des binaires agent** reconstruits avec les correctifs #13/#18 aux postes
   déjà enrôlés — pas fait automatiquement, à planifier selon le processus habituel
   (`docs/AGENTS.md` § Mise à jour).
-- **#39 — BOLA notes** : nécessite migration DB (`user_id` sur `NoteSubject`/`NoteImage`/
-  `NoteTheme`) + refactor handlers — effort moyen, non encore planifié.
+- **`schema_patches.sql` notes** — à rejouer contre la DB (colonnes `user_id` sur les 3 tables
+  notes, drop contrainte `UNIQUE(name)`, nouveau `UNIQUE(name, user_id)`, backfill admin).

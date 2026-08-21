@@ -10,6 +10,9 @@ initial (terme/définition) le même jour. Trois ressources :
 
 Accès protégé au niveau du router par require_page("/notes") (main.py), pas de
 restriction admin en plus : notes personnelles, pas un registre d'organisation.
+Propriété par utilisateur (21/08/2026, audit #39) : chaque compte ne voit et ne
+modifie que ses propres thèmes/sujets/images — 404 en cas d'accès cross-user pour
+ne pas révéler l'existence des objets d'autrui.
 Phase 1 seulement (Thèmes/Sujets/Markdown/images) — pas de génération de QCM par IA
 ici, reporté à plus tard (demande explicite de l'utilisateur).
 """
@@ -25,8 +28,9 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth_deps import require_auth
 from database import get_session
-from models import NoteImage, NoteSubject, NoteTheme
+from models import NoteImage, NoteSubject, NoteTheme, User
 from services.note_images import CONTENT_TYPES, NOTE_IMAGES_ROOT, ensure_note_images_dir, validate_note_image
 
 router = APIRouter()
@@ -80,23 +84,32 @@ def _subject_dict(s: NoteSubject) -> dict:
 # ─── Thèmes ───────────────────────────────────────────────────────────────────
 
 @router.get("/themes")
-async def list_themes(session: AsyncSession = Depends(get_session)):
-    rows = (await session.execute(select(NoteTheme).order_by(NoteTheme.name))).scalars().all()
-    counts = dict((await session.execute(
-        select(NoteSubject.theme_id, func.count()).group_by(NoteSubject.theme_id)
-    )).all())
+async def list_themes(user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
+    rows = (await session.execute(
+        select(NoteTheme).where(NoteTheme.user_id == user.id).order_by(NoteTheme.name)
+    )).scalars().all()
+    theme_ids = [t.id for t in rows]
+    counts: dict = {}
+    if theme_ids:
+        counts = dict((await session.execute(
+            select(NoteSubject.theme_id, func.count())
+            .where(NoteSubject.theme_id.in_(theme_ids))
+            .group_by(NoteSubject.theme_id)
+        )).all())
     return {"items": [_theme_dict(t, counts.get(t.id, 0)) for t in rows]}
 
 
 @router.post("/themes", status_code=201)
-async def create_theme(data: ThemeCreate, session: AsyncSession = Depends(get_session)):
+async def create_theme(data: ThemeCreate, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     name = data.name.strip()
     if not name:
         raise HTTPException(400, "Le nom est obligatoire.")
-    existing = (await session.execute(select(NoteTheme).where(NoteTheme.name == name))).scalar_one_or_none()
+    existing = (await session.execute(
+        select(NoteTheme).where(NoteTheme.name == name, NoteTheme.user_id == user.id)
+    )).scalar_one_or_none()
     if existing:
         raise HTTPException(409, "Un thème porte déjà ce nom.")
-    theme = NoteTheme(name=name, icon=data.icon.strip() or '📁', color=data.color.strip() or '#8b949e')
+    theme = NoteTheme(user_id=user.id, name=name, icon=data.icon.strip() or '📁', color=data.color.strip() or '#8b949e')
     session.add(theme)
     await session.commit()
     await session.refresh(theme)
@@ -104,16 +117,16 @@ async def create_theme(data: ThemeCreate, session: AsyncSession = Depends(get_se
 
 
 @router.patch("/themes/{theme_id}")
-async def update_theme(theme_id: str, data: ThemeUpdate, session: AsyncSession = Depends(get_session)):
+async def update_theme(theme_id: str, data: ThemeUpdate, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     theme = await session.get(NoteTheme, theme_id)
-    if not theme:
+    if not theme or theme.user_id != user.id:
         raise HTTPException(404, "Thème introuvable.")
     if data.name is not None:
         name = data.name.strip()
         if not name:
             raise HTTPException(400, "Le nom est obligatoire.")
         existing = (await session.execute(
-            select(NoteTheme).where(NoteTheme.name == name, NoteTheme.id != theme_id)
+            select(NoteTheme).where(NoteTheme.name == name, NoteTheme.user_id == user.id, NoteTheme.id != theme_id)
         )).scalar_one_or_none()
         if existing:
             raise HTTPException(409, "Un thème porte déjà ce nom.")
@@ -128,9 +141,9 @@ async def update_theme(theme_id: str, data: ThemeUpdate, session: AsyncSession =
 
 
 @router.delete("/themes/{theme_id}", status_code=204)
-async def delete_theme(theme_id: str, session: AsyncSession = Depends(get_session)):
+async def delete_theme(theme_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     theme = await session.get(NoteTheme, theme_id)
-    if not theme:
+    if not theme or theme.user_id != user.id:
         raise HTTPException(404, "Thème introuvable.")
     existing_subject = (await session.execute(
         select(NoteSubject.id).where(NoteSubject.theme_id == theme_id).limit(1)
@@ -144,11 +157,11 @@ async def delete_theme(theme_id: str, session: AsyncSession = Depends(get_sessio
 # ─── Sujets ───────────────────────────────────────────────────────────────────
 
 @router.get("/subjects")
-async def list_subjects(theme_id: Optional[str] = None, session: AsyncSession = Depends(get_session)):
+async def list_subjects(theme_id: Optional[str] = None, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     # content_markdown inclus (pour l'aperçu texte de la carte côté frontend) : usage
     # personnel, quelques dizaines de sujets attendus, pas le volume qui justifierait de
     # l'exclure comme raw_data sur les CVE (cf. cpe_matcher.py::run_cpe_matching).
-    query = select(NoteSubject).order_by(NoteSubject.updated_at.desc())
+    query = select(NoteSubject).where(NoteSubject.user_id == user.id).order_by(NoteSubject.updated_at.desc())
     if theme_id:
         query = query.where(NoteSubject.theme_id == theme_id)
     rows = (await session.execute(query)).scalars().all()
@@ -156,22 +169,22 @@ async def list_subjects(theme_id: Optional[str] = None, session: AsyncSession = 
 
 
 @router.get("/subjects/{subject_id}")
-async def get_subject(subject_id: str, session: AsyncSession = Depends(get_session)):
+async def get_subject(subject_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     subject = await session.get(NoteSubject, subject_id)
-    if not subject:
+    if not subject or subject.user_id != user.id:
         raise HTTPException(404, "Sujet introuvable.")
     return _subject_dict(subject)
 
 
 @router.post("/subjects", status_code=201)
-async def create_subject(data: SubjectCreate, session: AsyncSession = Depends(get_session)):
+async def create_subject(data: SubjectCreate, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     title = data.title.strip()
     if not title:
         raise HTTPException(400, "Le titre est obligatoire.")
     theme = await session.get(NoteTheme, data.theme_id)
-    if not theme:
+    if not theme or theme.user_id != user.id:
         raise HTTPException(404, "Thème introuvable.")
-    subject = NoteSubject(theme_id=data.theme_id, title=title, content_markdown=data.content_markdown or '')
+    subject = NoteSubject(user_id=user.id, theme_id=data.theme_id, title=title, content_markdown=data.content_markdown or '')
     session.add(subject)
     await session.commit()
     await session.refresh(subject)
@@ -179,13 +192,13 @@ async def create_subject(data: SubjectCreate, session: AsyncSession = Depends(ge
 
 
 @router.patch("/subjects/{subject_id}")
-async def update_subject(subject_id: str, data: SubjectUpdate, session: AsyncSession = Depends(get_session)):
+async def update_subject(subject_id: str, data: SubjectUpdate, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     subject = await session.get(NoteSubject, subject_id)
-    if not subject:
+    if not subject or subject.user_id != user.id:
         raise HTTPException(404, "Sujet introuvable.")
     if data.theme_id is not None:
         theme = await session.get(NoteTheme, data.theme_id)
-        if not theme:
+        if not theme or theme.user_id != user.id:
             raise HTTPException(404, "Thème introuvable.")
         subject.theme_id = data.theme_id
     if data.title is not None:
@@ -202,9 +215,9 @@ async def update_subject(subject_id: str, data: SubjectUpdate, session: AsyncSes
 
 
 @router.delete("/subjects/{subject_id}", status_code=204)
-async def delete_subject(subject_id: str, session: AsyncSession = Depends(get_session)):
+async def delete_subject(subject_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     subject = await session.get(NoteSubject, subject_id)
-    if not subject:
+    if not subject or subject.user_id != user.id:
         raise HTTPException(404, "Sujet introuvable.")
     # Nettoyage disque (18/08/2026, cf. audit/AUDIT_SECURITE.md #36) — `NoteImage.
     # subject_id` a `ondelete="CASCADE"` : supprimer un sujet efface les lignes en base,
@@ -229,11 +242,12 @@ async def delete_subject(subject_id: str, session: AsyncSession = Depends(get_se
 async def upload_image(
     file: UploadFile = File(...),
     subject_id: Optional[str] = Form(None),
+    user: User = Depends(require_auth),
     session: AsyncSession = Depends(get_session),
 ):
     if subject_id:
         subject = await session.get(NoteSubject, subject_id)
-        if not subject:
+        if not subject or subject.user_id != user.id:
             raise HTTPException(404, "Sujet introuvable.")
 
     content = await file.read()
@@ -248,7 +262,8 @@ async def upload_image(
         f.write(content)
 
     image = NoteImage(
-        subject_id=subject_id or None, filename=file.filename, stored_filename=stored_filename,
+        user_id=user.id, subject_id=subject_id or None,
+        filename=file.filename, stored_filename=stored_filename,
         size_bytes=len(content), uploaded_at=datetime.now(timezone.utc),
     )
     session.add(image)
@@ -258,9 +273,9 @@ async def upload_image(
 
 
 @router.get("/images/{image_id}/file")
-async def get_image_file(image_id: str, session: AsyncSession = Depends(get_session)):
+async def get_image_file(image_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     image = await session.get(NoteImage, image_id)
-    if not image:
+    if not image or image.user_id != user.id:
         raise HTTPException(404, "Image introuvable")
     path = os.path.join(NOTE_IMAGES_ROOT, image.stored_filename)
     if not os.path.isfile(path):
@@ -270,14 +285,14 @@ async def get_image_file(image_id: str, session: AsyncSession = Depends(get_sess
 
 
 @router.delete("/images/{image_id}", status_code=204)
-async def delete_note_image(image_id: str, session: AsyncSession = Depends(get_session)):
+async def delete_note_image(image_id: str, user: User = Depends(require_auth), session: AsyncSession = Depends(get_session)):
     """18/08/2026, cf. audit/AUDIT_SECURITE.md #36 — n'existait pas jusqu'ici, contrairement
     aux trois modules frères (documents.py, incidents.py, audits.py, qui font tous ce même
     os.remove + session.delete) : tout compte avec accès /notes pouvait uploader des images
     (5 Mo chacune, sans limite de nombre) sans jamais pouvoir en récupérer une seule —
     accumulation illimitée dans le volume note_images, sans mécanisme de purge."""
     image = await session.get(NoteImage, image_id)
-    if not image:
+    if not image or image.user_id != user.id:
         raise HTTPException(404, "Image introuvable.")
     path = os.path.join(NOTE_IMAGES_ROOT, image.stored_filename)
     if os.path.isfile(path):

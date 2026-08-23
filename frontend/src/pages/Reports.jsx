@@ -4,7 +4,7 @@ import AssetDropdown from '../components/AssetDropdown.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
-import { FAKE_ASSETS, anonymizeAsset, redactText, isFakeId } from '../utils/fakeData.js'
+import { SYNTHETIC_ASSETS, anonymizeAsset, redactText, isSyntheticId } from '../utils/syntheticData.js'
 import WeeklyArchives from '../components/WeeklyArchives.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
@@ -29,18 +29,18 @@ export default function Reports() {
   }, [])
 
   const displayAssetList = isAnonymous
-    ? [...realAssetList.map(anonymizeAsset), ...FAKE_ASSETS].sort((a, b) => a.name.localeCompare(b.name))
+    ? [...realAssetList.map(anonymizeAsset), ...SYNTHETIC_ASSETS].sort((a, b) => a.name.localeCompare(b.name))
     : realAssetList
 
   // Le backend ne connaît rien des actifs de démonstration — seuls les ids
   // réels lui sont transmis pour le résumé/l'export.
   function realSelectedIds() {
-    return selectedAssetIds.filter(id => !isFakeId(id))
+    return selectedAssetIds.filter(id => !isSyntheticId(id))
   }
   // Sélection composée uniquement d'actifs fictifs : pas de vraies données à
   // résumer, on l'indique plutôt que d'appeler le backend sur tout le parc
   // (ce qui donnerait un résumé qui ne correspond pas à la sélection affichée).
-  function onlyFakeAssetsSelected() {
+  function onlySyntheticAssetsSelected() {
     return selectedAssetIds.length > 0 && realSelectedIds().length === 0
   }
 
@@ -50,7 +50,7 @@ export default function Reports() {
   }
 
   function handleExportCsv() {
-    if (onlyFakeAssetsSelected()) {
+    if (onlySyntheticAssetsSelected()) {
       setError('Export indisponible pour une sélection composée uniquement d\'actifs de démonstration.')
       return
     }
@@ -84,7 +84,7 @@ export default function Reports() {
     <div className="p-6 space-y-6">
       <PageHero
         icon="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-        title="Rapport exécutif CVE" color="#a371f7"
+        title="Rapport exécutif CVE" color={MODULES.rapports.color}
         subtitle="Résumé exécutif, export CSV et journaux d'accès"
       />
 

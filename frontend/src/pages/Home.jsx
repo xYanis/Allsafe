@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { MODULES } from '../constants/modules.js'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { canAccessPage } from '../utils/pageAccess.js'
+import { useTiltEnabled, tiltMouseMove, tiltMouseEnter, tiltMouseLeave } from '../utils/tilt3d.js'
 import WelcomeOverlay from '../components/WelcomeOverlay.jsx'
 import { CbrLogoTile } from '../components/CbrMark.jsx'
 
@@ -69,13 +70,6 @@ const TILE_BASE_DELAY = 950
 // (home-enter-left/-right, cf. JSX), ce décalage n'est plus qu'un complément.
 const TILE_ROW_DELAY = 500
 
-// TEST — tilt 3D des tuiles (18/08/2026, à l'essai, pas encore validé) : rotation suivant la
-// souris + glare (cf. index.css § home-tile-glare). En style inline, pas via React state — un
-// setState par mousemove redessinerait tout le composant à chaque frame pour rien, alors que
-// muter le DOM directement (comme .home-tile porte déjà `will-change: transform`) coûte
-// beaucoup moins cher pour un effet purement visuel qui n'a besoin d'être lu par personne.
-const MAX_TILT_DEG = 10
-
 export default function Home() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -100,39 +94,18 @@ export default function Home() {
   // `.home-exit` (home-fade-out, index.css) : navigate() attend la fin du fondu.
   const [leaving, setLeaving] = useState(null)
 
-  // TEST — tilt 3D (cf. constante MAX_TILT_DEG plus haut). `tileRefs` indexé par `m.to` : sert
-  // uniquement à effacer le tilt inline de la tuile cliquée dans `selectModule` ci-dessous, sans
-  // quoi son transform inline (plus prioritaire qu'une classe CSS) écraserait silencieusement
-  // `.home-tile-selected` si le clic arrive sans que la souris n'ait quitté la tuile entre-temps.
+  // Tilt 3D (cf. utils/tilt3d.js — logique partagée avec Dashboard.jsx, extraite au 2e usage).
+  // `tileRefs` indexé par `m.to` : sert uniquement à effacer le tilt inline de la tuile cliquée
+  // dans `selectModule` ci-dessous, sans quoi son transform inline (plus prioritaire qu'une
+  // classe CSS) écraserait silencieusement `.home-tile-selected` si le clic arrive sans que la
+  // souris n'ait quitté la tuile entre-temps. Les wrappers ci-dessous n'ajoutent que le garde
+  // `leaving` (animation de sortie en cours) par-dessus les fonctions partagées.
   const tileRefs = useRef(new Map())
-  const tiltEnabled = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    && window.matchMedia('(hover: hover) and (pointer: fine)').matches
+  const tiltEnabled = useTiltEnabled()
 
-  function handleTileMove(e) {
-    if (leaving) return
-    const el = e.currentTarget
-    const rect = el.getBoundingClientRect()
-    const px = (e.clientX - rect.left) / rect.width
-    const py = (e.clientY - rect.top) / rect.height
-    const rotateY = (px - 0.5) * MAX_TILT_DEG * 2
-    const rotateX = (0.5 - py) * MAX_TILT_DEG * 2
-    el.style.transform = `perspective(900px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`
-    el.style.setProperty('--mx', `${px * 100}%`)
-    el.style.setProperty('--my', `${py * 100}%`)
-  }
-
-  function handleTileEnter(e) {
-    if (leaving) return
-    // Coupe la transition sur `transform` pendant le suivi (sinon la tuile "traîne" derrière le
-    // curseur) — les autres propriétés (bordure/fond, cf. .home-tile) restent animées comme
-    // aujourd'hui. Réactivée au `mouseleave` pour que le retour à plat soit lui-même animé.
-    e.currentTarget.style.transition = 'border-color 240ms var(--ease-out), background 240ms var(--ease-out), box-shadow 240ms var(--ease-out)'
-  }
-
-  function handleTileLeave(e) {
-    e.currentTarget.style.transition = ''
-    e.currentTarget.style.transform = ''
-  }
+  function handleTileMove(e) { if (!leaving) tiltMouseMove(e) }
+  function handleTileEnter(e) { if (!leaving) tiltMouseEnter(e) }
+  function handleTileLeave(e) { tiltMouseLeave(e) }
 
   function selectModule(m) {
     if (leaving) return
@@ -201,7 +174,7 @@ export default function Home() {
           structure interne partout (icône fixe + titre 1 ligne + description plafonnée
           à 2 lignes) donne la même hauteur calculée à toutes les tuiles, sans valeur
           codée en dur qui se déréglerait si un libellé changeait. */}
-      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-5xl home-tiles-grid">
+      <div className="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full max-w-5xl tile-3d-grid">
         {visibleModules.map((m, i) => (
           <button
             key={m.to}
@@ -211,7 +184,7 @@ export default function Home() {
             onMouseEnter={tiltEnabled ? handleTileEnter : undefined}
             onMouseLeave={tiltEnabled ? handleTileLeave : undefined}
             disabled={!!leaving}
-            className={`home-tile text-left p-4 rounded-2xl h-full flex flex-col ${
+            className={`home-tile tile-3d text-left p-4 rounded-2xl h-full flex flex-col ${
               leaving === m.to ? 'home-tile-selected' : leaving ? 'home-exit'
                 // Ligne paire (0-3) depuis la gauche, ligne impaire (4-7) depuis la droite
                 // (18/08/2026, demande explicite — un simple décalage de temps entre les
@@ -223,8 +196,8 @@ export default function Home() {
               animationDelay: `${TILE_BASE_DELAY + Math.floor(i / 4) * TILE_ROW_DELAY}ms`,
             }}
           >
-            {/* TEST — glare du tilt 3D, cf. index.css § home-tile-glare. */}
-            <span className="home-tile-glare" aria-hidden="true" />
+            {/* Glare du tilt 3D, cf. index.css § .tile-3d-glare. */}
+            <span className="tile-3d-glare" aria-hidden="true" />
             <div className="flex items-start justify-between mb-3">
               <div className="home-icon w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: `${m.color}22`, color: m.color }}>
                 {m.icon}

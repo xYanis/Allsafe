@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { releaseNotes, createReleaseNote, deleteReleaseNote } from '../api/client.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { SYNTHETIC_RELEASE_NOTES, isSyntheticId } from '../utils/syntheticData.js'
 
 // Panneau notes de version (18/08/2026, demande explicite) — partagé entre Paramètres
 // (scope="allsafe") et la page dédiée Agents (scope="agent") : même forme des deux côtés
@@ -49,6 +51,7 @@ export default function ReleaseNotesPanel({ scope, color, isAdmin, showVersionFi
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState(null)
   const [expanded, setExpanded] = useState(null) // clé de version dépliée, une seule à la fois
+  const { isAnonymous } = usePresentation()
 
   function load() {
     releaseNotes(scope).then(r => setItems(r.data.items || [])).catch(() => setError('Impossible de charger les notes de version.'))
@@ -77,7 +80,8 @@ export default function ReleaseNotesPanel({ scope, color, isAdmin, showVersionFi
     load()
   }
 
-  const groups = items ? groupByVersion(items) : []
+  const displayItems = isAnonymous ? [...(items || []), ...SYNTHETIC_RELEASE_NOTES[scope]] : items
+  const groups = displayItems ? groupByVersion(displayItems) : []
 
   return (
     <div className="space-y-3">
@@ -161,7 +165,7 @@ export default function ReleaseNotesPanel({ scope, color, isAdmin, showVersionFi
                             style={{ background: `color-mix(in srgb, ${CATEGORY_COLORS[n.category] || color} 15%, transparent)`, color: CATEGORY_COLORS[n.category] || color }}>
                             {CATEGORY_LABELS[n.category] || n.category}
                           </span>
-                          {isAdmin && (
+                          {isAdmin && !isSyntheticId(n.id) && (
                             <button onClick={() => setDeleteTarget(n)} title="Supprimer"
                               className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)' }}>✕</button>
                           )}

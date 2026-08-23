@@ -1,4 +1,5 @@
 import ServiceIcon from './ServiceIcon.jsx'
+import { isSyntheticId } from '../utils/syntheticData.js'
 
 // Une boîte-poste du mini organigramme (rectangle relié à son N+1 par un trait, cf. OrgNode
 // ci-dessous). Couleur reprise du service — l'organigramme reste lisible même sans branding riche.
@@ -52,7 +53,10 @@ function OrgNode({ role, childrenByManager, color, visited }) {
 // n'a pas de supérieur) est traité comme racine ici : cette vue ne montre que la hiérarchie interne
 // au service, pas la chaîne complète jusqu'à la direction générale.
 export default function ServiceOrgChartModal({ service, roles, onClose }) {
-  const serviceRoles = roles.filter(r => r.service_id === service.id)
+  // Rattachement par NOM en plus de l'id pour les rôles de démonstration (23/08/2026) —
+  // SYNTHETIC_ORGANIZATION_ROLES n'a pas de `service_id` réel à donner (UUID généré à
+  // l'installation, jamais devinable à l'avance), même logique que ServicesTab.
+  const serviceRoles = roles.filter(r => r.service_id === service.id || (isSyntheticId(r.id) && r.service_name === service.name))
   const idSet = new Set(serviceRoles.map(r => r.id))
 
   const childrenByManager = new Map()

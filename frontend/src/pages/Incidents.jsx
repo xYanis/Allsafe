@@ -10,7 +10,7 @@ import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { FAKE_INCIDENTS, anonymizeIncident, anonymizeAsset } from '../utils/fakeData.js'
+import { SYNTHETIC_INCIDENTS, anonymizeIncident, anonymizeAsset } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -145,11 +145,11 @@ export default function Incidents() {
 
   const totalPages = Math.ceil(data.total / PER_PAGE)
   // Les vraies lignes sont anonymisées (21/08/2026, retour utilisateur — restaient jusqu'ici
-  // affichées en clair, seules des lignes FAKE_INCIDENTS s'y ajoutaient) avant d'y ajouter les
-  // fake data, seulement en 1re page sans filtre — un filtre server-side ne les retrouverait pas
+  // affichées en clair, seules des lignes SYNTHETIC_INCIDENTS s'y ajoutaient) avant d'y ajouter les
+  // synthetic data, seulement en 1re page sans filtre — un filtre server-side ne les retrouverait pas
   // (pas de logique de filtrage côté client dupliquée pour si peu).
   const anonymizedItems = isAnonymous ? data.items.map(i => anonymizeIncident(i, assetList)) : data.items
-  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...FAKE_INCIDENTS] : anonymizedItems
+  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...SYNTHETIC_INCIDENTS] : anonymizedItems
   const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   if (loading && data.items.length === 0 && noFilterActive) {

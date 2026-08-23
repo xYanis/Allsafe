@@ -24,9 +24,9 @@ import BulkQualifyModal from '../components/BulkQualifyModal.jsx'
 import { cvssColor, epssColor } from '../utils/scoreColors.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import {
-  FAKE_ASSETS, FAKE_VULNERABILITIES, anonymizeAsset, anonymizeVuln, isFakeId,
-  computeDashboardStats, fakePatchCheckResult, fakeAnalysis,
-} from '../utils/fakeData.js'
+  SYNTHETIC_ASSETS, SYNTHETIC_VULNERABILITIES, anonymizeAsset, anonymizeVuln, isSyntheticId,
+  computeDashboardStats, syntheticPatchCheckResult, syntheticAnalysis,
+} from '../utils/syntheticData.js'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
 import { useTiltEnabled, tiltMouseMove, tiltMouseEnter, tiltMouseLeave } from '../utils/tilt3d.js'
@@ -642,7 +642,15 @@ function SslCertificatesCard() {
 // pas une nouvelle prop — les 4 KPI sont déjà chacun dans leur propre teinte.
 function KpiCard({ label, value, sub, color, tiltEnabled }) {
   return (
-    <div style={{ ...CARD, '--tile': color || 'var(--text-muted)' }} className="p-5 tile-3d"
+    // `height: 100%` (23/08/2026, retour utilisateur — les 4 tuiles KPI n'avaient pas la
+    // même hauteur) : sans lui, cette carte ne prenait que la hauteur de son PROPRE contenu
+    // (label + valeur + sub éventuel), pas celle de la cellule de grille déjà étirée par
+    // `align-items: stretch` (comportement par défaut de CSS Grid, cf. Widget ci-dessus) —
+    // un label plus long passant sur 2 lignes ("Taux de correction global") ou un `sub`
+    // absent ("Vulns ouvertes", seule tuile sans 3e ligne) suffisait à désynchroniser les
+    // hauteurs visibles entre tuiles d'une même ligne, y compris en mode édition (même
+    // écart de longueur sur WIDGET_LABELS).
+    <div style={{ ...CARD, '--tile': color || 'var(--text-muted)', height: '100%' }} className="p-5 tile-3d"
       onMouseMove={tiltEnabled ? tiltMouseMove : undefined}
       onMouseEnter={tiltEnabled ? tiltMouseEnter : undefined}
       onMouseLeave={tiltEnabled ? tiltMouseLeave : undefined}>
@@ -688,8 +696,15 @@ function Widget({ id, children }) {
   }
 
   return (
+    // `display: flex, flexDirection: column, height: 100%` (23/08/2026, retour utilisateur —
+    // tuiles KPI de hauteurs inégales) : CSS Grid étire déjà ce conteneur (grid item) à la
+    // hauteur de la ligne (`align-items: stretch`, défaut) — sans ce flex, le `height: 100%`
+    // posé sur le contenu (cf. KpiCard) n'aurait aucun ancêtre à hauteur définie contre
+    // lequel se résoudre. `flex: 1, minHeight: 0` sur le wrapper juste en dessous : occupe
+    // tout l'espace restant sous le bandeau d'édition (absent hors editMode, donc ce wrapper
+    // occupe alors 100% à lui seul).
     <div
-      style={{ gridColumn: `span ${SIZE_SPAN[size]}`, order: order.indexOf(id) }}
+      style={{ gridColumn: `span ${SIZE_SPAN[size]}`, order: order.indexOf(id), display: 'flex', flexDirection: 'column', height: '100%' }}
       draggable={editMode && !locked}
       onDragStart={editMode && !locked ? handleDragStart : undefined}
       onDragOver={editMode ? handleDragOver : undefined}
@@ -730,7 +745,7 @@ function Widget({ id, children }) {
           )}
         </div>
       )}
-      <div style={{ outline: dragOver ? '2px dashed #58a6ff' : 'none', outlineOffset: 2, borderRadius: 12 }}>
+      <div style={{ outline: dragOver ? '2px dashed #58a6ff' : 'none', outlineOffset: 2, borderRadius: 12, flex: '1 1 auto', minHeight: 0 }}>
         {children}
       </div>
     </div>
@@ -990,12 +1005,12 @@ export default function Dashboard() {
         // Mode Présentation : noms/IP/analystes réels remplacés par des
         // équivalents fictifs (id réel conservé, actions inchangées), parc
         // complété par des actifs et vulnérabilités 100% inventés.
-        openItems = [...openItems.map(anonymizeVuln), ...FAKE_VULNERABILITIES.filter(v => v.status === 'open')]
-        const fakeClosed = FAKE_VULNERABILITIES.filter(v => v.status === 'patched' || v.status === 'false_positive')
-        closed = [...closed.map(anonymizeVuln), ...fakeClosed]
+        openItems = [...openItems.map(anonymizeVuln), ...SYNTHETIC_VULNERABILITIES.filter(v => v.status === 'open')]
+        const syntheticClosed = SYNTHETIC_VULNERABILITIES.filter(v => v.status === 'patched' || v.status === 'false_positive')
+        closed = [...closed.map(anonymizeVuln), ...syntheticClosed]
           .sort((a, b) => new Date(b.patched_at || b.false_positive_at || 0) - new Date(a.patched_at || a.false_positive_at || 0))
-        awaitingItems = [...awaitingItems.map(anonymizeVuln), ...FAKE_VULNERABILITIES.filter(v => v.status === 'awaiting_fix')]
-        assetsList = [...assetsList.map(anonymizeAsset), ...FAKE_ASSETS]
+        awaitingItems = [...awaitingItems.map(anonymizeVuln), ...SYNTHETIC_VULNERABILITIES.filter(v => v.status === 'awaiting_fix')]
+        assetsList = [...assetsList.map(anonymizeAsset), ...SYNTHETIC_ASSETS]
       }
 
       const sortedAssets = [...assetsList].sort((a, b) => a.name.localeCompare(b.name))
@@ -1306,7 +1321,7 @@ export default function Dashboard() {
   // foi pour matchesAssetFilter (déjà le cas côté serveur pour openVulns/
   // patchedVulns/awaitingVulns via `configured_only` dans loadLists, mais
   // fpCandidates ci-dessous n'est filtré que côté client) — pas en mode
-  // Présentation, où les actifs fictifs (FAKE_ASSETS) n'existent jamais dans
+  // Présentation, où les actifs fictifs (SYNTHETIC_ASSETS) n'existent jamais dans
   // cette liste réelle et seraient sinon exclus à tort.
   const configuredAssetIds = assetList.filter(a => a.asset_type !== 'network' && a.package_count > 0).map(a => a.id)
   const effectiveAssetIds = selectedAssetIds.length ? selectedAssetIds : (isAnonymous ? [] : configuredAssetIds)
@@ -1553,7 +1568,7 @@ export default function Dashboard() {
   // faux positif) ou de "en attente de correctif" — les boutons "↩ Réouvrir"
   // partagent ce handler.
   async function handleReopen(vuln) {
-    if (!isFakeId(vuln.id)) await updateVuln(vuln.id, { status: 'open' })
+    if (!isSyntheticId(vuln.id)) await updateVuln(vuln.id, { status: 'open' })
     const wasAwaiting = vuln.status === 'awaiting_fix' || vuln.status === 'awaiting_fix_partial'
     setPatchedVulns(prev => prev.filter(v => v.id !== vuln.id))
     setAwaitingVulns(prev => prev.filter(v => v.id !== vuln.id))
@@ -1567,9 +1582,9 @@ export default function Dashboard() {
     setPatchLoading(l => ({ ...l, [vuln.id]: true }))
     setPatchModal({ vuln, result: null })
     setShowDebugCommands(false)
-    if (isFakeId(vuln.id)) {
+    if (isSyntheticId(vuln.id)) {
       setTimeout(() => {
-        const result = fakePatchCheckResult(vuln)
+        const result = syntheticPatchCheckResult(vuln)
         setPatchModal({ vuln, result, autoPatched: false })
         if (result.patch_detected) setPatchDetected(prev => ({ ...prev, [vuln.id]: true }))
         setPatchLoading(l => ({ ...l, [vuln.id]: false }))
@@ -1593,8 +1608,8 @@ export default function Dashboard() {
   }
 
   async function handleAnalyze(vuln) {
-    if (isFakeId(vuln.id)) {
-      setAnalysisModal({ analysis: fakeAnalysis(vuln), cve_id: vuln.cve?.cve_id, description: vuln.cve?.description })
+    if (isSyntheticId(vuln.id)) {
+      setAnalysisModal({ analysis: syntheticAnalysis(vuln), cve_id: vuln.cve?.cve_id, description: vuln.cve?.description })
       return
     }
     flash('Analyse IA en cours…')
@@ -1650,9 +1665,9 @@ export default function Dashboard() {
       setBatchRowStatus(prev => ({ ...prev, [idArr[i]]: 'checking' }))
       setBatchStats(prev => ({ ...prev, current: i + 1 }))
       setBatchProgress(`Patch check ${i + 1}/${idArr.length}…`)
-      if (isFakeId(vuln.id)) {
+      if (isSyntheticId(vuln.id)) {
         await new Promise(r => setTimeout(r, 250))
-        const result = fakePatchCheckResult(vuln)
+        const result = syntheticPatchCheckResult(vuln)
         if (result.patch_detected) {
           setPatchDetected(prev => ({ ...prev, [vuln.id]: true }))
           detected++

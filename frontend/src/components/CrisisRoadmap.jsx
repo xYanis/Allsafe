@@ -6,7 +6,7 @@ import AddCrisisContactModal from './AddCrisisContactModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { anonymizeRoleHolder } from '../utils/fakeData.js'
+import { anonymizeRoleHolder, isSyntheticId } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -53,6 +53,8 @@ export default function CrisisRoadmap({ crisis, onUpdated }) {
     }
     setActorError(false)
     setChecked(next)
+    // Crise de démonstration : pas d'appel API (n'existe pas en base), l'état local suffit.
+    if (isSyntheticId(crisis.id)) return
     try {
       const payload = [...next.entries()].map(([index, v]) => ({ index, by: v.by, at: v.at }))
       const { data: fresh } = await updateCrisis(crisis.id, { completed_crisis_steps: payload })

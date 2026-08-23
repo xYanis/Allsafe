@@ -14,7 +14,7 @@ import { MODULES } from '../constants/modules.js'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { isFakeId, buildFakeCrisisTimeline, anonymizeValidator } from '../utils/fakeData.js'
+import { isSyntheticId, buildSyntheticCrisisTimeline, anonymizeValidator } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 
@@ -65,12 +65,12 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
   // pour ne pas laisser un compte analyst se heurter à un 403 après confirmation.
   const { user } = useAuth()
   const { isAnonymous } = usePresentation()
-  const isFake = isFakeId(crisis.id)
-  const canDelete = user?.role === 'admin' && !isFake
+  const isSynthetic = isSyntheticId(crisis.id)
+  const canDelete = user?.role === 'admin' && !isSynthetic
   // Crise réelle affichée en mode Présentation (21/08/2026, retour utilisateur) — même principe
   // qu'IncidentDetailModal.jsx::maskReal : le `crisis` reçu est déjà anonymisé par la page
   // appelante (Crises.jsx), il ne reste que les 2 appels API propres à cette modale.
-  const maskReal = isAnonymous && !isFake
+  const maskReal = isAnonymous && !isSynthetic
   const [entries, setEntries] = useState([])
   const [loadingTimeline, setLoadingTimeline] = useState(true)
   const [actionModal, setActionModal] = useState(null) // null | 'stand-down' | 'decision' | 'communication' | 'role'
@@ -84,7 +84,7 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
 
   function loadTimeline() {
     // Crise de démonstration (mode Présentation) : pas d'appel API, construite côté client.
-    if (isFake) { setEntries(buildFakeCrisisTimeline(crisis)); setLoadingTimeline(false); return }
+    if (isSynthetic) { setEntries(buildSyntheticCrisisTimeline(crisis)); setLoadingTimeline(false); return }
     setLoadingTimeline(true)
     crisisTimeline(crisis.id)
       .then(r => setEntries(maskReal ? r.data.entries.map(e => ({ ...e, author: e.author ? anonymizeValidator(e.author) : e.author })) : r.data.entries))
@@ -94,9 +94,9 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
   useEffect(() => { loadTimeline() }, [crisis.id])
 
   useEffect(() => {
-    if (isFake) return
+    if (isSynthetic) return
     // Titres génériques en mode Présentation (21/08/2026) : pas de liste de vrais actifs sous la
-    // main ici pour un redactText propre (cf. utils/fakeData.js) — un titre générique numéroté
+    // main ici pour un redactText propre (cf. utils/syntheticData.js) — un titre générique numéroté
     // reste sûr et suffit pour choisir lequel rattacher.
     fetchIncidents({ per_page: 200 }).then(r => {
       const items = r.data.items || []
@@ -197,7 +197,7 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
             <div className="rounded-xl p-4" style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Cellule de crise</p>
-                {active && !isFake && (
+                {active && !isSynthetic && (
                   <button onClick={() => setActionModal('role')} className="text-xs px-2.5 py-1 rounded-lg font-medium"
                     style={{ background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}4d` }}>
                     + Assigner un rôle
@@ -211,7 +211,7 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
                   {crisis.crisis_roles.map(r => (
                     <div key={r.role} className="flex items-center justify-between text-xs">
                       <span style={{ color: 'var(--text-secondary)' }}><strong style={{ color: 'var(--text-primary)' }}>{r.role}</strong> — {r.analyst_name}</span>
-                      {active && !isFake && (
+                      {active && !isSynthetic && (
                         <button onClick={() => handleRemoveRole(r.role)} style={{ color: 'var(--text-faint)' }} title="Retirer">✕</button>
                       )}
                     </div>
@@ -229,14 +229,14 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
                   {crisis.linked_incidents.map(li => (
                     <div key={li.id} className="flex items-center justify-between text-xs">
                       <span style={{ color: 'var(--text-secondary)' }}>{li.title}</span>
-                      {active && !isFake && (
+                      {active && !isSynthetic && (
                         <button onClick={() => handleUnlinkIncident(li.id)} style={{ color: 'var(--text-faint)' }} title="Détacher">✕</button>
                       )}
                     </div>
                   ))}
                 </div>
               )}
-              {active && !isFake && (
+              {active && !isSynthetic && (
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <select value={linkIncidentId} onChange={e => setLinkIncidentId(e.target.value)}
                     className="text-xs px-2 py-1.5 rounded-lg outline-none flex-1 min-w-[140px]"
@@ -268,7 +268,7 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
             <div>
               <div className="flex items-center justify-between mb-2 flex-wrap gap-1.5">
                 <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-muted)' }}>Journal</p>
-                {active && !isFake && (
+                {active && !isSynthetic && (
                   <div className="flex gap-1.5">
                     <button onClick={() => setActionModal('decision')} className="text-xs px-2 py-1 rounded-lg font-medium"
                       style={{ background: 'var(--bg-card)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>+ Décision</button>
@@ -289,7 +289,7 @@ export default function CrisisDetailModal({ crisis, onClose, onUpdated, onDelete
                 Supprimer
               </button>
             )}
-            {active && !isFake && (
+            {active && !isSynthetic && (
               <button onClick={() => setActionModal('stand-down')} className="text-xs px-3 py-2 rounded-lg font-medium"
                 style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
                 Désactiver la crise

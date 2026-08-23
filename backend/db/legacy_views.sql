@@ -1,5 +1,5 @@
 -- ============================================================================
--- deception_setup.sql — Objets de déception (honeypots DB) pour CBR.
+-- legacy_views.sql — Objets de déception (honeypots DB) pour Allsafe.
 --
 -- Principe : AUCUN code applicatif ne référence les objets leurres ci-dessous
 -- (vues api_keys/app_users/ssh_credentials_backup/admin_tokens, rôles admin/root/
@@ -8,11 +8,24 @@
 -- SECURITY DEFINER — pas de parsing de logs.
 --
 -- Idempotent : réexécutable sans dommage. À rejouer sur toute base :
---   docker compose exec -T db psql -U cybervuln -d cybervuln -f - < backend/db/deception_setup.sql
+--   docker compose exec -T db psql -U cybervuln -d cybervuln -f - < backend/db/legacy_views.sql
 --
 -- ⚠️ Ne JAMAIS ajouter de référence à ces objets dans le code de l'app : ce sont
 -- des pièges, leur seule légitimité d'accès est un attaquant.
+--
+-- Noms de fonctions volontairement neutres (pas de préfixe "honey_"/"decoy_") :
+-- un attaquant qui introspecte pg_proc/information_schema.routines après avoir
+-- compromis la base ne doit pas pouvoir repérer le piège rien qu'au nom des
+-- objets. Renommé le 23/08/2026 (fichier compris, ex-deception_setup.sql) —
+-- les DROP FUNCTION ci-dessous nettoient les anciens noms sur une base où ce
+-- script tournait déjà.
 -- ============================================================================
+
+DROP FUNCTION IF EXISTS honey_api_keys();
+DROP FUNCTION IF EXISTS honey_app_users();
+DROP FUNCTION IF EXISTS honey_ssh_credentials_backup();
+DROP FUNCTION IF EXISTS honey_admin_tokens();
+DROP FUNCTION IF EXISTS honey_view_write() CASCADE;
 
 -- ─── Couche D : socle d'alerte ──────────────────────────────────────────────
 -- Table réelle (pas un leurre) : journal des événements de déception. Lue par
@@ -20,7 +33,7 @@
 CREATE TABLE IF NOT EXISTS security_events (
     id           bigserial PRIMARY KEY,
     occurred_at  timestamptz NOT NULL DEFAULT now(),
-    source       text        NOT NULL,   -- honey_read | honey_write | decoy_role
+    source       text        NOT NULL,   -- trap_read | trap_write | trap_role
     object_name  text,                   -- vue/table leurre touchée
     operation    text,                   -- SELECT | INSERT | UPDATE | DELETE
     db_user      text        NOT NULL DEFAULT current_user,
@@ -44,7 +57,7 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
     INSERT INTO security_events(source, object_name, operation, db_user, client_addr, detail)
     VALUES (p_source, p_object, p_op, current_user, inet_client_addr(), p_detail);
-    RAISE WARNING 'SECURITY DECEPTION: % % on % by "%" from %',
+    RAISE WARNING 'SECURITY ALERT: % % on % by "%" from %',
         p_source, COALESCE(p_op,''), COALESCE(p_object,''), current_user, inet_client_addr();
 EXCEPTION WHEN OTHERS THEN
     NULL;  -- ne jamais propager d'erreur vers l'attaquant
@@ -52,10 +65,12 @@ END;
 $$;
 
 -- Écriture sur une vue leurre (INSTEAD OF) : logge et avale silencieusement.
-CREATE OR REPLACE FUNCTION honey_view_write() RETURNS trigger
+-- Nom neutre : une vue en lecture seule appliquée par un trigger INSTEAD OF est
+-- un idiome Postgres tout à fait ordinaire, rien qui trahisse un piège.
+CREATE OR REPLACE FUNCTION _readonly_view_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-    PERFORM record_security_event('honey_write', TG_TABLE_NAME, TG_OP, NULL);
+    PERFORM record_security_event('trap_write', TG_TABLE_NAME, TG_OP, NULL);
     RETURN NULL;  -- l'écriture n'a aucun effet, mais aucune erreur n'est levée
 END;
 $$;
@@ -66,11 +81,11 @@ $$;
 -- honeytokens, couche C — valeurs bidon self-hosted, aucun callback externe).
 
 -- api_keys
-CREATE OR REPLACE FUNCTION honey_api_keys()
+CREATE OR REPLACE FUNCTION _api_keys_source()
 RETURNS TABLE(id int, service text, api_key text, environment text, created_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-    PERFORM record_security_event('honey_read', 'api_keys', 'SELECT', NULL);
+    PERFORM record_security_event('trap_read', 'api_keys', 'SELECT', NULL);
     RETURN QUERY SELECT * FROM (VALUES
         (1, 'stripe'::text,   'sk_live_51NfAqL2eZvKYxT8pQ3rW9hBc'::text, 'production'::text, (now() - interval '210 days')::timestamptz),
         (2, 'aws_iam'::text,  'AKIA4JF7K2MNPQ6RSTUV'::text,              'production'::text, (now() - interval '160 days')::timestamptz),
@@ -78,49 +93,49 @@ BEGIN
     ) AS t(id, service, api_key, environment, created_at);
 END;
 $$;
-CREATE OR REPLACE VIEW api_keys AS SELECT * FROM honey_api_keys();
+CREATE OR REPLACE VIEW api_keys AS SELECT * FROM _api_keys_source();
 
 -- app_users
-CREATE OR REPLACE FUNCTION honey_app_users()
+CREATE OR REPLACE FUNCTION _app_users_source()
 RETURNS TABLE(id int, username text, email text, password_hash text, role text, last_login timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-    PERFORM record_security_event('honey_read', 'app_users', 'SELECT', NULL);
+    PERFORM record_security_event('trap_read', 'app_users', 'SELECT', NULL);
     RETURN QUERY SELECT * FROM (VALUES
         (1, 'admin'::text,     'admin@aer.loc'::text,   '$2b$12$Kx8pQzR3sT7uVwXyZ0aBcOeFgHiJkLmNoPqRsTuVwXyZ012345678'::text, 'superadmin'::text, (now() - interval '2 days')::timestamptz),
         (2, 'svc-backup'::text,'backup@aer.loc'::text,  '$2b$12$aB3cDeF6gHiJkLmNoPqRsOtUvWxYz012345678aBcDeFgHiJkLmNoP'::text, 'admin'::text,      (now() - interval '9 days')::timestamptz)
     ) AS t(id, username, email, password_hash, role, last_login);
 END;
 $$;
-CREATE OR REPLACE VIEW app_users AS SELECT * FROM honey_app_users();
+CREATE OR REPLACE VIEW app_users AS SELECT * FROM _app_users_source();
 
 -- ssh_credentials_backup (honeytoken "actif privilégié" DC-PRIV-01)
-CREATE OR REPLACE FUNCTION honey_ssh_credentials_backup()
+CREATE OR REPLACE FUNCTION _ssh_credentials_backup_source()
 RETURNS TABLE(id int, hostname text, ip_address text, username text, password text, note text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-    PERFORM record_security_event('honey_read', 'ssh_credentials_backup', 'SELECT', NULL);
+    PERFORM record_security_event('trap_read', 'ssh_credentials_backup', 'SELECT', NULL);
     RETURN QUERY SELECT * FROM (VALUES
         (1, 'DC-PRIV-01'::text, '10.0.0.5'::text,  'Administrateur'::text, 'W1nter#2026!Dom'::text, 'contrôleur de domaine principal'::text),
         (2, 'BACKUP-NAS'::text, '10.0.0.20'::text, 'root'::text,           'nas-r00t-2026'::text,   'sauvegardes hebdo'::text)
     ) AS t(id, hostname, ip_address, username, password, note);
 END;
 $$;
-CREATE OR REPLACE VIEW ssh_credentials_backup AS SELECT * FROM honey_ssh_credentials_backup();
+CREATE OR REPLACE VIEW ssh_credentials_backup AS SELECT * FROM _ssh_credentials_backup_source();
 
 -- admin_tokens
-CREATE OR REPLACE FUNCTION honey_admin_tokens()
+CREATE OR REPLACE FUNCTION _admin_tokens_source()
 RETURNS TABLE(id int, label text, token text, scope text, expires_at timestamptz)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
-    PERFORM record_security_event('honey_read', 'admin_tokens', 'SELECT', NULL);
+    PERFORM record_security_event('trap_read', 'admin_tokens', 'SELECT', NULL);
     RETURN QUERY SELECT * FROM (VALUES
         (1, 'ci-deploy'::text,  'cbr_pat_9fK2mNpQ7rStUvWxYz012345'::text, 'admin:all'::text,   (now() + interval '120 days')::timestamptz),
         (2, 'grafana-sa'::text, 'cbr_pat_aB3cDeF6gHiJkLmNoPqRsT'::text,   'read:metrics'::text,(now() + interval '300 days')::timestamptz)
     ) AS t(id, label, token, scope, expires_at);
 END;
 $$;
-CREATE OR REPLACE VIEW admin_tokens AS SELECT * FROM honey_admin_tokens();
+CREATE OR REPLACE VIEW admin_tokens AS SELECT * FROM _admin_tokens_source();
 
 -- Triggers d'écriture + ouverture en lecture à tous (l'app légitime n'y touche
 -- jamais ; un rôle leurre ou une réutilisation des creds app s'y trahit).
@@ -129,7 +144,7 @@ DECLARE v text;
 BEGIN
     FOREACH v IN ARRAY ARRAY['api_keys','app_users','ssh_credentials_backup','admin_tokens'] LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS %I_wr ON %I', v, v);
-        EXECUTE format('CREATE TRIGGER %I_wr INSTEAD OF INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION honey_view_write()', v, v);
+        EXECUTE format('CREATE TRIGGER %I_wr INSTEAD OF INSERT OR UPDATE OR DELETE ON %I FOR EACH ROW EXECUTE FUNCTION _readonly_view_guard()', v, v);
         EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO PUBLIC', v);
     END LOOP;
 END $$;

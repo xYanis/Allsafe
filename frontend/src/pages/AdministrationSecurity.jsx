@@ -13,7 +13,11 @@ import {
   services as fetchServices, createService, updateService, deleteService,
   windowsAppMappings as fetchWindowsAppMappings, createWindowsAppMapping, updateWindowsAppMapping, deleteWindowsAppMapping,
 } from '../api/client.js'
-import { anonymizeConnection, anonymizeUserConnection, anonymizeRoleHolder, anonymizeValidator } from '../utils/fakeData.js'
+import {
+  anonymizeConnection, anonymizeUserConnection, anonymizeRoleHolder, anonymizeValidator,
+  anonymizeSecurityEvent, SYNTHETIC_SECURITY_EVENTS, SYNTHETIC_WINDOWS_APP_MAPPINGS, isSyntheticId,
+  SYNTHETIC_ANALYSTS, SYNTHETIC_ORGANIZATION_ROLES, SYNTHETIC_USERS,
+} from '../utils/syntheticData.js'
 import PageLoader from '../components/PageLoader.jsx'
 import DeclareIncidentButton from '../components/DeclareIncidentButton.jsx'
 import UserFormModal from '../components/UserFormModal.jsx'
@@ -24,14 +28,32 @@ import ServiceFormModal from '../components/ServiceFormModal.jsx'
 import ServiceOrgChartModal from '../components/ServiceOrgChartModal.jsx'
 import WindowsAppMappingFormModal from '../components/WindowsAppMappingFormModal.jsx'
 import { SERVICE_COLOR_PALETTE } from '../constants/serviceColors.js'
+import { PAGE_LABELS } from '../constants/modulePages.js'
 import ServiceIcon from '../components/ServiceIcon.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 
-const MODULE_COLOR = '#fb8f44' // orange Administration (demande utilisateur, 19/08/2026) — diverge
-// volontairement du gris #8b949e de Paramètres : reprend l'orange déjà utilisé sur cette page (boutons
-// « + Ajouter » d'Utilisateurs/Analystes/Services), pour thémer hero + nav + carte + filtres d'un seul point.
+// Orange Administration (19/08/2026, demande utilisateur) — diverge volontairement du gris
+// #8b949e de Paramètres : reprend l'orange déjà utilisé sur cette page (boutons « + Ajouter »
+// d'Utilisateurs/Analystes/Services), pour thémer hero + nav + carte + filtres d'un seul point.
+// Résolu par thème (23/08/2026, retour utilisateur — même bug que CyberVeille : hex fixe,
+// figé sur Neutre/Cyberpunk). Pas de `MODULES.x.color` à réutiliser ici : Administration
+// n'est pas un module de constants/modules.js (c'est un override propre à cette seule page),
+// donc même mécanique reprise en local — lecture localStorage à l'import, cf. modules.js pour
+// le pourquoi de ce choix plutôt qu'un contexte réactif (react à un rechargement complet,
+// déclenché par ThemeContext.jsx en passant vers/depuis Neutre/Cyberpunk, pas en direct).
+const ADMIN_COLOR_BY_THEME = { base: '#fb8f44', neutral: '#a89c7a', cyberpunk: '#e0a015' }
+function _currentAdminColor() {
+  try {
+    const stored = localStorage.getItem('theme')
+    if (stored === 'neutral' || stored === 'cyberpunk') return ADMIN_COLOR_BY_THEME[stored]
+  } catch {
+    // localStorage indisponible (SSR/tests) — repli sur base, sans casser l'import.
+  }
+  return ADMIN_COLOR_BY_THEME.base
+}
+const MODULE_COLOR = _currentAdminColor()
 const CARD = tintedCard(MODULE_COLOR)
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
 const activeFilterSelectStyle = { background: `${MODULE_COLOR}1f`, color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}59` }
@@ -265,9 +287,9 @@ function ConnectionsTab({ isAnonymous }) {
 
 // ─── Onglet Base de données (déception / administration) ───────────────────────
 const EVENT_SOURCE = {
-  honey_read:  { label: 'Lecture leurre',  color: '#f85149' },
-  honey_write: { label: 'Écriture leurre', color: '#f85149' },
-  decoy_role:  { label: 'Rôle leurre',     color: '#fb8f44' },
+  trap_read:   { label: 'Lecture leurre',  color: '#f85149' },
+  trap_write:  { label: 'Écriture leurre', color: '#f85149' },
+  trap_role:   { label: 'Rôle leurre',     color: '#fb8f44' },
   ddl_attempt: { label: 'DDL bloquée',     color: '#a371f7' },
 }
 
@@ -280,21 +302,21 @@ function explainEvent(e) {
   const from = e.client_addr ? ` (adresse ${e.client_addr})` : ''
   const op = OP_LABEL[e.operation] || (e.operation || '').toLowerCase()
   switch (e.source) {
-    case 'honey_read':
+    case 'trap_read':
       return {
         title: 'Quelqu’un a fouillé une fausse table-piège',
         what: `${who}${from} a consulté « ${e.object_name} » — une fausse table qui imite des données sensibles (identifiants, mots de passe, clés d’API…). Ces pièges ne sont jamais utilisés par le logiciel Allsafe.`,
         why: `Un utilisateur ou un logiciel normal ne lit jamais cet objet. Cette lecture signifie que quelqu’un explore la base pour y trouver des secrets.`,
         reco: `À faire : identifier qui se cache derrière ce compte et cette adresse, puis couper l’accès si l’activité n’est pas légitime.`,
       }
-    case 'honey_write':
+    case 'trap_write':
       return {
         title: 'Quelqu’un a tenté de modifier un objet-piège',
         what: `${who}${from} a tenté une ${op} sur « ${e.object_name} », un objet-piège inutilisé par Allsafe. L’opération n’a eu aucun effet réel — elle a été absorbée par le piège.`,
         why: `Personne de légitime ne modifie cet objet. Une écriture ici trahit une manipulation volontaire de la base.`,
         reco: `À faire : traiter ce compte et cette adresse comme suspects et vérifier leurs autres actions.`,
       }
-    case 'decoy_role':
+    case 'trap_role':
       return {
         title: 'Connexion avec un compte-piège',
         what: `${who}${from} s’est connecté — c’est un compte-piège volontairement alléchant (admin, root, dba…) qu’aucun service d’Allsafe n’utilise.`,
@@ -390,7 +412,7 @@ function EventDetailModal({ event, onClose, onAck, acking }) {
   )
 }
 
-function DatabaseTab() {
+function DatabaseTab({ isAnonymous }) {
   const { user: me } = useAuth()
   const [events, setEvents] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -401,6 +423,10 @@ function DatabaseTab() {
   // c'est la vue de DÉTECTION D'INTRUSION par leurres — un échec réseau avalé
   // silencieusement y affichait "0 alerte", le pire endroit possible pour ça.
   const [error, setError] = useState('')
+  // Acquittement des alertes de DÉMONSTRATION (23/08/2026) : jamais persisté (elles
+  // n'existent pas en base), juste un état local de session — même idée que
+  // Watch.jsx::pick() sur un item fictif, mutation directe plutôt qu'un appel API réel.
+  const [syntheticAcked, setSyntheticAcked] = useState({})
 
   function load() {
     setLoading(true)
@@ -417,20 +443,45 @@ function DatabaseTab() {
   // admins (`useAuth()` déjà utilisé pour ça dans UsersTab du même fichier).
   async function ackAll() {
     setBusy(true)
-    try { await ackAllSecurityEvents(me?.full_name || 'Administration'); load() }
-    finally { setBusy(false) }
+    try {
+      // Les alertes de démo se marquent localement, jamais via l'API (elles n'existent
+      // pas en base) — le lot réel, lui, suit le chemin habituel.
+      setSyntheticAcked(prev => ({ ...prev, ...Object.fromEntries(SYNTHETIC_SECURITY_EVENTS.map(e => [e.id, true])) }))
+      await ackAllSecurityEvents(me?.full_name || 'Administration')
+      load()
+    } finally { setBusy(false) }
   }
 
   async function ackFromModal() {
     if (!detail) return
     setAcking(true)
-    try { await ackSecurityEvent(detail.id, me?.full_name || 'Administration'); setDetail(null); load() }
-    finally { setAcking(false) }
+    try {
+      if (isSyntheticId(detail.id)) {
+        setSyntheticAcked(prev => ({ ...prev, [detail.id]: true }))
+        setDetail(null)
+        return
+      }
+      await ackSecurityEvent(detail.id, me?.full_name || 'Administration'); setDetail(null); load()
+    } finally { setAcking(false) }
   }
 
   if (loading) return <Loader />
   if (!events) return null
-  const unackEvents = events.filter(e => !e.acknowledged)
+
+  // Données de démonstration (23/08/2026, demande explicite — "il faut des synthetic data
+  // sur toute la partie administration également") : IP réelles anonymisées + 3 alertes
+  // fictives en plus (variété des 3 signaux de déception), jamais mêlées hors mode
+  // Présentation. `ack_by` recalculé localement pour porter le nom de l'admin courant,
+  // comme le ferait un vrai acquittement.
+  const displayEvents = isAnonymous
+    ? [
+        ...events.map(anonymizeSecurityEvent),
+        ...SYNTHETIC_SECURITY_EVENTS.map(e => syntheticAcked[e.id]
+          ? { ...e, acknowledged: true, ack_by: me?.full_name || 'Administration' }
+          : e),
+      ]
+    : events
+  const unackEvents = displayEvents.filter(e => !e.acknowledged)
 
   return (
     <>
@@ -483,9 +534,9 @@ function DatabaseTab() {
 
       {/* Journal complet */}
       <p className="text-xs mb-2" style={{ color: 'var(--text-muted)' }}>
-        Journal complet — {events.length} événement{events.length !== 1 ? 's' : ''}
+        Journal complet — {displayEvents.length} événement{displayEvents.length !== 1 ? 's' : ''}
       </p>
-      {events.length === 0 ? (
+      {displayEvents.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun accès aux objets leurres — rien à signaler.</p>
       ) : (
         <div className="overflow-x-auto">
@@ -498,7 +549,7 @@ function DatabaseTab() {
               </tr>
             </thead>
             <tbody>
-              {events.map(e => {
+              {displayEvents.map(e => {
                 const src = EVENT_SOURCE[e.source] || { label: e.source, color: 'var(--text-muted)' }
                 return (
                   <tr key={e.id} style={{
@@ -526,7 +577,9 @@ function DatabaseTab() {
                         : <span className="text-xs font-semibold" style={{ color: '#f85149' }}>À investiguer</span>}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap">
-                      <DeclareIncidentButton sourceType="security_event" sourceId={e.id} />
+                      {/* Pas de bouton sur une alerte de démonstration — `prefill_incident`
+                          chercherait un SecurityEvent réel par id, la démo n'en a pas. */}
+                      {!isSyntheticId(e.id) && <DeclareIncidentButton sourceType="security_event" sourceId={e.id} />}
                     </td>
                   </tr>
                 )
@@ -545,15 +598,15 @@ function DatabaseTab() {
 
 // ─── Onglet Utilisateurs ────────────────────────────────────────────────────────
 // Anonymise un compte/une demande réels pour l'affichage (21/08/2026, retour utilisateur —
-// "il manque beaucoup de fake data un peu partout") : `full_name`/`email` d'un vrai compte
+// "il manque beaucoup de synthetic data un peu partout") : `full_name`/`email` d'un vrai compte
 // employé restaient en clair, seul ConnectionsTab était couvert sur cette page. Réutilise
 // anonymizeRoleHolder (déjà utilisé pour Services/Rôles) — même pool de noms fictifs, cohérent
 // dans toute l'app. Jamais utilisé pour construire un payload de mutation (modifier/supprimer
 // continuent de lire l'objet réel, cf. displayUsers usage plus bas).
 function anonymizeAccountLike(u) {
   if (!u) return u
-  const fake = anonymizeRoleHolder({ id: u.id, name: u.full_name, email: u.email })
-  return { ...u, full_name: fake.name, email: fake.email }
+  const synthetic = anonymizeRoleHolder({ id: u.id, name: u.full_name, email: u.email })
+  return { ...u, full_name: synthetic.name, email: synthetic.email }
 }
 
 // Registre « Rôles » (organigramme) — même anonymizeRoleHolder que CrisisRoadmap.jsx/
@@ -630,7 +683,8 @@ function UsersTab({ isAnonymous }) {
 
   if (!list) return <Loader />
 
-  const displayList = isAnonymous ? list.map(anonymizeAccountLike) : list
+  // Padding de démo (23/08/2026, demande explicite) en plus de l'anonymisation du compte réel.
+  const displayList = isAnonymous ? [...list.map(anonymizeAccountLike), ...SYNTHETIC_USERS] : list
   const displayResetRequests = isAnonymous ? (resetRequests || []).map(anonymizeAccountLike) : resetRequests
 
   return (
@@ -708,7 +762,20 @@ function UsersTab({ isAnonymous }) {
                   )}
                 </div>
                 <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{u.email}</p>
+                {/* Détail des modules réellement accordés (23/08/2026, demande explicite) — le
+                    badge ci-dessus ne donnait qu'un compte, il fallait ouvrir "Modifier" pour
+                    savoir lesquels. Visible directement dans la liste. */}
+                {u.role === 'analyst' && Array.isArray(u.allowed_pages) && (
+                  <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-faint)' }}>
+                    {u.allowed_pages.length > 0
+                      ? u.allowed_pages.map(p => PAGE_LABELS[p] || p).join(' · ')
+                      : 'Aucun module accessible (hors Paramètres)'}
+                  </p>
+                )}
               </div>
+              {/* Pas d'actions sur un compte de démonstration — Déconnecter/Modifier/Supprimer
+                  appelleraient l'API réelle avec un id qui n'existe pas en base. */}
+              {!isSyntheticId(u.id) && (
               <div className="flex gap-1.5 flex-shrink-0">
                 <button onClick={() => handleRevoke(u.id)}
                   className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
@@ -724,6 +791,7 @@ function UsersTab({ isAnonymous }) {
                   style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' }}
                 >Supprimer</button>
               </div>
+              )}
             </div>
             )
           })}
@@ -793,16 +861,21 @@ function AnalystsTab({ isAnonymous }) {
         </div>
       )}
 
-      {analysts.length === 0 ? (
+      {/* Padding de démo (23/08/2026, demande explicite) quand le registre réel est vide —
+          jamais mêlé hors mode Présentation. */}
+      {(isAnonymous ? [...analysts, ...SYNTHETIC_ANALYSTS] : analysts).length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun analyste — ajoutez-en un ci-dessus.</p>
       ) : (
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
           {/* Noms réels masqués à l'affichage (21/08/2026, retour utilisateur) via
               anonymizeValidator — édition toujours sur l'objet réel `a` (jamais le nom masqué),
               sinon "Enregistrer" sans changement écraserait le vrai nom par le nom fictif. */}
-          {analysts.map(a => (
+          {(isAnonymous ? [...analysts, ...SYNTHETIC_ANALYSTS] : analysts).map(a => (
             <div key={a.id} className="py-3 flex items-center justify-between gap-3">
-              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{isAnonymous ? anonymizeValidator(a.name) : a.name}</p>
+              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>{isAnonymous && !isSyntheticId(a.id) ? anonymizeValidator(a.name) : a.name}</p>
+              {/* Pas d'actions sur un analyste de démonstration — Modifier/Supprimer
+                  appelleraient l'API réelle avec un id qui n'existe pas en base. */}
+              {!isSyntheticId(a.id) && (
               <div className="flex gap-1.5 flex-shrink-0">
                 <button onClick={() => setFormModal(a)}
                   className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
@@ -813,6 +886,7 @@ function AnalystsTab({ isAnonymous }) {
                   style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' }}
                 >Supprimer</button>
               </div>
+              )}
             </div>
           ))}
         </div>
@@ -874,7 +948,11 @@ function ServicesTab({ isAnonymous }) {
 
   if (svcs === null) return <Loader />
 
-  const displayRoles = isAnonymous ? roles.map(anonymizeRole) : roles
+  // Padding de démo (23/08/2026, demande explicite) : SYNTHETIC_ORGANIZATION_ROLES n'a pas de
+  // `service_id` réel (id générés à l'installation, jamais devinables), donc le rattachement
+  // ci-dessous matche aussi par NOM de service pour ces entrées-là uniquement — assez pour
+  // retomber sur les vrais services RH/DSI/Juridique/Direction sans connaître leurs UUID.
+  const displayRoles = isAnonymous ? [...roles.map(anonymizeRole), ...SYNTHETIC_ORGANIZATION_ROLES] : roles
 
   return (
     <>
@@ -901,7 +979,7 @@ function ServicesTab({ isAnonymous }) {
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {svcs.map(s => {
-            const attached = displayRoles.filter(r => r.service_id === s.id)
+            const attached = displayRoles.filter(r => r.service_id === s.id || (isSyntheticId(r.id) && r.service_name === s.name))
             return (
               <div key={s.id} className="rounded-2xl p-4" style={{ background: 'var(--bg-secondary)', border: `1px solid ${s.color}59` }}>
                 <div className="flex items-center gap-3 mb-3">
@@ -995,7 +1073,8 @@ function OrganizationRolesTab({ isAnonymous }) {
 
   // Édition/suppression restent sur l'objet réel (`setFormModal(r)`/`setDeleteTarget(r)` plus
   // bas utilisent `r` de `roles`, jamais `displayRoles`) — seul l'affichage est masqué.
-  const displayRoles = isAnonymous ? roles.map(anonymizeRole) : roles
+  // Padding de démo (23/08/2026, demande explicite) en plus de l'anonymisation des rôles réels.
+  const displayRoles = isAnonymous ? [...roles.map(anonymizeRole), ...SYNTHETIC_ORGANIZATION_ROLES] : roles
 
   return (
     <>
@@ -1016,7 +1095,7 @@ function OrganizationRolesTab({ isAnonymous }) {
         </div>
       )}
 
-      {roles.length === 0 ? (
+      {displayRoles.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucun rôle — ajoutez-en un ci-dessus.</p>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1051,6 +1130,9 @@ function OrganizationRolesTab({ isAnonymous }) {
                     ↳ rapporte à {r.reports_to_position} — {r.reports_to_name}
                   </p>
                 )}
+                {/* Pas d'actions sur un rôle de démonstration — Modifier/Supprimer
+                    appelleraient l'API réelle avec un id qui n'existe pas en base. */}
+                {!isSyntheticId(r.id) && (
                 <div className="flex gap-1.5 mt-3">
                   <button onClick={() => setFormModal(realRole)}
                     className="text-xs px-2.5 py-1 rounded-lg transition-colors font-medium flex-1"
@@ -1061,6 +1143,7 @@ function OrganizationRolesTab({ isAnonymous }) {
                     style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' }}
                   >Supprimer</button>
                 </div>
+                )}
               </div>
             )
           })}
@@ -1092,7 +1175,7 @@ function OrganizationRolesTab({ isAnonymous }) {
 // services/cpe_matcher.py côté Windows : un nom d'application Windows (texte libre
 // de registre) n'a pas de convention exploitable comme les paquets Debian/RPM, d'où
 // une correspondance déclarée ici plutôt qu'un heuristique deviné.
-function WindowsAppMappingsTab() {
+function WindowsAppMappingsTab({ isAnonymous }) {
   const { list, error, setError, load } = useLoadList(
     fetchWindowsAppMappings, 'Impossible de charger les correspondances — le serveur a peut-être renvoyé une erreur.'
   )
@@ -1101,12 +1184,34 @@ function WindowsAppMappingsTab() {
 
   if (list === null) return <Loader />
 
+  // Rien à anonymiser ici (noms de logiciels publics, pas de donnée personnelle/infra) —
+  // uniquement du padding pour ne pas présenter une page vide en démo (23/08/2026, demande
+  // explicite), table réellement vide sur une instance neuve tant qu'aucune correspondance
+  // n'a été ajoutée à la main.
+  const displayList = isAnonymous ? [...list, ...SYNTHETIC_WINDOWS_APP_MAPPINGS] : list
+
   return (
     <>
       <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>
         Correspondances entre un nom d'application Windows et un produit CPE — alimente le badge
-        vulnérabilité sur les applications installées côté Windows. À ajouter au fil des applications
-        réellement rencontrées sur le parc.
+        vulnérabilité sur les applications installées côté Windows. Un nom Windows brut ("PuTTY
+        release 0.81 (64-bit)") ne suit aucune convention exploitable comme un paquet Debian/RPM ;
+        sans correspondance déclarée ici, une application pourtant vulnérable et bien installée
+        n'apparaît dans aucune vulnérabilité détectée sur l'actif concerné.
+      </p>
+      <p className="text-sm mb-3" style={{ color: 'var(--text-muted)' }}>
+        <strong style={{ color: 'var(--text-secondary)' }}>À ajouter quand :</strong> un actif Windows
+        a une application connue pour être régulièrement vulnérable (PuTTY, 7-Zip, VLC…) installée,
+        mais aucune vulnérabilité correspondante ne remonte pour cet actif — signe que son nom Windows
+        ne correspond à aucun produit CPE connu. Le "produit"/"vendeur" CPE à saisir se cherchent dans
+        le{' '}
+        <a href="https://nvd.nist.gov/products/cpe/search" target="_blank" rel="noopener noreferrer"
+          className="hover:underline" style={{ color: MODULE_COLOR }}>
+          dictionnaire CPE officiel du NVD
+        </a>{' '}
+        (rechercher le nom de l'application, reprendre le "vendor"/"product" de l'URI CPE trouvée —
+        ex. PuTTY : <code>cpe:2.3:a:simon_tatham:putty</code> → produit <code>putty</code>, vendeur{' '}
+        <code>simon_tatham</code>, comme dans les exemples pré-remplis du formulaire ci-dessous).
       </p>
       <div className="flex justify-end mb-3">
         <button onClick={() => setFormModal('new')}
@@ -1121,11 +1226,11 @@ function WindowsAppMappingsTab() {
         </div>
       )}
 
-      {list.length === 0 ? (
+      {displayList.length === 0 ? (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Aucune correspondance — ajoutez-en une ci-dessus.</p>
       ) : (
         <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
-          {list.map(m => (
+          {displayList.map(m => (
             <div key={m.id} className="py-3 flex items-center justify-between gap-3">
               <div>
                 <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>
@@ -1135,16 +1240,20 @@ function WindowsAppMappingsTab() {
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>Vendeur : {m.cpe_vendor}</p>
                 )}
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                <button onClick={() => setFormModal(m)}
-                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
-                  style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
-                >Modifier</button>
-                <button onClick={() => setDeleteTarget(m)}
-                  className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
-                  style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' }}
-                >Supprimer</button>
-              </div>
+              {/* Pas d'actions sur une correspondance de démonstration — Modifier/Supprimer
+                  appelleraient l'API réelle avec un id qui n'existe pas en base. */}
+              {!isSyntheticId(m.id) && (
+                <div className="flex gap-1.5 flex-shrink-0">
+                  <button onClick={() => setFormModal(m)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                    style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                  >Modifier</button>
+                  <button onClick={() => setDeleteTarget(m)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg transition-colors font-medium"
+                    style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.25)' }}
+                  >Supprimer</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -1198,10 +1307,6 @@ export default function AdministrationSecurity() {
 
   return (
     <div className="p-6 space-y-5">
-      <button onClick={() => navigate('/settings')}
-        className="text-xs -mb-1 inline-flex items-center gap-1 hover:underline" style={{ color: 'var(--text-muted)' }}>
-        ← Retour aux paramètres
-      </button>
       <PageHero
         icon="M17.982 18.725A7.488 7.488 0 0012 15.75a7.488 7.488 0 00-5.982 2.975m11.964 0a9 9 0 10-11.964 0m11.964 0A8.966 8.966 0 0112 21a8.966 8.966 0 01-5.982-2.275M15 9.75a3 3 0 11-6 0 3 3 0 016 0z"
         title="Administration" color={MODULE_COLOR}
@@ -1209,18 +1314,34 @@ export default function AdministrationSecurity() {
       />
 
       <div className="flex flex-col lg:flex-row gap-5 items-start">
-        <nav className={`w-full ${navCollapsed ? 'lg:w-16' : 'lg:w-64'} flex-shrink-0 flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1 transition-[width] duration-200`}>
-          <button onClick={() => setNavCollapsed(c => !c)} title={navCollapsed ? 'Déplier le menu' : 'Réduire le menu'}
-            className="hidden lg:flex items-center gap-2 px-3 py-2 rounded-lg mb-1 flex-shrink-0 transition-colors"
-            style={{ color: 'var(--text-muted)' }}
-            onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <svg className="w-4 h-4 flex-shrink-0 transition-transform duration-200" style={{ transform: navCollapsed ? 'rotate(180deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 19.5L8.25 12l7.5-7.5" />
-            </svg>
-            {!navCollapsed && <span className="text-xs font-medium">Réduire</span>}
-          </button>
+        <div className={`w-full ${navCollapsed ? 'lg:w-16' : 'lg:w-64'} flex-shrink-0 transition-[width] duration-200`}>
+          {/* Retour + réduction du menu sur la même ligne (23/08/2026, retour utilisateur —
+              le lien de retour flottait seul au-dessus du bandeau coloré, sans lien visuel
+              avec le contrôle « Réduire » plus bas). Hors du <nav> ci-dessous : sur mobile la
+              nav bascule en bande horizontale défilante (`flex`, pas `flex-col`) — ce
+              bandeau reste toujours pleine largeur, jamais entraîné dans le défilement. */}
+          <div className="flex items-center gap-1 mb-1.5">
+            <button onClick={() => navigate('/settings')} title="Retour aux paramètres"
+              className="flex-1 min-w-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs transition-colors"
+              style={{ color: 'var(--text-muted)', justifyContent: navCollapsed ? 'center' : 'flex-start' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span className="flex-shrink-0">←</span>
+              {!navCollapsed && <span className="truncate">Retour aux paramètres</span>}
+            </button>
+            <button onClick={() => setNavCollapsed(c => !c)} title={navCollapsed ? 'Déplier le menu' : 'Réduire le menu'}
+              className="hidden lg:flex items-center justify-center w-8 h-8 rounded-lg flex-shrink-0 transition-colors"
+              style={{ color: 'var(--text-muted)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-secondary)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <svg className="w-4 h-4 flex-shrink-0 transition-transform duration-200" style={{ transform: navCollapsed ? 'rotate(180deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.75 19.5L8.25 12l7.5-7.5" />
+              </svg>
+            </button>
+          </div>
+          <nav className="w-full flex lg:flex-col gap-1.5 overflow-x-auto lg:overflow-visible pb-1">
           {TABS.map(t => {
             const active = tab === t.key
             return (
@@ -1256,7 +1377,8 @@ export default function AdministrationSecurity() {
               </button>
             )
           })}
-        </nav>
+          </nav>
+        </div>
 
         <div style={CARD} className="flex-1 min-w-0 p-6">
           {tab === 'connections' ? (
@@ -1270,9 +1392,9 @@ export default function AdministrationSecurity() {
           ) : tab === 'roles' ? (
             <OrganizationRolesTab isAnonymous={isAnonymous} />
           ) : tab === 'windows-mappings' ? (
-            <WindowsAppMappingsTab />
+            <WindowsAppMappingsTab isAnonymous={isAnonymous} />
           ) : (
-            <DatabaseTab />
+            <DatabaseTab isAnonymous={isAnonymous} />
           )}
         </div>
       </div>

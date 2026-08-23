@@ -17,7 +17,7 @@ import { AUDIT_TYPES, AUDIT_METHODOLOGIES, AUDIT_STATUSES } from '../components/
 import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
-import { isFakeId, FAKE_AUDITS, FAKE_AUDIT_FINDINGS, anonymizeAudit, anonymizeAuditFinding, anonymizeAsset } from '../utils/fakeData.js'
+import { isSyntheticId, SYNTHETIC_AUDITS, SYNTHETIC_AUDIT_FINDINGS, anonymizeAudit, anonymizeAuditFinding, anonymizeAsset } from '../utils/syntheticData.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 
 const MODULE_COLOR = MODULES.securite.color
@@ -177,15 +177,15 @@ export default function AuditDetail() {
   // après confirmation.
   const { user } = useAuth()
   const { isAnonymous } = usePresentation()
-  const isFake = isFakeId(id)
+  const isSynthetic = isSyntheticId(id)
   // Un audit RÉEL reste entièrement fonctionnel en mode Présentation (édition, findings,
   // mandat...) — seul l'AFFICHAGE est masqué (21/08/2026, retour utilisateur : cette page ne
-  // gérait jusqu'ici que les audits de démonstration via isFakeId, un audit réel s'ouvrait en
+  // gérait jusqu'ici que les audits de démonstration via isSyntheticId, un audit réel s'ouvrait en
   // clair). Les handlers de mutation (saveEdit, handleCreateFinding...) continuent de lire/écrire
   // sur `audit`/`findings` (les vraies données) — ne jamais leur passer les versions `display*`
   // ci-dessous sous peine d'écraser un vrai enregistrement avec du texte anonymisé/fictif.
-  const maskReal = isAnonymous && !isFake
-  const canDelete = user?.role === 'admin' && !isFake
+  const maskReal = isAnonymous && !isSynthetic
+  const canDelete = user?.role === 'admin' && !isSynthetic
   const cached = auditDetailCache[id]
   const [audit, setAudit] = useState(() => cached?.audit ?? null)
   const [findings, setFindings] = useState(() => cached?.findings ?? [])
@@ -209,10 +209,10 @@ export default function AuditDetail() {
 
   const load = useCallback(() => {
     // Audit de démonstration (mode Présentation) : n'existe pas en base, résolu côté client.
-    if (isFake) {
-      const a = FAKE_AUDITS.find(x => x.id === id)
+    if (isSynthetic) {
+      const a = SYNTHETIC_AUDITS.find(x => x.id === id)
       if (!a) { setError('Audit introuvable.'); setLoading(false); return }
-      const findingsData = FAKE_AUDIT_FINDINGS[id] || []
+      const findingsData = SYNTHETIC_AUDIT_FINDINGS[id] || []
       setAudit(a); setFindings(findingsData); setAttachments([])
       setSummary(a.executive_summary || '')
       setLoading(false)
@@ -318,7 +318,7 @@ export default function AuditDetail() {
     // en clair) : rapport reconstruit côté client depuis les données déjà masquées à l'affichage
     // (mêmes ingrédients que services/audit_report.py — titre, périmètre, synthèse, findings —
     // pas d'appel API).
-    if (isFake || maskReal) {
+    if (isSynthetic || maskReal) {
       const lines = [
         `# ${displayAudit.title}`, '',
         `**Type** : ${AUDIT_TYPES.find(t => t.value === displayAudit.type)?.label || displayAudit.type} — **Référentiel** : ${displayAudit.referential || 'non précisé'}`, '',
@@ -347,7 +347,7 @@ export default function AuditDetail() {
 
   const isAuthorized = !!audit.authorized_by
   // `display*` : copies purement pour l'affichage (texte libre/noms redigés via redactText/
-  // anonymizeValidator, cf. utils/fakeData.js) — mêmes ids/statuts/dates que les vraies données,
+  // anonymizeValidator, cf. utils/syntheticData.js) — mêmes ids/statuts/dates que les vraies données,
   // jamais utilisées pour construire un payload de mutation (cf. note plus haut).
   const displayAudit = maskReal ? anonymizeAudit(audit, assetList) : audit
   const displayFindings = maskReal ? findings.map(f => anonymizeAuditFinding(f, assetList)) : findings
@@ -370,17 +370,17 @@ export default function AuditDetail() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {isAuthorized && !isFake && (
+          {isAuthorized && !isSynthetic && (
             <select value={audit.status} onChange={e => changeStatus(e.target.value)}
               className="text-xs px-2.5 py-1.5 rounded-lg outline-none" style={field}>
               {AUDIT_STATUSES.filter(s => s.value !== 'cadrage' && s.value !== 'autorise').map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
               {audit.status === 'autorise' && <option value="autorise">Autorisé</option>}
             </select>
           )}
-          {isAuthorized && isFake && (
+          {isAuthorized && isSynthetic && (
             <span className="text-xs px-2.5 py-1 rounded-lg font-medium" style={field}>{AUDIT_STATUSES.find(s => s.value === audit.status)?.label || audit.status}</span>
           )}
-          {!isFake && (
+          {!isSynthetic && (
             <button onClick={startEdit} className="text-xs px-3 py-1.5 rounded-lg font-medium" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
           )}
           {canDelete && (
@@ -460,7 +460,7 @@ export default function AuditDetail() {
               Autorisé par <strong style={{ color: 'var(--text-secondary)' }}>{displayAudit.authorized_by}</strong> le {new Date(audit.authorized_at).toLocaleDateString('fr-FR')} — champs verrouillés.
             </p>
           </div>
-          {!isFake && <MandateCard auditId={id} attachments={displayAttachments} onUploaded={a => setAttachments(x => [...x, a])} />}
+          {!isSynthetic && <MandateCard auditId={id} attachments={displayAttachments} onUploaded={a => setAttachments(x => [...x, a])} />}
         </div>
       )}
 
@@ -471,11 +471,11 @@ export default function AuditDetail() {
           {audit.asset_ids.map((aid, i) => (
             <span key={aid} className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
               {displayAudit.asset_names[i]}
-              {!isFake && <button onClick={() => handleRemoveAsset(aid)} style={{ color: 'var(--text-muted)' }}>×</button>}
+              {!isSynthetic && <button onClick={() => handleRemoveAsset(aid)} style={{ color: 'var(--text-muted)' }}>×</button>}
             </span>
           ))}
         </div>
-        {!isFake && (
+        {!isSynthetic && (
           <div className="flex items-center gap-2 mt-3">
             <select value={addAssetId} onChange={e => setAddAssetId(e.target.value)} className="text-xs rounded-lg px-2.5 py-1.5 outline-none" style={field}>
               <option value="">Ajouter un actif…</option>
@@ -489,7 +489,7 @@ export default function AuditDetail() {
       <div style={CARD} className="overflow-hidden">
         <div className="px-6 py-4 flex items-center justify-between flex-wrap gap-2" style={{ borderBottom: '1px solid var(--border)' }}>
           <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Findings ({displayFindings.length})</h2>
-          {!isFake && (
+          {!isSynthetic && (
             <button onClick={() => setFindingModal(null)} disabled={!isAuthorized}
               title={!isAuthorized ? "Autoriser l'audit avant de saisir un finding" : undefined}
               className="text-xs px-3 py-1.5 rounded-lg font-medium disabled:opacity-40"
@@ -522,7 +522,7 @@ export default function AuditDetail() {
                   return (
                   <tr key={f.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td className="px-4 py-3"><SeverityBadge value={f.severity} /></td>
-                    <td className={`px-4 py-3 font-medium ${isFake ? '' : 'cursor-pointer'}`} style={{ color: 'var(--text-primary)' }} onClick={() => !isFake && setFindingModal(realFinding)}>{f.title}</td>
+                    <td className={`px-4 py-3 font-medium ${isSynthetic ? '' : 'cursor-pointer'}`} style={{ color: 'var(--text-primary)' }} onClick={() => !isSynthetic && setFindingModal(realFinding)}>{f.title}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{f.affected_asset_name || '—'}</td>
                     <td className="px-4 py-3 text-xs">
                       {f.cve_id ? <Link to={`/vulnerabilities?cve=${f.cve_id}`} style={{ color: MODULE_COLOR }}>{f.cve_id}</Link> : <span style={{ color: 'var(--text-muted)' }}>—</span>}
@@ -533,7 +533,7 @@ export default function AuditDetail() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5 flex-wrap">
-                        {!isFake && (
+                        {!isSynthetic && (
                           <>
                             <button onClick={() => setFindingModal(realFinding)} className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>Modifier</button>
                             <DeclareIncidentButton sourceType="audit_finding" sourceId={f.id} label="Déclarer un incident" />
@@ -556,7 +556,7 @@ export default function AuditDetail() {
       <div style={CARD} className="p-6">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold" style={{ color: 'var(--text-primary)' }}>Synthèse exécutive</h2>
-          {!summaryEdit && !isFake && <button onClick={() => setSummaryEdit(true)} className="text-xs" style={{ color: MODULE_COLOR }}>Modifier</button>}
+          {!summaryEdit && !isSynthetic && <button onClick={() => setSummaryEdit(true)} className="text-xs" style={{ color: MODULE_COLOR }}>Modifier</button>}
         </div>
         {summaryEdit ? (
           <div className="mt-3 space-y-2">

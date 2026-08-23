@@ -294,7 +294,7 @@ cybervuln/
     │                              des comptes utilisateurs — cf. routers/agents.py)
     ├── models.py                ✅ — CVE, Asset, Vulnerability, VulnerabilityStatusHistory, Feed, WatchItem, WatchSource, SyncState, WatchedIdentity, ConnectionLog, KbBuild, Report, WatchProfileItem, SecurityEvent, Incident, IncidentTimelineEntry, IncidentNotificationContact, IncidentAttachment, Crisis, CrisisTimelineEntry, CrisisContact, Analyst, OrganizationRole, Service, DocumentType, Document, WindowsAppMapping, User, UserSession, AuthAuditLog, Audit, AuditAsset, AuditFinding, AuditFindingHistory, AuditAttachment, NetworkStatus, PatchCheckAssetCompletion, Agent, AgentEnrollmentToken, ScanPolicy, ReleaseNote
     ├── db/
-    │   ├── deception_setup.sql  ✅ — honeypots DB (vues + rôles leurres, honeytokens) → security_events.
+    │   ├── legacy_views.sql  ✅ — honeypots DB (vues + rôles leurres, honeytokens) → security_events.
     │   │                          Idempotent. NE JAMAIS référencer ces objets dans le code (cf.
     │   │                          docs/ARCHITECTURE.md § Déception)
     │   ├── app_role.sql         ✅ — rôle applicatif `cbr_app` à privilèges réduits (DML only, non

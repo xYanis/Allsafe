@@ -964,3 +964,13 @@ ALTER TABLE agents ADD COLUMN IF NOT EXISTS last_pong_ms      INTEGER;
 -- Ping dans la frise de l'historique des contacts (21/08/2026).
 ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS is_ping  BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE agent_checkin_logs ADD COLUMN IF NOT EXISTS pong_ms  INTEGER;
+
+-- Image par item de veille (23/08/2026, cf. models.py::WatchItem, services/watch_fetcher.py
+-- ::_extract_image) — uniquement si le flux source en fournit une (media:thumbnail/
+-- enclosure RSS, LogoPath HIBP), jamais de requête HTTP dédiée. `NULL` = repli sur une
+-- icône par source côté frontend (Veille technologique + Fuite de données, même modèle).
+ALTER TABLE watch_items ADD COLUMN IF NOT EXISTS image_url VARCHAR;
+
+-- Confirmé/revendiqué (23/08/2026, cf. models.py::WatchItem.is_verified) — seul HIBP peuple ce
+-- champ (`IsVerified` de son API), NULL partout ailleurs (notion non applicable, pas "inconnu").
+ALTER TABLE watch_items ADD COLUMN IF NOT EXISTS is_verified BOOLEAN;

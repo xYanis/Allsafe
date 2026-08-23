@@ -10,7 +10,7 @@ import { useAnalystPreference } from '../contexts/AnalystPreferenceContext.jsx'
 // true par défaut) : "Corrigé" reste une action rapide sur du non-CRITICAL,
 // l'annotation n'y est qu'un complément optionnel (cf. CLAUDE.md).
 export default function AnnotationModal({ title, detail, color, subtitle, helpText, placeholder, confirmLabel, onConfirm, onClose, noteRequired = true, initialNote = '', initialValidator = '', showReviewDate = false, initialReviewDate = '' }) {
-  // `names` bascule déjà sur FAKE_VALIDATORS en mode Présentation, centralisé dans
+  // `names` bascule déjà sur SYNTHETIC_VALIDATORS en mode Présentation, centralisé dans
   // AnalystContext.jsx (31/07/2026) — plus besoin de le refaire ici.
   const { names } = useAnalysts()
   // Nom d'analyste par défaut (14/08/2026, demande utilisateur) — ne s'applique que

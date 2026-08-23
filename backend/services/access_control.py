@@ -20,6 +20,7 @@ MODULE_PAGES = {
     "securite":      ["/audits", "/bastion"],
     "documentation": ["/documentation", "/notes"],
     "rapports":      ["/reports", "/rapport-veille", "/rapport-surveillance", "/rapport-incidents"],
+    "notesDeVersion": ["/notes-de-version"],
 }
 
 PAGE_KEYS = {p for pages in MODULE_PAGES.values() for p in pages}

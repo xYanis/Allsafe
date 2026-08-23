@@ -215,7 +215,7 @@ logique que les 3 FK optionnelles § 3). Un incident appartient à zéro ou une 
   RSSI → Michel Lacroix), géré indépendamment du module Incidents/Crise mais consommé par les
   deux. Distinct des contacts ad-hoc (`CrisisContact`/`IncidentNotificationContact`, texte libre
   non garanti nominatif) : ce registre contient des noms réels, donc **anonymisé en mode
-  Présentation** (`utils/fakeData.js::anonymizeRoleHolder`) — le poste reste affiché tel quel
+  Présentation** (`utils/syntheticData.js::anonymizeRoleHolder`) — le poste reste affiché tel quel
   (non sensible), seuls le nom et l'email basculent en fictif. Chaque poste peut être rattaché à
   un **Service** (`Service`, Administration > onglet Services — RH/DSI/Juridique/Direction en
   seed, liste ouverte avec code couleur) : la grille de cartes se colore alors par service

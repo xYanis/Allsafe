@@ -6,6 +6,8 @@ import { renderMd, exportPdf } from '../components/ReportMarkdown.jsx'
 import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { SYNTHETIC_INCIDENTS, isSyntheticId, buildSyntheticIncidentReport } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 const HERO_COLOR = MODULES.rapports.color
@@ -41,6 +43,7 @@ export default function RapportIncidents() {
   const [openId, setOpenId] = useState(null)
   const [openSummary, setOpenSummary] = useState('')
   const [reportLoading, setReportLoading] = useState(false)
+  const { isAnonymous } = usePresentation()
 
   useEffect(() => {
     setLoading(true)
@@ -49,6 +52,8 @@ export default function RapportIncidents() {
       .catch(() => setError('Erreur lors du chargement des incidents.'))
       .finally(() => setLoading(false))
   }, [])
+
+  const displayItems = isAnonymous ? [...items, ...SYNTHETIC_INCIDENTS] : items
 
   function handleExportCsv() {
     setExportLoading(true)
@@ -68,6 +73,13 @@ export default function RapportIncidents() {
 
   function handleOpenReport(id) {
     if (openId === id) { setOpenId(null); return }
+    // Incident de démonstration : rapport reconstruit côté client, pas d'appel API.
+    if (isSyntheticId(id)) {
+      const inc = SYNTHETIC_INCIDENTS.find(i => i.id === id)
+      setOpenId(id)
+      setOpenSummary(inc ? buildSyntheticIncidentReport(inc) : '')
+      return
+    }
     setReportLoading(true)
     setError('')
     getIncidentReport(id)
@@ -76,7 +88,7 @@ export default function RapportIncidents() {
       .finally(() => setReportLoading(false))
   }
 
-  const openIncident = items.find(i => i.id === openId)
+  const openIncident = displayItems.find(i => i.id === openId)
 
   return (
     <div className="p-6 space-y-6">
@@ -117,7 +129,7 @@ export default function RapportIncidents() {
 
         {loading ? (
           <p className="px-6 py-8 text-sm text-center" style={{ color: 'var(--text-muted)' }}>Chargement…</p>
-        ) : items.length === 0 ? (
+        ) : displayItems.length === 0 ? (
           <p className="px-6 py-8 text-sm text-center" style={{ color: 'var(--text-muted)' }}>Aucun incident déclaré pour l'instant.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -130,7 +142,7 @@ export default function RapportIncidents() {
                 </tr>
               </thead>
               <tbody>
-                {items.map(inc => {
+                {displayItems.map(inc => {
                   const isOpen = openId === inc.id
                   return (
                     <tr key={inc.id} className="transition-colors"

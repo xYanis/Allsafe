@@ -6,7 +6,7 @@ import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
-import { redactText } from '../utils/fakeData.js'
+import { redactText } from '../utils/syntheticData.js'
 
 const CARD = tintedCard(MODULES.rapports.color)
 

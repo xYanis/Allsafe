@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { assets as fetchAssets, scanAsset, getAssetPackages, exportInventoryPdf } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
+import { SYNTHETIC_ASSETS, anonymizeAsset, isSyntheticId } from '../utils/syntheticData.js'
 import { merakiModelLabel, assetCategory } from '../utils/assetCategory.js'
 import SeverityBadge from '../components/SeverityBadge.jsx'
 import NetworkStatusBadge, { NETWORK_STATUS_LABELS } from '../components/NetworkStatusBadge.jsx'
@@ -181,7 +181,7 @@ export default function Inventaire() {
   const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (inventairePageCache == null) return []
-    return isAnonymous ? [...inventairePageCache.map(anonymizeAsset), ...FAKE_ASSETS] : inventairePageCache
+    return isAnonymous ? [...inventairePageCache.map(anonymizeAsset), ...SYNTHETIC_ASSETS] : inventairePageCache
   })
   const [loading, setLoading] = useState(() => inventairePageCache == null)
   const [scanLoading, setScanLoading] = useState({})
@@ -203,7 +203,7 @@ export default function Inventaire() {
     fetchAssets().then(a => {
       const list = a.data || []
       inventairePageCache = list   // alimente le cache module pour le prochain remontage
-      setAssetList(isAnonymous ? [...list.map(anonymizeAsset), ...FAKE_ASSETS] : list)
+      setAssetList(isAnonymous ? [...list.map(anonymizeAsset), ...SYNTHETIC_ASSETS] : list)
     }).finally(() => setLoading(false))
   }, [isAnonymous])
 
@@ -222,7 +222,7 @@ export default function Inventaire() {
   })
 
   async function handleScan(asset) {
-    if (isFakeId(asset.id)) {
+    if (isSyntheticId(asset.id)) {
       setViewModal({ asset, data: { packages: asset.installed_packages, hardware: asset.hardware, last_scan: asset.last_scan } })
       return
     }
@@ -269,7 +269,7 @@ export default function Inventaire() {
   }
 
   async function handleView(asset) {
-    if (isFakeId(asset.id)) {
+    if (isSyntheticId(asset.id)) {
       setViewModal({ asset, data: { packages: asset.installed_packages, hardware: asset.hardware, last_scan: asset.last_scan } })
       return
     }
@@ -287,7 +287,7 @@ export default function Inventaire() {
   // scan unitaire, juste répétée avec une concurrence limitée pour ne pas saturer le réseau/AD
   // d'un coup. Les échecs individuels (actif injoignable) ne bloquent pas les suivants.
   async function handleScanAll() {
-    const targets = assetList.filter(a => !isFakeId(a.id) && !scanLoading[a.id])
+    const targets = assetList.filter(a => !isSyntheticId(a.id) && !scanLoading[a.id])
     if (targets.length === 0 || bulkScan) return
     setBulkScan({ total: targets.length, done: 0, errors: 0 })
 
@@ -358,7 +358,7 @@ export default function Inventaire() {
       <PageHero
         icon="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
         title="Inventaire Complet"
-        color="#39c5cf"
+        color={MODULES.inventaire.color}
         subtitle="Specs matérielles et applications installées — lecture seule, jamais d'écriture sur les serveurs"
       >
         <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
@@ -539,7 +539,7 @@ export default function Inventaire() {
 
       {viewModal && (
         <PackagesModal asset={viewModal.asset} data={viewModal.data} onClose={() => setViewModal(null)}
-          onRescan={isFakeId(viewModal.asset.id) ? undefined : () => handleScan(viewModal.asset)}
+          onRescan={isSyntheticId(viewModal.asset.id) ? undefined : () => handleScan(viewModal.asset)}
           rescanning={!!scanLoading[viewModal.asset.id]}
         />
       )}

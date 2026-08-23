@@ -15,9 +15,16 @@ import PageHero from '../components/PageHero.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { FAKE_WATCH_ITEMS, isFakeId, anonymizeWatchItem, anonymizeAsset } from '../utils/fakeData.js'
+import { SYNTHETIC_WATCH_ITEMS, isSyntheticId, anonymizeWatchItem, anonymizeAsset } from '../utils/syntheticData.js'
+import WatchThumbnail from '../components/WatchThumbnail.jsx'
+import ViewToggle from '../components/ViewToggle.jsx'
+import SevBadge, { SEV_STYLES, SEV_LABELS } from '../components/SevBadge.jsx'
 
-const WATCH_ACCENT = '#58a6ff'
+// Bleu résolu par thème (23/08/2026, retour utilisateur — "le fond bleu" persistait tel quel
+// sur Neutre/Cyberpunk) : hex fixe auparavant, contournait le système déjà en place ailleurs
+// dans l'app (cf. commentaire de tête, constants/modules.js — Incidents.jsx/Documentation.jsx
+// etc. consomment déjà `MODULES.x.color`, seul le module CyberVeille y avait échappé).
+const WATCH_ACCENT = MODULES.cyberveille.color
 
 const CARD = tintedCard(WATCH_ACCENT)
 
@@ -59,13 +66,6 @@ const THEMES = [
   'Ransomware', 'Réglementation', 'Réseau', 'Software', 'Vulnérabilité',
 ]
 
-const SEV_STYLES = {
-  critical:      { background: 'rgba(248,81,73,0.12)',  color: '#f85149', border: '1px solid rgba(248,81,73,0.3)'  },
-  important:     { background: 'rgba(251,143,68,0.12)', color: '#fb8f44', border: '1px solid rgba(251,143,68,0.3)' },
-  informational: { background: 'rgba(88,166,255,0.12)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)' },
-}
-const SEV_LABELS = { critical: 'Critique', important: 'Important', informational: 'Informatif' }
-
 const STATUS_STYLES = {
   new:            { background: 'rgba(139,148,158,0.12)', color: '#8b949e', border: '1px solid rgba(139,148,158,0.3)' },
   in_review:      { background: 'rgba(88,166,255,0.12)',  color: '#58a6ff', border: '1px solid rgba(88,166,255,0.3)' },
@@ -91,15 +91,6 @@ const STATUS_FILTER_STYLES = {
 const STATUS_LABELS = { new: 'Nouveau', in_review: 'En cours', treated: 'Traité', not_applicable: 'Non concerné' }
 
 // ─── Sous-composants ──────────────────────────────────────────────────────────
-
-function SevBadge({ value }) {
-  const s = SEV_STYLES[value] || SEV_STYLES.informational
-  return (
-    <span style={{ ...s, borderRadius: 6, padding: '2px 8px', fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', display: 'inline-block' }}>
-      {SEV_LABELS[value] ?? value}
-    </span>
-  )
-}
 
 // `onClick` rend le badge cliquable dans le tableau — ouvrir le détail depuis
 // le statut est le geste naturel quand on cherche « pourquoi cet élément est
@@ -150,6 +141,100 @@ function Btn({ children, onClick, variant = 'primary', disabled, small }) {
     </button>
   )
 }
+
+// Vue Cartes (23/08/2026, demande explicite) — mêmes actions que la ligne de tableau
+// équivalente (Traiter/Consulter ouvre la même modale via `onOpen`, Déclarer un incident
+// identique), juste un gabarit plus visuel : vignette plus grande, résumé visible sans
+// avoir à ouvrir le détail. `background` reprend exactement `rowBg(item, false)` du
+// tableau (activeItemId/SLA dépassé/correspondance profil) pour rester cohérent entre
+// les deux vues sur le même signal.
+function WatchCard({ item, onOpen, onActivate, accent }) {
+  const sources = item.group_sources || [{ source: item.source, source_label: item.source_label }]
+  // Liseré fin (pas un aplat plein cadre) pour signaler "en cours"/"correspond au profil" —
+  // même idiome que les cartes de Fuite de données (`boxShadow: inset 3px 0 0 0 couleur`).
+  // `CARD` (tintedCard) garde son propre dégradé intact : un fond plat par-dessus rendait
+  // la carte "trop flashy" (retour utilisateur, 23/08/2026) en le remplaçant entièrement.
+  // `v !== 'none'` (pas juste `Boolean`) : le thème Neutre pose `CARD.boxShadow: 'none'`
+  // explicitement (cf. utils/cardStyle.js::tintedCard) — un simple filter(Boolean) le
+  // laissait passer et produisait "none, inset 3px 0 0 0 ..." (valeur box-shadow
+  // invalide, silencieusement rejetée par le navigateur : le liseré ne s'affichait
+  // jamais en thème Neutre, bug repéré au passage en vérifiant les 4 thèmes).
+  const style = accent
+    ? { ...CARD, boxShadow: [CARD.boxShadow, `inset 3px 0 0 0 ${accent}`].filter(v => v && v !== 'none').join(', ') }
+    : CARD
+  return (
+    <div style={style} className="lift-card flex flex-col p-4 gap-2.5 transition-colors">
+      <div className="flex items-start gap-3">
+        <WatchThumbnail item={item} size={56} rounded={10} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+            {sources.slice(0, 2).map((s, i) => (
+              <span key={s.source || i} className="text-xs font-medium px-2 py-0.5 rounded whitespace-nowrap"
+                style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+                {s.source_label || s.source}
+              </span>
+            ))}
+            <SevBadge value={item.severity} />
+            {item.sla_exceeded && <span className="font-bold text-xs" style={{ color: '#f85149' }} title="SLA critique dépassé">⚠</span>}
+          </div>
+          <a href={item.url?.startsWith('urn:') ? undefined : item.url} target="_blank" rel="noopener noreferrer"
+            className="text-sm font-semibold leading-snug hover:underline"
+            style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {item.title}
+          </a>
+        </div>
+      </div>
+
+      {item.summary && (
+        <p className="text-xs leading-relaxed" style={{ color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+          {item.summary}
+        </p>
+      )}
+
+      <div className="flex flex-wrap gap-1">
+        {item.profile_matches?.length > 0 && (
+          <span title={`Correspond à votre profil de veille : ${item.profile_matches.join(', ')}`}
+            style={{ background: 'rgba(88,166,255,0.15)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.4)', borderRadius: 5, padding: '1px 6px', fontSize: 10, fontWeight: 600 }}>
+            ★ {item.profile_matches.slice(0, 2).join(', ')}
+          </span>
+        )}
+        {(item.themes || []).slice(0, 4).map(t => <ThemeTag key={t} value={t} small />)}
+        {item.cve_ids_found?.length > 0 && (
+          <span className="text-xs font-mono font-semibold px-1" style={{ color: '#58a6ff' }}>
+            {item.cve_ids_found.slice(0, 2).join(', ')}{item.cve_ids_found.length > 2 ? ` +${item.cve_ids_found.length - 2}` : ''}
+          </span>
+        )}
+      </div>
+
+      {/* `flex-wrap` (23/08/2026, retour utilisateur — le badge "Nouveau" chevauchait
+          Traiter) : sur une carte étroite (280px min), badge de statut + date + boutons
+          d'action ne tenaient pas toujours sur une seule ligne — `justify-between` seul ne
+          fait QUE répartir l'espace, il ne fait jamais passer un groupe à la ligne suivante
+          quand ça déborde. Les boutons descendent proprement en dessous plutôt que de se
+          superposer au badge. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5 mt-auto pt-2.5" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <StatusBadge value={item.status} onClick={() => onOpen(item)} />
+          <span className="text-xs whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>
+            {item.received_at ? new Date(item.received_at).toLocaleDateString('fr-FR') : '—'}
+          </span>
+        </div>
+        <div className="flex gap-1.5 flex-shrink-0">
+          {item.status === 'new' || item.status === 'in_review'
+            ? <Btn small variant="secondary" onClick={() => { onActivate(item.id); onOpen(item) }}>Traiter</Btn>
+            : <Btn small variant="success" onClick={() => { onActivate(item.id); onOpen(item) }}>Consulter</Btn>}
+          {(item.severity === 'critical' || item.severity === 'important') && (
+            // `iconOnly` (23/08/2026, retour utilisateur — chevauchait Traiter/Consulter,
+            // peu de largeur dans la carte) : texte complet réservé au tableau (colonne
+            // actions dédiée, plus de place).
+            <DeclareIncidentButton sourceType="watch_item" sourceId={item.id} iconOnly />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 // Icônes des KPI — même famille (Heroicons outline) que le reste de l'app.
 const KPI_ICON_PATHS = {
@@ -349,6 +434,12 @@ export default function Watch() {
   const [data, setData]     = useState({ items: [], total: 0 })
   const [kpis, setKpis]     = useState(null)
   const [page, setPage]     = useState(1)
+  // Bascule Tableau/Cartes (23/08/2026, demande explicite — "le côté liste n'est pas très
+  // engageant"). Persisté (préférence d'affichage pure, comme navCollapsed ailleurs dans
+  // l'app) — pas de perte de fonctionnalité entre les deux vues : mêmes actions
+  // (Traiter/Consulter, Déclarer un incident), même clic pour ouvrir la modale de détail.
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem('watch-view-mode') || 'table')
+  useEffect(() => { localStorage.setItem('watch-view-mode', viewMode) }, [viewMode])
   const [loading, setLoading] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [modal, setModal]   = useState(null)
@@ -522,11 +613,11 @@ export default function Watch() {
 
       // Item de démonstration (mode Présentation) : pas d'appel API (n'existe pas en
       // base) — mutation directe du jeu fictif, il n'est jamais persisté nulle part.
-      if (isFakeId(modal.id)) {
-        const fake = FAKE_WATCH_ITEMS.find(w => w.id === modal.id)
-        if (fake) {
-          Object.assign(fake, payload)
-          if (payload.status && payload.status !== 'new' && !fake.reviewed_at) fake.reviewed_at = new Date().toISOString()
+      if (isSyntheticId(modal.id)) {
+        const synthetic = SYNTHETIC_WATCH_ITEMS.find(w => w.id === modal.id)
+        if (synthetic) {
+          Object.assign(synthetic, payload)
+          if (payload.status && payload.status !== 'new' && !synthetic.reviewed_at) synthetic.reviewed_at = new Date().toISOString()
         }
         flash('Item mis à jour', 'success')
         setModal(null)
@@ -549,18 +640,18 @@ export default function Watch() {
   const totalPages        = Math.ceil(data.total / perPage)
   const criticalUntreated = kpis?.critical_untreated ?? null
 
-  // Fake data ajoutée seulement en page 1, sans filtre source/thème/SLA/profil actif —
+  // Synthetic data ajoutée seulement en page 1, sans filtre source/thème/SLA/profil actif —
   // filtrée côté client sur sévérité/statut (les deux chips par défaut) pour rester
   // cohérente avec la sélection, sans dupliquer tout le filtrage serveur pour si peu.
   const noExtraFilter = selSources.length === 0 && selThemes.length === 0 && !slaOnly && !profileOnly
-  const fakeWatchItems = FAKE_WATCH_ITEMS.filter(w =>
+  const syntheticWatchItems = SYNTHETIC_WATCH_ITEMS.filter(w =>
     (selSeverities.length === 0 || selSeverities.includes(w.severity)) &&
     (selStatuses.length === 0 || selStatuses.includes(w.status)))
-  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des fake data —
+  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des synthetic data —
   // restaient jusqu'ici en clair (titre/résumé/décision/analyste), seules des lignes
-  // FAKE_WATCH_ITEMS s'y ajoutaient.
+  // SYNTHETIC_WATCH_ITEMS s'y ajoutaient.
   const anonymizedItems = isAnonymous ? data.items.map(w => anonymizeWatchItem(w, assetList)) : data.items
-  const displayItems = isAnonymous && noExtraFilter && page === 1 ? [...anonymizedItems, ...fakeWatchItems] : anonymizedItems
+  const displayItems = isAnonymous && noExtraFilter && page === 1 ? [...anonymizedItems, ...syntheticWatchItems] : anonymizedItems
   const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   // Couleur de ligne : la mise en avant "item en cours" prime sur les signaux
@@ -746,7 +837,40 @@ export default function Watch() {
         />
       )}
 
-      {/* Tableau */}
+      {/* Bascule Tableau/Cartes (23/08/2026, demande explicite) */}
+      <div className="flex items-center justify-end">
+        <ViewToggle mode={viewMode} onChange={setViewMode} />
+      </div>
+
+      {viewMode === 'cards' ? (
+        <div style={CARD} className="overflow-hidden">
+          {loading && <div className="px-4 py-12 text-center"><PageLoader size="sm" /></div>}
+          {!loading && displayItems.length === 0 && (
+            <div className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
+              <p className="text-sm font-medium mb-1">Aucun item de veille</p>
+              <p className="text-xs">Cliquez sur "Synchroniser" pour lancer la première collecte</p>
+            </div>
+          )}
+          {!loading && displayItems.length > 0 && (
+            <div className="stagger grid gap-4 p-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              {displayItems.map(item => (
+                <WatchCard key={item.id} item={item} onOpen={openModal} onActivate={setActiveItemId}
+                  accent={activeItemId === item.id ? 'rgba(210,153,34,0.7)' : item.profile_matches?.length > 0 ? 'rgba(88,166,255,0.4)' : null} />
+              ))}
+            </div>
+          )}
+          {totalPages > 1 && (
+            <div className="px-5 py-3.5 flex items-center justify-between" style={{ borderTop: '1px solid var(--border)' }}>
+              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{data.total} résultats</span>
+              <div className="flex items-center gap-2">
+                <Btn small variant="secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Préc.</Btn>
+                <span className="text-xs px-2" style={{ color: 'var(--text-muted)' }}>Page {page} / {totalPages}</span>
+                <Btn small variant="secondary" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Suiv. →</Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
       <div style={CARD} className="overflow-hidden">
         <div className="overflow-x-auto" style={{ background: 'var(--bg-card)' }}>
           <table className="w-full text-sm">
@@ -813,9 +937,12 @@ export default function Watch() {
                   <td className="px-4 py-3" style={{ maxWidth: 280 }}>
                     <a href={item.url?.startsWith('urn:') ? undefined : item.url}
                       target="_blank" rel="noopener noreferrer"
-                      className="text-sm font-medium hover:underline"
-                      style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {item.title}
+                      className="flex items-center gap-2.5 group">
+                      <WatchThumbnail item={item} size={32} rounded={8} />
+                      <span className="text-sm font-medium group-hover:underline"
+                        style={{ color: 'var(--text-primary)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {item.title}
+                      </span>
                     </a>
                   </td>
                   <td className="px-4 py-3">
@@ -894,6 +1021,7 @@ export default function Watch() {
           </div>
         )}
       </div>
+      )}
 
       {/* Modal traitement */}
       {modal && (
@@ -905,6 +1033,8 @@ export default function Watch() {
 
             {/* Header */}
             <div className="px-6 py-4 flex items-start justify-between gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div className="flex items-start gap-3 min-w-0">
+              <WatchThumbnail item={modal} size={48} rounded={12} />
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2 mb-1.5">
                   <SevBadge value={modal.severity} />
@@ -933,6 +1063,7 @@ export default function Watch() {
                     Regroupe {modal.group_size} items de même titre — les traiter appliquera la décision à tous.
                   </p>
                 )}
+              </div>
               </div>
               <button onClick={() => setModal(null)} className="p-1.5 rounded-lg flex-shrink-0" style={{ color: 'var(--text-muted)' }}>
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -7,7 +7,7 @@ import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { FAKE_CRISES, anonymizeCrisis } from '../utils/fakeData.js'
+import { SYNTHETIC_CRISES, anonymizeCrisis } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 const filterSelectStyle = { background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }
@@ -76,7 +76,7 @@ export default function Crises() {
   }
 
   const anonymizedItems = isAnonymous ? data.items.map(c => anonymizeCrisis(c, assetList)) : data.items
-  const displayItems = isAnonymous && !statusFilter && !search ? [...anonymizedItems, ...FAKE_CRISES] : anonymizedItems
+  const displayItems = isAnonymous && !statusFilter && !search ? [...anonymizedItems, ...SYNTHETIC_CRISES] : anonymizedItems
 
   if (loading && data.items.length === 0 && !statusFilter && !search) {
     return <PageLoader />

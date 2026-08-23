@@ -5,7 +5,7 @@ import AddContactModal from './AddContactModal.jsx'
 import { MODULES } from '../constants/modules.js'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { anonymizeRoleHolder } from '../utils/fakeData.js'
+import { anonymizeRoleHolder, isSyntheticId } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.incidents.color
 const SCOPE_STYLES = {
@@ -96,6 +96,8 @@ export default function IncidentRoadmap({ incident, onUpdated }) {
     }
     setActorError(false)
     setCheckedResponse(next)
+    // Incident de démonstration : pas d'appel API (n'existe pas en base), l'état local suffit.
+    if (isSyntheticId(incident.id)) return
     try {
       const payload = [...next.entries()].map(([index, v]) => ({ index, by: v.by, at: v.at }))
       const { data: fresh } = await updateIncident(incident.id, { completed_response_steps: payload })

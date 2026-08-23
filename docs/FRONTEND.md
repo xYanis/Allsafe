@@ -82,7 +82,7 @@ les 12 pages où c'est appliqué (`Dashboard.jsx`, `Notes.jsx`, `NoteSubject.jsx
   (`Audits.jsx`, `Incidents.jsx` : cache écrit seulement quand aucun filtre n'est actif et
   `page === 1`, jamais un résultat déjà filtré par l'utilisateur).
 - Le cache stocke la réponse **brute** de l'API (avant tri/filtrage/anonymisation côté client) —
-  `Assets.jsx`/`Inventaire.jsx`/`Durcissement.jsx` appliquent `anonymizeAsset`/`FAKE_ASSETS` (mode
+  `Assets.jsx`/`Inventaire.jsx`/`Durcissement.jsx` appliquent `anonymizeAsset`/`SYNTHETIC_ASSETS` (mode
   Présentation) *après* lecture du cache, jamais sur la valeur mise en cache elle-même.
 
 Pages volontairement non touchées (fetch trop léger pour valoir le coût, ou déjà sans gate plein
@@ -1107,14 +1107,14 @@ Détail complet du module (matching, sources, limite) dans `docs/VEILLE.md` § 9
   les identités surveillées contiennent littéralement le nom/domaine réel de l'entreprise, et les
   fuites matchées sont des articles publics en texte libre qui les citent nommément. Contrairement à
   `anonymizeAsset` (substitution de champs structurés), impossible d'anonymiser un titre d'article par
-  simple remplacement de propriété : `anonymizeIdentity`/`anonymizeIdentityMatch` (`utils/fakeData.js`)
+  simple remplacement de propriété : `anonymizeIdentity`/`anonymizeIdentityMatch` (`utils/syntheticData.js`)
   redirigent donc chaque occurrence du nom/domaine réel **dans le texte** (titre + résumé) vers son
   équivalent fictif, déterministe par hash — même technique que `redactText` (`Reports.jsx`). Complété
-  par `FAKE_IDENTITIES`/`FAKE_IDENTITY_MATCHES` (entreprise "Norvenia Group" 100% fictive) pour que la
+  par `SYNTHETIC_IDENTITIES`/`SYNTHETIC_IDENTITY_MATCHES` (entreprise "Norvenia Group" 100% fictive) pour que la
   démo reste parlante même sans fuite réelle. Ajout/suppression désactivés en mode Anonyme (cohérent
   avec "rien n'est jamais persisté en mode Présentation") plutôt que d'écrire le vrai nom d'entreprise
   en base pendant une démo, ou d'appeler `DELETE` sur un id `demo-*` inexistant côté serveur.
-- IP/plage IP anonymisées pareil (`FAKE_PUBLIC_IPS`/`FAKE_PUBLIC_IP_RANGES` — plages RFC 5737/TEST-NET,
+- IP/plage IP anonymisées pareil (`SYNTHETIC_PUBLIC_IPS`/`SYNTHETIC_PUBLIC_IP_RANGES` — plages RFC 5737/TEST-NET,
   jamais routées sur Internet, donc sûres à afficher). `anonymizeIpMatch` ne redirige que
   `identity_value` (votre IP surveillée réelle) ; l'IP blocklistée (`ip`) est une donnée publique — IP
   attaquante tierce, pas la vôtre — donc jamais anonymisée.
@@ -1285,22 +1285,22 @@ parc (noms d'actifs, IP, noms d'analystes). Purement frontend/affichage — aucu
 écrite en base, aucune vraie donnée n'est envoyée nulle part. Activé via le switch "Anonyme" dans
 Paramètres (`PresentationContext`), persistant en `localStorage`.
 
-### `frontend/src/utils/fakeData.js` — cœur du mode
+### `frontend/src/utils/syntheticData.js` — cœur du mode
 
-- **`FAKE_ASSETS`** : 24 actifs 100% inventés (`id` préfixé `demo-asset-`), noms/hostnames/IP/OS/
+- **`SYNTHETIC_ASSETS`** : 24 actifs 100% inventés (`id` préfixé `demo-asset-`), noms/hostnames/IP/OS/
   hardware/apps plausibles et variés (Windows Server 2016-2022, Windows 10/11, Ubuntu, Debian).
-- **`FAKE_VULNERABILITIES`** : 2 à 6 vulnérabilités par actif fictif, statuts variés (open/patched/
-  awaiting_fix/false_positive), tirées de **`FAKE_CVE_POOL`** — CVE entièrement inventées
+- **`SYNTHETIC_VULNERABILITIES`** : 2 à 6 vulnérabilités par actif fictif, statuts variés (open/patched/
+  awaiting_fix/false_positive), tirées de **`SYNTHETIC_CVE_POOL`** — CVE entièrement inventées
   (`CVE-2026-710xx`), jamais une vraie CVE réutilisée pour éviter toute confusion.
-- **`FAKE_VALIDATORS`** : 6 faux noms d'analystes, distincts des vrais `ANALYSTS`
+- **`SYNTHETIC_VALIDATORS`** : 6 faux noms d'analystes, distincts des vrais `ANALYSTS`
   (`ValidateDropdown.jsx`).
-- **`isFakeId(id)`** : convention `demo-*`. Distingue une entité **100% fictive** (padding, jamais en
+- **`isSyntheticId(id)`** : convention `demo-*`. Distingue une entité **100% fictive** (padding, jamais en
   base, aucune action ne doit toucher le backend) d'une entité **réelle affichée sous nom anonymisé**
   (id réel conservé, les actions qui n'écrivent pas d'identité continuent de fonctionner normalement).
 - **`anonymizeAsset`/`anonymizeVuln`/`anonymizeValidator`/`anonymizeConnection`** : remplacent nom/
   hostname/IP/analyste réels par un équivalent fictif **déterministe** (hash du vrai id/nom → même
   faux nom à chaque appel, cohérent sur toutes les pages de la session) — ne touchent jamais l'id réel.
-  **Deux pools de noms séparés** (`FAKE_ASSET_NAMES` pour le padding `FAKE_ASSETS`, `ANON_REAL_NAMES`
+  **Deux pools de noms séparés** (`SYNTHETIC_ASSET_NAMES` pour le padding `SYNTHETIC_ASSETS`, `ANON_REAL_NAMES`
   pour les vrais actifs anonymisés) — un pool unique aurait fait porter par coïncidence le même nom à
   un vrai actif et à un actif de démo affichés côte à côte (bug constaté et corrigé en session).
 - **`redactText(text, realAssets, realValidatorNames)`** : reformate un texte libre (résumé exécutif,
@@ -1309,7 +1309,7 @@ Paramètres (`PresentationContext`), persistant en `localStorage`.
 - **`computeDashboardStats(...)`** : recalcule les KPI (taux de correction, actifs exposés,
   `severity_rates`) **localement** depuis les listes déjà fusionnées réel(anonymisé)+fictif, sur le
   même modèle que `backend/services/stats.py` — le backend ne connaît rien des données de démo.
-- **`fakePatchCheckResult`/`fakeAnalysis`/`fakeRecommendation`/`fakeScript`** : simulent localement le
+- **`syntheticPatchCheckResult`/`syntheticAnalysis`/`syntheticRecommendation`/`syntheticScript`** : simulent localement le
   résultat des actions (Analyser, Patch check, Recommandation, Script) sur les vulns fictives, sans
   aucun appel réseau, avec un texte explicite "(simulation — mode Présentation)".
 - **⚠️ Piège rencontré** : `h >> 8` (décalage signé) appliqué à un hash déjà `>>> 0` (non-signé) —
@@ -1320,13 +1320,13 @@ Paramètres (`PresentationContext`), persistant en `localStorage`.
 ### Câblage par page
 
 - **`Dashboard.jsx`** : au fetch initial (`useEffect([isAnonymous])`), fusionne actifs/vulns réels
-  (anonymisés via `anonymizeAsset`/`anonymizeVuln`) avec `FAKE_ASSETS`/`FAKE_VULNERABILITIES` dans le
+  (anonymisés via `anonymizeAsset`/`anonymizeVuln`) avec `SYNTHETIC_ASSETS`/`SYNTHETIC_VULNERABILITIES` dans le
   state React existant — pas de re-fetch au toggle du switch, juste un re-merge côté client.
   `displayKpis` bascule entre `kpis` (fetch backend, mode normal) et `computeDashboardStats(...)`
   (local, mode Anonyme) ; `refreshStats()` devient un no-op en mode Anonyme.
 - **`Assets.jsx` / `Inventaire.jsx`** : les 24 actifs fictifs sont ajoutés à la liste affichée. Scan
   d'une ligne fictive = relit directement `hardware`/`installed_packages` déjà en mémoire (pas
-  d'appel réseau, `fakeScanResult()`) ; Modifier/Supprimer désactivés sur ces lignes (pas de ligne DB
+  d'appel réseau, `syntheticScanResult()`) ; Modifier/Supprimer désactivés sur ces lignes (pas de ligne DB
   derrière — `updateAsset`/`deleteAsset` échoueraient en 404).
 - **`Vulnerabilities.jsx`** : pagination/tri/filtres backend en mode normal ; en mode Anonyme, un seul
   fetch (**`per_page=200`** — limite dure backend `Query(..., le=200)`, un essai à `per_page=1000`
@@ -1338,17 +1338,17 @@ Paramètres (`PresentationContext`), persistant en `localStorage`.
   `redactText`, qui a besoin des **vrais** noms pour savoir quoi chercher/remplacer dans le texte
   généré par le backend. Résumé exécutif/export CSV : seuls les ids d'actifs **réels** de la
   sélection sont envoyés au backend (`realSelectedIds()`) ; si la sélection ne contient que des
-  actifs de démo, `onlyFakeAssetsSelected()` bloque l'appel avec un message d'erreur plutôt que de
+  actifs de démo, `onlySyntheticAssetsSelected()` bloque l'appel avec un message d'erreur plutôt que de
   renvoyer un résumé trompeur sur tout le parc réel. Connexions IP anonymisées
   (`anonymizeConnection`).
-- **`ValidateDropdown.jsx` / `AnnotationModal.jsx`** : listent `FAKE_VALIDATORS` au lieu des vrais
+- **`ValidateDropdown.jsx` / `AnnotationModal.jsx`** : listent `SYNTHETIC_VALIDATORS` au lieu des vrais
   `ANALYSTS` dès que `isAnonymous` est actif. **Corollaire important** : comme le nom choisi est
   désormais toujours fictif en mode Anonyme, `handleMarkPatched`/`handleMarkAwaitingFix`/
   `handleMarkFalsePositive` (`Dashboard.jsx`) et `handleMarkPatched`/`handleStatus`
-  (`Vulnerabilities.jsx`) sont gardés par `isAnonymous` (pas seulement `isFakeId`) — **aucune**
+  (`Vulnerabilities.jsx`) sont gardés par `isAnonymous` (pas seulement `isSyntheticId`) — **aucune**
   écriture backend tant que le mode est actif, même sur une vraie vulnérabilité affichée sous nom
   anonymisé, pour ne jamais polluer son historique de validation avec une identité inventée. Les
-  actions read-only (Analyser, Patch check) restent gardées par `isFakeId` uniquement — elles
+  actions read-only (Analyser, Patch check) restent gardées par `isSyntheticId` uniquement — elles
   n'écrivent aucune identité, pas de raison de les bloquer sur du réel.
 
 ### Méthodologie de test
@@ -1430,7 +1430,7 @@ frontend/
     │                                 client (`localStorage`) que les deux ci-dessus. Consommé par
     │                                 `components/PageGuide.jsx`, cf. section dédiée plus bas
     ├── utils/
-    │   ├── fakeData.js          → pools d'actifs/vulns/analystes fictifs + helpers d'anonymisation
+    │   ├── syntheticData.js          → pools d'actifs/vulns/analystes fictifs + helpers d'anonymisation
     │   │                           (mode Présentation, cf. section dédiée plus haut)
     │   ├── countries.js         → `COUNTRIES`/`COUNTRY_LABELS`, ~40 pays — filtre pays Fuite de données
     │   │                           + formulaire d'ajout de source (Watch.jsx + FuiteDeDonnees.jsx)

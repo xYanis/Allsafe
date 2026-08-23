@@ -239,7 +239,7 @@ if settings.SECRET_KEY == "changeme" or settings.DB_PASSWORD == "changeme":
       `APP_DB_*`). Vérifié : `CREATE`/`DROP`/`DELETE security_events`/superuser refusés. Complète la
       déception DB (traces ineffaçables). Cf. `docs/ARCHITECTURE.md § Rôle applicatif`.
 - [x] **Déception DB** (24/07/2026) — honeypots (vues/rôles leurres, honeytokens) → `security_events` +
-      bannière Dashboard (`backend/db/deception_setup.sql`). Cf. `docs/ARCHITECTURE.md § Déception`.
+      bannière Dashboard (`backend/db/legacy_views.sql`). Cf. `docs/ARCHITECTURE.md § Déception`.
 
 ---
 

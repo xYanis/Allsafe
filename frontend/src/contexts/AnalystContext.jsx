@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import { analysts as fetchAnalysts } from '../api/client.js'
 import { usePresentation } from './PresentationContext.jsx'
-import { FAKE_VALIDATORS } from '../utils/fakeData.js'
+import { SYNTHETIC_VALIDATORS } from '../utils/syntheticData.js'
 
 const AnalystContext = createContext({
   analysts: [], names: [], refresh: () => {}, loading: true,
@@ -11,8 +11,8 @@ const AnalystContext = createContext({
 // dur, alimente les menus déroulants d'attribution (validé par, déclaré par, jalon envoyé
 // par, étape du Plan d'action...) partout dans l'app.
 //
-// `names` bascule sur FAKE_VALIDATORS en mode Présentation (31/07/2026) — centralisé ici plutôt
-// que dans chaque dropdown consommateur (`isAnonymous ? FAKE_VALIDATORS : ANALYSTS` était fait
+// `names` bascule sur SYNTHETIC_VALIDATORS en mode Présentation (31/07/2026) — centralisé ici plutôt
+// que dans chaque dropdown consommateur (`isAnonymous ? SYNTHETIC_VALIDATORS : ANALYSTS` était fait
 // au cas par cas dans Vulnerabilities.jsx/ValidateDropdown.jsx/AnnotationModal.jsx, mais absent
 // de tous les dropdowns Incidents/Crise — ce correctif les couvre tous d'un coup, présents et
 // futurs, sans devoir patcher chaque fichier). `PresentationProvider` englobe `AnalystProvider`
@@ -41,7 +41,7 @@ export function AnalystProvider({ children }) {
     return () => window.removeEventListener('focus', refresh)
   }, [refresh])
 
-  const names = isAnonymous ? FAKE_VALIDATORS : analysts.map(a => a.name)
+  const names = isAnonymous ? SYNTHETIC_VALIDATORS : analysts.map(a => a.name)
 
   return (
     <AnalystContext.Provider value={{ analysts, names, refresh, loading }}>

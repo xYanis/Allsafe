@@ -676,11 +676,11 @@ gérer les comptes des autres.
 
 Couche de **détection** (pas de prévention) : des objets leurres qu'**aucun code d'Allsafe ne
 référence** sont plantés dans la base ; tout accès à l'un d'eux = intrusion (zéro faux positif).
-Tout est dans `backend/db/deception_setup.sql` (idempotent, à rejouer sur toute base — comme les
+Tout est dans `backend/db/legacy_views.sql` (idempotent, à rejouer sur toute base — comme les
 `ALTER` manuels, `create_all` ne crée que la table `security_events`, jamais les vues/fonctions/rôles).
 
 - **`security_events`** (table réelle, modèle `SecurityEvent`) : journal des accès leurres.
-  Colonnes `source` (honey_read | honey_write | decoy_role), `object_name`, `operation`, `db_user`,
+  Colonnes `source` (trap_read | trap_write | trap_role), `object_name`, `operation`, `db_user`,
   `client_addr` (inet), `detail` (jsonb), `acknowledged`/`ack_by`/`ack_at`.
 - **Vues leurres** `api_keys` / `app_users` / `ssh_credentials_backup` / `admin_tokens` : chacune est
   une **vue adossée à une fonction `SECURITY DEFINER`** qui journalise **à la lecture** (SELECT — pas
@@ -745,7 +745,7 @@ journalise** toute commande DDL (CREATE / ALTER / DROP / GRANT…) lancée par u
 **existante** create_all n'émet aucun DDL → aucun souci. Mais sur une base **vierge**, il faut créer le
 schéma **avec `cybervuln`** d'abord : laisser `APP_DB_*` vide au premier démarrage (l'app se rabat sur
 `DB_USER=cybervuln`, whitelisté, et create_all bâtit le schéma), puis renseigner `APP_DB_USER=cbr_app`.
-Ordre de pose des scripts sur base neuve : schéma (cybervuln) → `app_role.sql` → `deception_setup.sql` →
+Ordre de pose des scripts sur base neuve : schéma (cybervuln) → `app_role.sql` → `legacy_views.sql` →
 `ddl_guard.sql` → `schema_patches.sql` (peut être rejoué à tout moment, idempotent).
 
 ### Table `release_notes` (session 18/08/2026)

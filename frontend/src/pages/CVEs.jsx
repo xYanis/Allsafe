@@ -6,6 +6,8 @@ import ExploitBadge from '../components/ExploitBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { SYNTHETIC_CVE_CATALOG } from '../utils/syntheticData.js'
 
 const REFRESH_OPTIONS = [7, 15]
 // Survol de ligne teinté CyberVuln (11/08/2026, tour visuel) — cf. même remarque que
@@ -118,6 +120,7 @@ export default function CVEs() {
   const [syncMsg, setSyncMsg] = useState('')
   const pollRef = useRef(null)
   const perPage = 50
+  const { isAnonymous } = usePresentation()
 
   const load = useCallback(() => {
     setLoading(true)
@@ -170,13 +173,23 @@ export default function CVEs() {
 
   const totalPages = Math.ceil(data.total / perPage)
 
+  // Synthetic data ajoutée seulement en page 1 — filtrée côté client sur les mêmes critères
+  // que la barre de filtres, pour rester cohérente avec la sélection en cours.
+  const syntheticCves = SYNTHETIC_CVE_CATALOG.filter(c =>
+    (!filters.severity || c.severity === filters.severity) &&
+    (!filters.search || c.cve_id.toLowerCase().includes(filters.search.toLowerCase()) || (c.description || '').toLowerCase().includes(filters.search.toLowerCase())) &&
+    (!filters.min_cvss || c.cvss_score >= Number(filters.min_cvss)) &&
+    (!filters.kev || c.kev) &&
+    (!filters.msf_module || c.msf_module))
+  const displayItems = isAnonymous && page === 1 ? [...data.items, ...syntheticCves] : data.items
+
   const cvssColor = score => score >= 9 ? '#f85149' : score >= 7 ? '#fb8f44' : score >= 4 ? '#58a6ff' : '#8b949e'
 
   return (
     <div className="p-6 space-y-5">
       <PageHero
         icon="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-        title="CVE" color="#f85149"
+        title="CVE" color={MODULES.cybervuln.color}
         subtitle={`Toutes les CVE publiées dans les ${DAYS_WINDOW} derniers jours (pas seulement celles touchant le parc)`}
       >
         <RefreshDropdown status={syncStatus} onSelect={handleRefresh} />
@@ -241,10 +254,10 @@ export default function CVEs() {
               {loading && (
                 <tr><td colSpan={7} className="px-4 py-12 text-center"><PageLoader size="sm" /></td></tr>
               )}
-              {!loading && data.items.length === 0 && (
+              {!loading && displayItems.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'var(--text-muted)' }}>Aucun résultat</td></tr>
               )}
-              {!loading && data.items.map(c => (
+              {!loading && displayItems.map(c => (
                 <tr key={c.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}
                   onMouseEnter={e => e.currentTarget.style.background = MODULE_HOVER}
                   onMouseLeave={e => e.currentTarget.style.background = 'transparent'}

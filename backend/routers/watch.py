@@ -123,6 +123,8 @@ def _item_dict(w: WatchItem, asset_names: dict[str, str] | None = None,
         "cve_ids_found": w.cve_ids_found or [],
         "themes": w.themes or [],
         "country": w.country,
+        "image_url": w.image_url,
+        "is_verified": w.is_verified,
         # Correspondance au profil de veille, calculée à la volée (jamais
         # stockée : le profil évolue, un indicateur figé deviendrait faux).
         # Marque seulement — ne retire jamais l'élément du registre.
@@ -499,6 +501,93 @@ async def leak_sources(session: AsyncSession = Depends(get_session)):
         select(WatchSource.slug).where(WatchSource.enabled.is_(True), WatchSource.category == "leak")
     )).scalars().all()
     return {"sources": BUILTIN_LEAK_SOURCES + list(rows)}
+
+
+_COUNTRY_RANGE_DELTAS = {
+    "day": timedelta(days=1), "week": timedelta(weeks=1),
+    "month": timedelta(days=30), "year": timedelta(days=365),
+}
+
+
+@router.get("/leak-dashboard")
+async def leak_dashboard(
+    source: Optional[str] = None,
+    country_range: str = Query("all", pattern="^(day|week|month|year|all)$"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Dashboard mondial de Fuite de données (23/08/2026, demande explicite) — total, répartition
+    par pays/source, tendance hebdo/mensuelle sur 12 périodes. `source` (CSV) restreint aux
+    sources dédiées "fuite" comme /watch/stats — le frontend passe systématiquement
+    `leakSources.join(',')` (résultat de /leak-sources), jamais appelé sans filtre en pratique
+    (sinon inclurait CERT-FR/ANSSI, hors sujet ici). Tout scope confondu par défaut (pas de
+    fenêtre `days` comme /stats) : c'est un total/historique, pas un indicateur "activité
+    récente" — SAUF le classement pays, seul à prendre `country_range` (23/08/2026, demande
+    explicite d'une vue jour/semaine/mois/année/tout) : total/tendance/répartition source
+    restent volontairement sur tout l'historique, périmètre non demandé pour eux."""
+    def _scope(q):
+        return _apply_multi(q, WatchItem.source, source)
+
+    # Date RÉELLE de la fuite (23/08/2026, retour utilisateur — "moyen de remonter plus loin
+    # dans les dates ?") : `received_at` (date d'IMPORT chez Allsafe) était utilisé partout
+    # dans cet endpoint jusqu'ici, alors qu'une instance qui vient de commencer à synchroniser
+    # n'a que quelques jours d'import quelle que soit l'ancienneté réelle des fuites — vérifié
+    # en conditions réelles : `published_at` remonte à 2023 sur cette base, `received_at` à
+    # l'avant-veille seulement. `coalesce` : ~20% des items n'ont pas de `published_at` fiable
+    # (flux sans date de publication exploitable), repli sur `received_at` plutôt que de les
+    # exclure du classement/de la tendance.
+    real_date = func.coalesce(WatchItem.published_at, WatchItem.received_at)
+
+    total = await session.scalar(_scope(select(func.count(WatchItem.id))))
+
+    country_q = _scope(select(WatchItem.country, func.count(WatchItem.id))).where(WatchItem.country.is_not(None))
+    if country_range != "all":
+        country_q = country_q.where(real_date >= datetime.now(timezone.utc) - _COUNTRY_RANGE_DELTAS[country_range])
+    country_rows = (await session.execute(
+        country_q.group_by(WatchItem.country).order_by(func.count(WatchItem.id).desc())
+    )).all()
+    by_country = [{"country": r[0], "count": r[1]} for r in country_rows]
+
+    source_rows = (await session.execute(
+        _scope(select(WatchItem.source, WatchItem.source_label, func.count(WatchItem.id)))
+        .group_by(WatchItem.source, WatchItem.source_label)
+        .order_by(func.count(WatchItem.id).desc())
+    )).all()
+    by_source = [{"source": r[0], "source_label": r[1], "count": r[2]} for r in source_rows]
+
+    # 12 dernières semaines/mois glissants — `date_trunc` groupe par période calendaire
+    # (semaine ISO démarrant lundi, mois civil), pas une fenêtre de 7/30 jours glissante.
+    # Expression construite UNE FOIS et réutilisée dans select/group_by/order_by (pas un
+    # `func.date_trunc('week', ...)` réécrit à chaque endroit) : le 1er argument littéral se
+    # bind en paramètre PostgreSQL ($1/$2/$3 distincts sinon), et Postgres refuse alors le
+    # GROUP BY — il ne sait pas au moment de PREPARE que ces paramètres porteront la même
+    # valeur à l'exécution ("column must appear in GROUP BY", constaté en conditions réelles).
+    # Réutiliser le même objet Python fait que SQLAlchemy compile un seul bind partagé.
+    now = datetime.now(timezone.utc)
+    week_trunc = func.date_trunc('week', real_date)
+    week_rows = (await session.execute(
+        _scope(select(week_trunc, func.count(WatchItem.id)))
+        .where(real_date >= now - timedelta(weeks=12))
+        .group_by(week_trunc)
+        .order_by(week_trunc)
+    )).all()
+    trend_weekly = [{"period": r[0].isoformat(), "count": r[1]} for r in week_rows if r[0]]
+
+    month_trunc = func.date_trunc('month', real_date)
+    month_rows = (await session.execute(
+        _scope(select(month_trunc, func.count(WatchItem.id)))
+        .where(real_date >= now - timedelta(days=366))
+        .group_by(month_trunc)
+        .order_by(month_trunc)
+    )).all()
+    trend_monthly = [{"period": r[0].isoformat(), "count": r[1]} for r in month_rows if r[0]]
+
+    return {
+        "total": total,
+        "by_country": by_country,
+        "by_source": by_source,
+        "trend_weekly": trend_weekly,
+        "trend_monthly": trend_monthly,
+    }
 
 
 @router.get("/sources")

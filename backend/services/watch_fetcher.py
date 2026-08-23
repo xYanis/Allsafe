@@ -232,9 +232,12 @@ async def recompute_all_themes() -> dict:
 # ─── Parsing ──────────────────────────────────────────────────────────────────
 
 NS = {
-    "atom": "http://www.w3.org/2005/Atom",
-    "dc":   "http://purl.org/dc/elements/1.1/",
+    "atom":  "http://www.w3.org/2005/Atom",
+    "dc":    "http://purl.org/dc/elements/1.1/",
+    "media": "http://search.yahoo.com/mrss/",
 }
+
+IMG_SRC_PATTERN = re.compile(r'<img[^>]+src=["\']([^"\']+)["\']', re.IGNORECASE)
 
 
 def _text(el: Optional[ET.Element], default: str = "") -> str:
@@ -289,6 +292,34 @@ def _find(entry: ET.Element, tag: str) -> Optional[ET.Element]:
     return el if el is not None else entry.find(tag)
 
 
+def _extract_image(entry: ET.Element, html_text: str = "") -> Optional[str]:
+    """Image d'un item RSS/Atom SI le flux en fournit déjà une — jamais de requête HTTP
+    supplémentaire vers le site source (décision explicite, 23/08/2026 : les bulletins
+    texte de CERT-FR/ANSSI n'ont quasiment jamais d'image, aller chercher og:image sur
+    chaque article ralentirait la synchro pour un gain marginal). Ordre de préférence :
+    media:thumbnail/media:content (extension Yahoo Media RSS, la plus fréquente sur les
+    flux type blog, ex. Sekoia TDR) > enclosure image (RSS 2.0 standard, ou <link
+    rel="enclosure"> côté Atom) > première <img> trouvée dans le HTML du résumé. `None`
+    si rien de tout ça — un repli visuel par source prend le relais côté frontend."""
+    thumb = entry.find("media:thumbnail", NS)
+    if thumb is not None and thumb.get("url"):
+        return thumb.get("url")
+    content = entry.find("media:content", NS)
+    if content is not None and content.get("url") and (content.get("medium") == "image" or (content.get("type") or "").startswith("image/")):
+        return content.get("url")
+    enclosure = entry.find("enclosure")
+    if enclosure is not None and enclosure.get("url") and (enclosure.get("type") or "").startswith("image/"):
+        return enclosure.get("url")
+    for link in entry.findall("atom:link", NS) + entry.findall("link"):
+        if link.get("rel") == "enclosure" and (link.get("type") or "").startswith("image/") and link.get("href"):
+            return link.get("href")
+    if html_text:
+        m = IMG_SRC_PATTERN.search(html_text)
+        if m:
+            return m.group(1)
+    return None
+
+
 def _parse_atom(root: ET.Element, source: str, source_label: str, country: Optional[str] = None) -> list[dict]:
     items = []
     entries = root.findall("atom:entry", NS) or root.findall("entry")
@@ -316,6 +347,7 @@ def _parse_atom(root: ET.Element, source: str, source_label: str, country: Optio
             "cve_ids_found": cves,
             "themes": _themes_for_item(source, title, summary),
             "country": country or SOURCE_DEFAULT_COUNTRY.get(source),
+            "image_url": _extract_image(entry, summary),
         })
     return items
 
@@ -342,6 +374,7 @@ def _parse_rss(root: ET.Element, source: str, source_label: str, country: Option
             "cve_ids_found": cves,
             "themes": _themes_for_item(source, title, summary),
             "country": country or SOURCE_DEFAULT_COUNTRY.get(source),
+            "image_url": _extract_image(item, summary),
         })
     return items
 
@@ -452,6 +485,14 @@ async def _fetch_hibp() -> list[dict]:
             "cve_ids_found": [],
             "themes": _themes_for_item("hibp", title, summary),
             "country": None,
+            # `LogoPath` : seule source de ce fichier avec une vraie image fournie par
+            # l'API elle-même (logo de la marque concernée) — pas de requête en plus.
+            "image_url": (b.get("LogoPath") or "").strip() or None,
+            # `IsVerified` (23/08/2026, demande explicite — "confirmé ou revendiqué") : seul
+            # champ de statut réellement exploitable parmi les 5 sources dédiées "fuite" — HIBP
+            # vérifie chaque brèche avant publication, contrairement à ransomware.live (une
+            # revendication du groupe par nature) ou aux flux RSS (aucun champ structuré).
+            "is_verified": bool(b.get("IsVerified")),
         })
     logger.info("Veille HIBP : %d entrées récentes", len(items))
     return items
@@ -612,6 +653,8 @@ async def run_watch_sync(feeds: Optional[list[dict]] = None) -> dict:
                 cve_ids_found=item["cve_ids_found"],
                 themes=item["themes"],
                 country=item.get("country"),
+                image_url=item.get("image_url"),
+                is_verified=item.get("is_verified"),
                 status="new",
             ))
             existing_urls.add(item["url"])

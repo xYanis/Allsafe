@@ -39,7 +39,7 @@ class TestCreatePayloadIgnoresNotificationFields:
 class TestPrefillIsReadOnly:
     async def test_prefill_from_security_event_never_writes(self):
         event = SecurityEvent(
-            id=1, source="honey_read", object_name="v_fake_customers",
+            id=1, source="trap_read", object_name="v_fake_customers",
             operation="SELECT", db_user="cbr_app", occurred_at=datetime.now(timezone.utc),
         )
         session = MagicMock()

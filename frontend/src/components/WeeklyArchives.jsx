@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { weeklyReports, weeklyReport, generateWeekly, weeklyReportCsv } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAnalysts } from '../contexts/AnalystContext.jsx'
-import { redactText, isFakeId } from '../utils/fakeData.js'
+import { redactText, isSyntheticId } from '../utils/syntheticData.js'
 import { renderMd, exportPdf } from './ReportMarkdown.jsx'
 
 const CARD = { background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: '12px' }
@@ -36,7 +36,7 @@ export default function WeeklyArchives({
   const [genLoading, setGenLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const realAssetIds = assetIds.filter(id => !isFakeId(id))
+  const realAssetIds = assetIds.filter(id => !isSyntheticId(id))
   const scopeKey = realAssetIds.join(',')
 
   useEffect(() => {

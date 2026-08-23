@@ -120,7 +120,7 @@ cybervuln/
     ├── pages/                 ← 15 pages
     ├── components/            ← 15 composants partagés
     ├── contexts/              ← ThemeContext (dark/light), PresentationContext (mode anonyme)
-    ├── utils/                 ← fakeData (mode démo), countries, color
+    ├── utils/                 ← syntheticData (mode démo), countries, color
     └── api/client.js          ← instance Axios, baseURL `/api` (proxy Vite → backend:8000)
 ```
 

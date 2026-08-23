@@ -6,7 +6,7 @@ N'affecte jamais la base elle-même (pg_dump est lecture seule côté serveur).
 Connexion directe au service `db` via le réseau Docker (pas de session
 SQLAlchemy applicative) — indépendant du rôle `cbr_app` à privilèges réduits :
 on sauvegarde avec le superuser `cybervuln`, seul à voir tous les objets
-(y compris les vues/rôles de déception, cf. `backend/db/deception_setup.sql`).
+(y compris les vues/rôles de déception, cf. `backend/db/legacy_views.sql`).
 """
 
 import logging

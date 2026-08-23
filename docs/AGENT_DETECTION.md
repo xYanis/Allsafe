@@ -48,7 +48,7 @@ tuer l'agent, ou lui faire émettre de faux check-ins. **Cette capacité ne peut
 une preuve fiable de sa propre non-compromission.** Elle a de la valeur comme tripwire (la plupart des
 intrus ne pensent pas à neutraliser proprement l'agent avant d'agir), pas comme rempart.
 
-C'est exactement pourquoi la **déception DB** (`backend/db/deception_setup.sql`, hors de portée d'un
+C'est exactement pourquoi la **déception DB** (`backend/db/legacy_views.sql`, hors de portée d'un
 attaquant présent sur un poste) reste **complémentaire** : les deux surfaces se couvrent mutuellement,
 aucune ne remplace l'autre.
 

@@ -12,6 +12,8 @@ import PendingUpdatesBadge from '../components/PendingUpdatesBadge.jsx'
 import { complianceSummary } from '../components/ComplianceChecklist.jsx'
 import { TYPE_LABELS } from '../utils/assetCategory.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { anonymizeAsset, anonymizeAgent, isSyntheticId, SYNTHETIC_AGENTS, SYNTHETIC_ASSETS, buildSyntheticAgentCheckins } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.inventaire.color
 const CARD = tintedCard(MODULE_COLOR)
@@ -171,6 +173,7 @@ export default function AgentHistory() {
   const [pinging, setPinging] = useState(false)
   const [pingError, setPingError] = useState('')
   const [pingConfirm, setPingConfirm] = useState(false)
+  const { isAnonymous } = usePresentation()
 
   const refreshAgent = useCallback(() => {
     getAgent(id).then(r => setAgent(r.data)).catch(() => {})
@@ -207,6 +210,16 @@ export default function AgentHistory() {
   useEffect(() => {
     let cancelled = false
     setAgent(null); setCheckins(null); setAsset(null); setError('')
+    // Agent de démonstration (mode Présentation, cf. SYNTHETIC_AGENTS) : n'existe pas en base,
+    // construit entièrement côté client — mêmes idiomes qu'Assets.jsx (isSyntheticId).
+    if (isSyntheticId(id)) {
+      const syntheticAgent = SYNTHETIC_AGENTS.find(a => a.id === id)
+      if (!syntheticAgent) { setError('Agent introuvable.'); return }
+      setAgent(syntheticAgent)
+      setCheckins(buildSyntheticAgentCheckins(syntheticAgent))
+      setAsset(SYNTHETIC_ASSETS.find(a => a.id === syntheticAgent.asset_id) || null)
+      return
+    }
     Promise.all([getAgent(id), agentCheckins(id, CHECKIN_LOAD_LIMIT)])
       .then(([agentRes, checkinsRes]) => {
         if (cancelled) return
@@ -235,6 +248,8 @@ export default function AgentHistory() {
   }
   if (!agent || !checkins) return <PageLoader />
 
+  const displayAgent = isAnonymous ? anonymizeAgent(agent) : agent
+  const displayAsset = isAnonymous ? anonymizeAsset(asset) : asset
   const items = checkins.items
   const gaps = items.filter(i => i.gap_started_at)
   const longestGapMs = gaps.length
@@ -255,12 +270,12 @@ export default function AgentHistory() {
 
       <PageHero
         icon="M9 17.25v1.007a3 3 0 01-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0115 18.257V17.25m6-12V15a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 15V5.25m18 0A2.25 2.25 0 0018.75 3H5.25A2.25 2.25 0 003 5.25m18 0V12a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 12V5.25"
-        title={agent.hostname}
+        title={displayAgent.hostname}
         color={MODULE_COLOR}
-        subtitle={agent.asset_name ? `Actif lié : ${agent.asset_name}` : 'Aucun actif lié'}
+        subtitle={displayAgent.asset_name ? `Actif lié : ${displayAgent.asset_name}` : 'Aucun actif lié'}
       >
         <StatusBadge value={agent.status} />
-        {agent.status === 'enrolled' && !pinging && (
+        {agent.status === 'enrolled' && !isSyntheticId(agent.id) && !pinging && (
           <button
             onClick={() => setPingConfirm(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
@@ -332,7 +347,7 @@ export default function AgentHistory() {
         {asset && (
           <>
             <StatTile label="Adresse IP">
-              <span className="font-mono">{asset.hardware?.ip || asset.ip_address || '—'}</span>
+              <span className="font-mono">{displayAsset.hardware?.ip || displayAsset.ip_address || '—'}</span>
             </StatTile>
             <StatTile label="Paquets installés">{asset.package_count}</StatTile>
             <StatTile label="Vulnérabilités ouvertes">
@@ -433,10 +448,10 @@ export default function AgentHistory() {
           />
           <FoundingEntry
             title="Jeton d'enrôlement généré"
-            subtitle={agent.enrollment_token_created_at
-              ? `par ${agent.enrollment_token_created_by || '—'}`
+            subtitle={displayAgent.enrollment_token_created_at
+              ? `par ${displayAgent.enrollment_token_created_by || '—'}`
               : 'Détails indisponibles (jeton révoqué ou supprimé)'}
-            date={agent.enrollment_token_created_at}
+            date={displayAgent.enrollment_token_created_at}
             color={MODULE_COLOR}
           />
         </div>
@@ -445,7 +460,7 @@ export default function AgentHistory() {
       {pingConfirm && (
         <ConfirmModal
           title="Ping de l'agent"
-          message={<>Envoyer un ping à <strong>{agent.hostname}</strong> ? L'agent répondra lors de son prochain sondage (≤ 5 s).</>}
+          message={<>Envoyer un ping à <strong>{displayAgent.hostname}</strong> ? L'agent répondra lors de son prochain sondage (≤ 5 s).</>}
           confirmLabel="Ping" busyLabel="Envoi…" color="#58a6ff"
           onConfirm={handlePing} onClose={() => setPingConfirm(false)} />
       )}

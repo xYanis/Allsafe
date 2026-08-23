@@ -3,7 +3,7 @@ routers/security.py
 Événements de déception (honeypots DB) — couche D (canal d'alerte in-app).
 
 Expose le journal `security_events` alimenté par les objets leurres
-(backend/db/deception_setup.sql). Consommé par la bannière rouge du Dashboard.
+(backend/db/legacy_views.sql). Consommé par la bannière rouge du Dashboard.
 Aucune écriture d'événement ici : les événements naissent en SQL, au moment où
 un attaquant touche une vue/rôle leurre — l'API ne fait que lire et acquitter.
 """
@@ -27,7 +27,7 @@ def _event_dict(e: SecurityEvent) -> dict:
     return {
         "id": e.id,
         "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
-        "source": e.source,                 # honey_read | honey_write | decoy_role
+        "source": e.source,                 # trap_read | trap_write | trap_role
         "object_name": e.object_name,
         "operation": e.operation,
         "db_user": e.db_user,

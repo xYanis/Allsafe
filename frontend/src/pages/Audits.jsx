@@ -8,7 +8,7 @@ import { MODULES } from '../constants/modules.js'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { FAKE_AUDITS, anonymizeAudit, anonymizeAsset } from '../utils/fakeData.js'
+import { SYNTHETIC_AUDITS, anonymizeAudit, anonymizeAsset } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.securite.color
 
@@ -80,11 +80,11 @@ export default function Audits() {
 
   const totalPages = Math.ceil(data.total / PER_PAGE)
   const noFilterActive = !statusFilter && !typeFilter && !search
-  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des fake data —
+  // Vraies lignes anonymisées (21/08/2026, retour utilisateur) avant l'ajout des synthetic data —
   // restaient jusqu'ici en clair (titre/scope/périmètre/mandataire), seules des lignes
-  // FAKE_AUDITS s'y ajoutaient.
+  // SYNTHETIC_AUDITS s'y ajoutaient.
   const anonymizedItems = isAnonymous ? data.items.map(a => anonymizeAudit(a, assetList)) : data.items
-  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...FAKE_AUDITS] : anonymizedItems
+  const displayItems = isAnonymous && noFilterActive && page === 1 ? [...anonymizedItems, ...SYNTHETIC_AUDITS] : anonymizedItems
   const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
 
   if (loading && data.items.length === 0 && !statusFilter && !typeFilter && !search) {

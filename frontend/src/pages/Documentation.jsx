@@ -13,7 +13,7 @@ import DocumentPreviewModal from '../components/DocumentPreviewModal.jsx'
 import ConfirmModal from '../components/ConfirmModal.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
-import { anonymizeDocument } from '../utils/fakeData.js'
+import { anonymizeDocument } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.documentation.color
 

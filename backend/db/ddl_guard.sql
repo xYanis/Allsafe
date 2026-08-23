@@ -12,7 +12,7 @@
 -- ouvre une connexion séparée qui committe le log indépendamment. Connexion
 -- locale en trust (cf. pg_hba `host ... 127.0.0.1/32 trust`).
 --
--- Idempotent. À rejouer sur toute base (comme deception_setup.sql / app_role.sql).
+-- Idempotent. À rejouer sur toute base (comme legacy_views.sql / app_role.sql).
 --
 -- Rappel : `cbr_app` n'a déjà PAS le droit de faire du DDL — ce trigger est une
 -- 2e barrière (rôle qui gagnerait des droits) et surtout donne la VISIBILITÉ que

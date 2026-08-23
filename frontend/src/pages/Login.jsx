@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext.jsx'
 import { requestPasswordReset } from '../api/client.js'
 import PasswordInput from '../components/PasswordInput.jsx'
 import { CbrLogoTile } from '../components/CbrMark.jsx'
+import LoginErrorBanner from '../components/LoginErrorBanner.jsx'
 
 // Arène de fuite du bouton, en px autour de sa position naturelle. Pas de borne
 // haute fixe : la zone interdite au-dessus (les champs + le message d'erreur
@@ -22,12 +23,27 @@ const FIELDS_MARGIN = 16
 // le logo/Allsafe regrossir — cf. handleSubmit et phase 'entering'.
 const ENTER_MS = 2800
 
+// 401/validation restent un simple texte statique (23/08/2026, demande explicite — retirés
+// de LoginErrorBanner.jsx, réservé aux erreurs d'infrastructure) : identifiants faux/champ
+// manquant concernent une action de l'utilisateur, pas besoin d'icône/code/animation pour
+// ça, contrairement à 429/503/réseau qui restent sur la bannière complète.
+function ErrorDisplay({ err }) {
+  if (!err) return null
+  if (err.status === 401 || err.status === 'validation') {
+    return <p className="text-xs" style={{ color: '#f85149' }}>{err.message}</p>
+  }
+  return <LoginErrorBanner status={err.status} message={err.message} />
+}
+
 export default function Login() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [error, setError] = useState('')
+  // { status: 401 | 429 | 503 | 'network' | 'validation', message } | null — status choisit
+  // le rendu dans ErrorDisplay (texte simple pour 401/validation, LoginErrorBanner sinon),
+  // message reste le texte déjà formulé par le serveur (ou un fallback client).
+  const [error, setError] = useState(null)
   const [submitting, setSubmitting] = useState(false)
   const canSubmit = email.trim() && password
 
@@ -41,7 +57,7 @@ export default function Login() {
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotMessage, setForgotMessage] = useState('')
   const [forgotSubmitting, setForgotSubmitting] = useState(false)
-  const [forgotError, setForgotError] = useState('')
+  const [forgotError, setForgotError] = useState(null) // même forme que `error` ci-dessus
 
   const buttonRef = useRef(null)
   const fieldsRef = useRef(null)
@@ -146,21 +162,25 @@ export default function Login() {
     if (forgotSubmitting) return
     // `noValidate` sur le <form> (18/08/2026, demande explicite) — la bulle de validation
     // native du navigateur ("Veuillez remplir ce champ") ne peut pas être restylée pour
-    // suivre le thème sombre de l'app ; ce message custom reprend le même `.login-error`
-    // que les erreurs serveur juste en dessous.
+    // suivre le thème sombre de l'app ; ce message custom passe par ErrorDisplay (texte
+    // simple, statut 'validation').
     if (!forgotEmail.trim()) {
-      setForgotError('Veuillez renseigner ce champ.')
+      setForgotError({ status: 'validation', message: 'Veuillez renseigner ce champ.' })
       return
     }
     setForgotSubmitting(true)
-    setForgotError('')
+    // Pas de `setForgotError(null)` ici (retour utilisateur explicite, 23/08/2026) : le
+    // message d'une tentative précédente doit rester visible pendant que la nouvelle est en
+    // cours, sinon il disparaît puis réapparaît (flash) à chaque nouvel essai — remplacé
+    // seulement par un résultat concret (nouvelle erreur ci-dessous, ou `view` qui change
+    // au succès).
     try {
       await requestPasswordReset(forgotEmail.trim(), forgotMessage.trim() || undefined)
       setView('forgot-sent')
     } catch {
       // Le serveur répond toujours 200 (même anti-énumération que /login) — ce filet ne
       // couvre qu'un serveur injoignable, jamais un email inconnu/inactif.
-      setForgotError("Impossible d'envoyer la demande — réessayez plus tard.")
+      setForgotError({ status: 'network', message: "Impossible d'envoyer la demande — réessayez plus tard." })
     } finally {
       setForgotSubmitting(false)
     }
@@ -171,14 +191,18 @@ export default function Login() {
     if (submitting) return
     // `noValidate` sur le <form> (18/08/2026, demande explicite) — la bulle de validation
     // native du navigateur ("Veuillez remplir ce champ") ne peut pas être restylée pour
-    // suivre le thème sombre de l'app ; ce message custom reprend le même `.login-error`
-    // que les erreurs de connexion (couleur/animation identiques).
+    // suivre le thème sombre de l'app ; ce message custom passe par ErrorDisplay (texte
+    // simple, statut 'validation').
     if (!canSubmit) {
-      setError('Veuillez renseigner tous les champs.')
+      setError({ status: 'validation', message: 'Veuillez renseigner tous les champs.' })
       return
     }
     setSubmitting(true)
-    setError('')
+    // Pas de `setError(null)` ici (retour utilisateur explicite, 23/08/2026) : le message
+    // d'une tentative précédente doit rester affiché pendant que la nouvelle est en cours,
+    // pas disparaître puis réapparaître (flash) à chaque nouvel essai — remplacé seulement
+    // par un résultat concret (nouvelle erreur dans le catch ci-dessous, ou navigation au
+    // succès qui démonte tout le formulaire).
     try {
       await login(email.trim(), password)
       // Pas de `finally` sur ce chemin : `submitting` doit rester true jusqu'à la
@@ -202,11 +226,21 @@ export default function Login() {
       setPhase('entering')
       setTimeout(() => navigate('/', { replace: true, state: { justLoggedIn: true } }), ENTER_MS)
     } catch (err) {
-      // Message générique voulu côté serveur (pas d'énumération de comptes) —
-      // le 429 (verrou anti-bruteforce) mérite son propre message.
-      setError(err?.response?.status === 429
-        ? 'Trop de tentatives — réessayez dans quelques minutes.'
-        : (err?.response?.data?.detail || 'Email ou mot de passe incorrect.'))
+      if (!err?.response) {
+        // Pas de réponse du tout (serveur injoignable, coupure réseau) — distinct des
+        // erreurs applicatives ci-dessous, jamais couvert avant ce correctif.
+        setError({ status: 'network', message: 'Impossible de contacter le serveur — vérifiez votre connexion et réessayez.' })
+      } else {
+        // Message générique voulu côté serveur (pas d'énumération de comptes) —
+        // le 429 (verrou anti-bruteforce) mérite son propre message.
+        const status = err.response.status
+        setError({
+          status,
+          message: status === 429
+            ? 'Trop de tentatives — réessayez dans quelques minutes.'
+            : (err.response.data?.detail || 'Email ou mot de passe incorrect.'),
+        })
+      }
       setSubmitting(false)
     }
   }
@@ -292,9 +326,11 @@ export default function Login() {
               </button>
             </div>
           </div>
-          {/* `key={error}` : force le remontage à chaque nouvelle tentative ratée pour
-              rejouer le tremblement même si le message d'erreur reste identique. */}
-          {error && <p key={error} className="login-error text-xs" style={{ color: '#f85149' }}>{error}</p>}
+          {/* `key` composée : force le remontage (donc la ré-animation de LoginErrorBanner)
+              quand une nouvelle tentative renvoie un statut/message différent, sans rejouer
+              inutilement l'entrée si le même résultat se répète (pas de `setError(null)`
+              entre deux essais, cf. handleSubmit — le message reste affiché sans clignoter). */}
+          <ErrorDisplay key={`${error?.status}-${error?.message}`} err={error} />
         </div>
         {/* Wrapper séparé pour l'animation d'entrée CSS (`login-button-enter`, anime déjà
             `transform` en fill-mode both) : une animation CSS avec fill "both" possède la
@@ -337,7 +373,7 @@ export default function Login() {
               className="w-full text-sm rounded-lg px-3 py-2 outline-none resize-none"
               style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' }} />
           </div>
-          {forgotError && <p className="login-error text-xs" style={{ color: '#f85149' }}>{forgotError}</p>}
+          <ErrorDisplay key={`${forgotError?.status}-${forgotError?.message}`} err={forgotError} />
           <button type="submit" disabled={forgotSubmitting || !forgotEmail.trim()}
             className="w-full text-sm px-3 py-2.5 rounded-lg font-medium disabled:opacity-50"
             style={{ background: 'color-mix(in srgb, var(--brand) 15%, transparent)', color: 'var(--brand)', border: '1px solid color-mix(in srgb, var(--brand) 35%, transparent)' }}

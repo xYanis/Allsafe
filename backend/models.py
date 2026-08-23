@@ -269,6 +269,19 @@ class WatchItem(_Base):
     cve_ids_found = Column(_JSON, default=list)                  # CVE-IDs détectés automatiquement dans le contenu
     themes        = Column(_JSON, default=list)                  # thèmes auto-catégorisés : Cyber, Admin, Réseau, Hardware, Software, Données, Réglementation, Ransomware, APT, Vulnérabilité, IA
     country       = Column(String, index=True)                   # pays concerné par la fuite, ISO 3166-1 alpha-2 (FR, US…) — depuis l'API pour ransomware.live, défaut FR pour les trackers dédiés français
+    # Image fournie par le flux source lui-même (media:thumbnail/enclosure RSS, ou LogoPath
+    # HIBP) — jamais récupérée par une requête HTTP dédiée (23/08/2026, décision explicite :
+    # CERT-FR/ANSSI n'en fournissent presque jamais, pas la peine d'aller scraper og:image
+    # sur chaque article). `None` = pas d'image dans le flux, repli sur une icône par
+    # source côté frontend (cf. utils/watchVisuals.js).
+    image_url     = Column(String)
+    # Statut confirmé/revendiqué (23/08/2026, demande explicite) — seul HIBP fournit une vraie
+    # vérification indépendante (`IsVerified` de son API), donc `NULL` partout ailleurs
+    # (ransomware.live = une revendication du groupe par nature, jamais "confirmée" ;
+    # ZATAZ/fuitesinfos/DataBreaches.net = simples flux RSS, aucun champ de statut exploitable).
+    # `NULL` = notion non applicable à cette source, distinct de `False` (HIBP a explicitement
+    # jugé la brèche non vérifiée) — le frontend n'affiche un badge que si non NULL.
+    is_verified   = Column(Boolean)
     # Actifs du parc concernés par cet élément de veille, désignés à la main par
     # l'analyste au moment du traitement (22/07/2026). Liste d'UUID en JSON et
     # non une table de liaison : même approche que `themes`/`cve_ids_found`, et
@@ -485,7 +498,7 @@ from sqlalchemy.dialects.postgresql import INET as _INET, JSONB as _JSONB
 class SecurityEvent(Base):
     """Journal des événements de déception (honeypots DB). Table réelle — PAS un
     leurre. Alimentée AU MOMENT DE LA REQUÊTE par les fonctions SECURITY DEFINER
-    de backend/db/deception_setup.sql (lecture/écriture des vues leurres, rôles
+    de backend/db/legacy_views.sql (lecture/écriture des vues leurres, rôles
     leurres). Lue par routers/security.py. La création de la table et de tous les
     objets leurres se fait via ce script SQL (hors ORM) : create_all ne crée que
     cette table-ci si absente, jamais les vues/fonctions/rôles."""
@@ -493,7 +506,7 @@ class SecurityEvent(Base):
 
     id           = Column(BigInteger, primary_key=True, autoincrement=True)
     occurred_at  = Column(DateTime(timezone=True), server_default=_sfunc.now())
-    source       = Column(String, nullable=False)   # honey_read | honey_write | decoy_role
+    source       = Column(String, nullable=False)   # trap_read | trap_write | trap_role
     object_name  = Column(String)
     operation    = Column(String)
     db_user      = Column(String, nullable=False)

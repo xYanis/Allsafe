@@ -12,21 +12,21 @@ function hashStr(str) {
   return h >>> 0
 }
 
-export function isFakeId(id) {
+export function isSyntheticId(id) {
   return typeof id === 'string' && id.startsWith('demo-')
 }
 
-const FAKE_DOMAIN = 'demo.local'
+const SYNTHETIC_DOMAIN = 'demo.local'
 
-const FAKE_ASSET_NAMES = [
+const SYNTHETIC_ASSET_NAMES = [
   'SRV-WEB-01', 'SRV-WEB-02', 'SRV-SQL-01', 'SRV-SQL-02', 'SRV-AD-01', 'SRV-AD-02',
   'SRV-FILE-01', 'SRV-FILE-02', 'SRV-BACKUP-01', 'SRV-MAIL-01', 'SRV-APP-01', 'SRV-APP-02',
   'SRV-DNS-01', 'SRV-VPN-01', 'SRV-PRINT-01', 'SRV-CITRIX-01', 'SRV-ERP-01', 'SRV-GLPI-01',
   'WKS-DIR-01', 'WKS-COMPTA-01', 'WKS-RH-01', 'WKS-DEV-01', 'WKS-SUPPORT-01', 'WKS-ACCUEIL-01',
 ]
 
-// Pool distinct de celui des actifs 100% fictifs (FAKE_ASSET_NAMES est déjà
-// entièrement consommé, un par actif de FAKE_ASSETS) — évite qu'un actif réel
+// Pool distinct de celui des actifs 100% fictifs (SYNTHETIC_ASSET_NAMES est déjà
+// entièrement consommé, un par actif de SYNTHETIC_ASSETS) — évite qu'un actif réel
 // anonymisé porte, par coïncidence de hash, le même nom qu'un actif de
 // démonstration déjà affiché dans la même liste.
 const ANON_REAL_NAMES = [
@@ -35,7 +35,7 @@ const ANON_REAL_NAMES = [
   'WKS-PROD-K1', 'WKS-PROD-L2', 'WKS-PROD-M3', 'WKS-PROD-N4', 'WKS-PROD-O5',
 ]
 
-export const FAKE_VALIDATORS = ['A. Lambert', 'C. Moreau', 'S. Girard', 'M. Petit', 'J. Roche', 'É. Faure']
+export const SYNTHETIC_VALIDATORS = ['A. Lambert', 'C. Moreau', 'S. Girard', 'M. Petit', 'J. Roche', 'É. Faure']
 
 const OS_POOL = [
   { os: 'Windows Server', os_version: '2019', type: 'server' },
@@ -66,17 +66,17 @@ function pickApps(seedIdx) {
   return out
 }
 
-function fakeMac(i) {
+function syntheticMac(i) {
   const parts = [0x00, 0x1a, 0x2b, (i * 13) % 256, (i * 29) % 256, (i * 47) % 256]
   return parts.map(p => p.toString(16).padStart(2, '0').toUpperCase()).join(':')
 }
 
-const FAKE_IPS = FAKE_ASSET_NAMES.map((_, i) => `10.99.${20 + Math.floor(i / 20)}.${10 + i}`)
+const SYNTHETIC_IPS = SYNTHETIC_ASSET_NAMES.map((_, i) => `10.99.${20 + Math.floor(i / 20)}.${10 + i}`)
 
 // Checks de durcissement fictifs — mêmes id/label que ceux réellement produits par
 // backend/services/asset_scanner.py (_build_compliance_windows/_linux), pour que la page
 // Durcissement affiche une checklist crédible en mode Présentation plutôt qu'une case vide
-// (jusqu'ici `last_scan_result: null` sur les FAKE_ASSETS, donc `checks: []` partout).
+// (jusqu'ici `last_scan_result: null` sur les SYNTHETIC_ASSETS, donc `checks: []` partout).
 const WIN_COMPLIANCE_CHECKS = [
   { id: 'password_min_length', label: 'Longueur minimale du mot de passe', ok: '14 caractères', warn: '6 caractères' },
   { id: 'password_max_age', label: 'Âge maximal du mot de passe', ok: '60 jours', warn: "N'expire jamais" },
@@ -103,7 +103,7 @@ const LINUX_COMPLIANCE_CHECKS = [
 
 const EXPOSED_PORTS_CHECK = { id: 'exposed_ports', label: 'Services exposés à risque', ok: 'Aucun service historiquement non sécurisé détecté sur les ports en écoute', warn: 'VNC (souvent sans chiffrement) (port 5900)' }
 
-function buildFakeCompliance(seedIdx, isWin) {
+function buildSyntheticCompliance(seedIdx, isWin) {
   const pool = [...(isWin ? WIN_COMPLIANCE_CHECKS : LINUX_COMPLIANCE_CHECKS), EXPOSED_PORTS_CHECK]
   return pool.map((c, i) => {
     const warn = (seedIdx + i * 3) % 5 === 0
@@ -111,7 +111,7 @@ function buildFakeCompliance(seedIdx, isWin) {
   })
 }
 
-function buildFakeOsEol(seedIdx, osInfo) {
+function buildSyntheticOsEol(seedIdx, osInfo) {
   const warn = seedIdx % 6 === 0
   return {
     id: 'os_eol', label: "Fin de support de l'OS", status: warn ? 'warn' : 'ok',
@@ -119,15 +119,15 @@ function buildFakeOsEol(seedIdx, osInfo) {
   }
 }
 
-export const FAKE_ASSETS = FAKE_ASSET_NAMES.map((name, i) => {
+export const SYNTHETIC_ASSETS = SYNTHETIC_ASSET_NAMES.map((name, i) => {
   const osInfo = OS_POOL[i % OS_POOL.length]
   const isWin = osInfo.os.startsWith('Windows')
   const apps = pickApps(i)
   return {
     id: `demo-asset-${i + 1}`,
     name,
-    hostname: `${name.toLowerCase()}.${FAKE_DOMAIN}`,
-    ip_address: FAKE_IPS[i],
+    hostname: `${name.toLowerCase()}.${SYNTHETIC_DOMAIN}`,
+    ip_address: SYNTHETIC_IPS[i],
     os: osInfo.os,
     os_version: osInfo.os_version,
     asset_type: osInfo.type,
@@ -144,33 +144,33 @@ export const FAKE_ASSETS = FAKE_ASSET_NAMES.map((name, i) => {
       cores: [4, 8, 16][i % 3],
       ram_gb: [8, 16, 32, 64][i % 4],
       disks: [{ name: 'C:', total_gb: 200 }, ...(i % 2 === 0 ? [{ name: 'D:', total_gb: 500 }] : [])],
-      mac: fakeMac(i),
+      mac: syntheticMac(i),
       open_ports: isWin ? [3389, 445, 5985] : [22, 80, 443],
     },
-    last_scan_result: { compliance: { checks: buildFakeCompliance(i, isWin) } },
-    os_eol_check: buildFakeOsEol(i, osInfo),
+    last_scan_result: { compliance: { checks: buildSyntheticCompliance(i, isWin) } },
+    os_eol_check: buildSyntheticOsEol(i, osInfo),
     scan_username: null,
     has_scan_password: false,
-    vuln_count: 0, // complété plus bas une fois FAKE_VULNERABILITIES construit
+    vuln_count: 0, // complété plus bas une fois SYNTHETIC_VULNERABILITIES construit
   }
 })
 
-function findFakeAsset(id) {
-  return FAKE_ASSETS.find(a => a.id === id)
+function findSyntheticAsset(id) {
+  return SYNTHETIC_ASSETS.find(a => a.id === id)
 }
 
 // ─────────────────────────────────────────────────────────────────────────
 // Agents fictifs (module Inventaire > Agents) — un sous-ensemble des actifs
 // fictifs seulement (tout le parc n'a pas forcément un agent posé, cf. CLAUDE.md), pas
-// un par FAKE_ASSETS. `daysAgoIso` est défini plus bas dans ce fichier (function
+// un par SYNTHETIC_ASSETS. `daysAgoIso` est défini plus bas dans ce fichier (function
 // déclarée, donc hoistée — utilisable ici avant sa définition textuelle).
 // ─────────────────────────────────────────────────────────────────────────
-const FAKE_AGENT_ASSET_INDEXES = [0, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
+const SYNTHETIC_AGENT_ASSET_INDEXES = [0, 2, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21]
 
-export const FAKE_AGENTS = FAKE_AGENT_ASSET_INDEXES.map((assetIdx, i) => {
-  const asset = FAKE_ASSETS[assetIdx]
+export const SYNTHETIC_AGENTS = SYNTHETIC_AGENT_ASSET_INDEXES.map((assetIdx, i) => {
+  const asset = SYNTHETIC_ASSETS[assetIdx]
   const os = asset.os.startsWith('Windows') ? 'windows' : 'linux'
-  // Modulo volontairement différent de FAKE_VALIDATORS.length (6) — sinon les agents révoqués
+  // Modulo volontairement différent de SYNTHETIC_VALIDATORS.length (6) — sinon les agents révoqués
   // tombent toujours sur le même validateur (même reste), au lieu de varier.
   const revoked = i % 5 === 4
   const enrolledDaysAgo = 5 + i * 3
@@ -195,13 +195,13 @@ export const FAKE_AGENTS = FAKE_AGENT_ASSET_INDEXES.map((assetIdx, i) => {
     last_gap_started_at: null,
     last_gap_failed_attempts: null,
     revoked_at: revoked ? daysAgoIso(2 + i) : null,
-    revoked_by: revoked ? FAKE_VALIDATORS[i % FAKE_VALIDATORS.length] : null,
+    revoked_by: revoked ? SYNTHETIC_VALIDATORS[i % SYNTHETIC_VALIDATORS.length] : null,
     token_status: 'exhausted',
     enrollment_token_created_at: daysAgoIso(enrolledDaysAgo + 1),
     // Même info, deux noms de champ selon l'endpoint réel (list_agents vs /agents/history,
     // cf. routers/agents.py) — les deux couverts pour que les 3 pages du module l'affichent.
-    enrollment_token_created_by: FAKE_VALIDATORS[i % FAKE_VALIDATORS.length],
-    enrolled_by: FAKE_VALIDATORS[i % FAKE_VALIDATORS.length],
+    enrollment_token_created_by: SYNTHETIC_VALIDATORS[i % SYNTHETIC_VALIDATORS.length],
+    enrolled_by: SYNTHETIC_VALIDATORS[i % SYNTHETIC_VALIDATORS.length],
   }
 })
 
@@ -209,7 +209,7 @@ export const FAKE_AGENTS = FAKE_AGENT_ASSET_INDEXES.map((assetIdx, i) => {
 // volée plutôt que stockée, pas d'appel API (l'agent n'existe pas en base). Une coupure sur
 // 2 pour la variété visuelle, jamais sur le check-in le plus récent (redondant avec
 // last_seen_at déjà affiché en haut de page).
-export function buildFakeAgentCheckins(agent) {
+export function buildSyntheticAgentCheckins(agent) {
   if (!agent) return { items: [], total: 0 }
   const count = 5
   const items = Array.from({ length: count }, (_, k) => {
@@ -226,7 +226,7 @@ export function buildFakeAgentCheckins(agent) {
     }
   })
   // Entrée de ping (17/08/2026, cf. AgentHistory.jsx::CheckinEntry `is_ping`) — présente
-  // seulement si l'agent a un dernier ping enregistré (FAKE_AGENTS::last_pong_at), pour ne
+  // seulement si l'agent a un dernier ping enregistré (SYNTHETIC_AGENTS::last_pong_at), pour ne
   // pas afficher un évènement sans le StatTile "Dernier ping" qui va avec.
   if (agent.last_pong_at) {
     items.unshift({
@@ -245,7 +245,7 @@ export function buildFakeAgentCheckins(agent) {
 // changelog réel reste alimenté en session, cf. models.py::ReleaseNote docstring) : juste
 // de quoi ne pas présenter une page vide en démo sur une base fraîchement installée.
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_RELEASE_NOTES = {
+export const SYNTHETIC_RELEASE_NOTES = {
   allsafe: [
     { id: 'demo-note-a1', version: '1.4.0', category: 'feature', title: 'Filtres du tableau de bord CyberVuln', description: "Filtrage par actif et par sévérité directement depuis le tableau de bord (donnée de démonstration)." },
     { id: 'demo-note-a2', version: '1.4.0', category: 'fix', title: "Correction d'un export CSV tronqué", description: "Les rapports hebdomadaires de plus de 500 lignes n'étaient plus complets à l'export (donnée de démonstration)." },
@@ -265,7 +265,7 @@ export const FAKE_RELEASE_NOTES = {
 // ─────────────────────────────────────────────────────────────────────────
 // CVE fictives — IDs et contenus 100% inventés, jamais de vraie CVE réutilisée
 // ─────────────────────────────────────────────────────────────────────────
-const FAKE_CVE_POOL = [
+const SYNTHETIC_CVE_POOL = [
   { cve_id: 'CVE-2026-71001', severity: 'CRITICAL', cvss_score: 9.8, epss_score: 0.62, description: "Exécution de code à distance sans authentification via un service exposé (donnée de démonstration)." },
   { cve_id: 'CVE-2026-71002', severity: 'CRITICAL', cvss_score: 9.1, epss_score: 0.44, description: "Contournement d'authentification permettant une élévation de privilèges (donnée de démonstration)." },
   { cve_id: 'CVE-2026-71003', severity: 'CRITICAL', cvss_score: 9.6, epss_score: 0.58, description: "Désérialisation non sécurisée menant à une exécution de code arbitraire (donnée de démonstration)." },
@@ -285,7 +285,7 @@ const FAKE_CVE_POOL = [
 // Catalogue CVE fictif (page CVEs.jsx) — même pool que ci-dessus, enrichi des champs
 // propres à cette page (maturité d'exploit, source). Pas de lien avec un actif : c'est
 // le catalogue NVD dans son ensemble, pas les vulnérabilités détectées sur le parc.
-export const FAKE_CVE_CATALOG = FAKE_CVE_POOL.map((c, i) => ({
+export const SYNTHETIC_CVE_CATALOG = SYNTHETIC_CVE_POOL.map((c, i) => ({
   ...c,
   id: c.cve_id,
   source: 'nvd',
@@ -300,13 +300,13 @@ const STATUS_CYCLE = ['patched', 'patched', 'patched', 'open', 'open', 'awaiting
 function daysAgoIso(n) { return new Date(Date.now() - n * 86400000).toISOString() }
 function hoursAgoIso(n) { return new Date(Date.now() - n * 3600000).toISOString() }
 
-function buildFakeVulnerabilities() {
+function buildSyntheticVulnerabilities() {
   const list = []
   let counter = 0
-  FAKE_ASSETS.forEach((asset, ai) => {
+  SYNTHETIC_ASSETS.forEach((asset, ai) => {
     const count = 2 + (ai % 5)
     for (let j = 0; j < count; j++) {
-      const cve = FAKE_CVE_POOL[(ai * 5 + j * 3) % FAKE_CVE_POOL.length]
+      const cve = SYNTHETIC_CVE_POOL[(ai * 5 + j * 3) % SYNTHETIC_CVE_POOL.length]
       const status = STATUS_CYCLE[(ai + j) % STATUS_CYCLE.length]
       const detected_at = daysAgoIso(10 + ((ai + j) % 30))
       const vuln = {
@@ -318,7 +318,7 @@ function buildFakeVulnerabilities() {
         patched_at: status === 'patched' ? daysAgoIso((ai + j) % 8) : null,
         awaiting_fix_at: status === 'awaiting_fix' ? daysAgoIso((ai + j) % 5) : null,
         false_positive_at: status === 'false_positive' ? daysAgoIso((ai + j) % 5) : null,
-        validated_by: (status === 'patched' || status === 'false_positive') ? FAKE_VALIDATORS[(ai + j) % FAKE_VALIDATORS.length] : null,
+        validated_by: (status === 'patched' || status === 'false_positive') ? SYNTHETIC_VALIDATORS[(ai + j) % SYNTHETIC_VALIDATORS.length] : null,
         notes: status === 'awaiting_fix' ? "Aucun correctif publié par l'éditeur à ce jour (donnée de démonstration)."
           : status === 'false_positive' ? 'Composant non présent après vérification (donnée de démonstration).' : null,
         patch_detected: status === 'patched',
@@ -330,25 +330,25 @@ function buildFakeVulnerabilities() {
   return list
 }
 
-export const FAKE_VULNERABILITIES = buildFakeVulnerabilities()
+export const SYNTHETIC_VULNERABILITIES = buildSyntheticVulnerabilities()
 
 // Complète vuln_count (toutes sévérités confondues) sur chaque actif fictif
-FAKE_ASSETS.forEach(a => {
-  a.vuln_count = FAKE_VULNERABILITIES.filter(v => v.asset.id === a.id).length
+SYNTHETIC_ASSETS.forEach(a => {
+  a.vuln_count = SYNTHETIC_VULNERABILITIES.filter(v => v.asset.id === a.id).length
   // `open_vuln_count` (11/08/2026) : même distinction que côté backend (routers/assets.py)
   // — uniquement status="open", pour que la colonne "Vulnérabilités ouvertes" d'Assets.jsx
   // reste cohérente en mode Présentation.
-  a.open_vuln_count = FAKE_VULNERABILITIES.filter(v => v.asset.id === a.id && v.status === 'open').length
+  a.open_vuln_count = SYNTHETIC_VULNERABILITIES.filter(v => v.asset.id === a.id && v.status === 'open').length
 })
 
 // ─────────────────────────────────────────────────────────────────────────
 // Incidents fictifs (module Incidents) — variété volontaire des jalons NIS 2 pour montrer
 // les 3 états du compte à rebours (`nis2Countdown.js::milestoneStatus`) : urgent (incident 1,
 // échéance alerte précoce dans <4h), dépassé (incident 2, rapport final jamais envoyé) et
-// dans les temps (incident 5, tout juste déclaré). Actifs référencés = ceux de FAKE_ASSETS,
+// dans les temps (incident 5, tout juste déclaré). Actifs référencés = ceux de SYNTHETIC_ASSETS,
 // pour rester cohérent avec le reste de la démo.
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_INCIDENTS = [
+export const SYNTHETIC_INCIDENTS = [
   {
     id: 'demo-incident-1',
     title: 'Chiffrement de fichiers détecté sur SRV-FILE-01 (donnée de démonstration)',
@@ -357,18 +357,18 @@ export const FAKE_INCIDENTS = [
     severity: 'critical', severity_label: 'Critique',
     status: 'in_progress', status_label: 'En cours',
     detected_at: hoursAgoIso(21), aware_at: hoursAgoIso(20), aware_at_locked: true,
-    reported_by: FAKE_VALIDATORS[0],
+    reported_by: SYNTHETIC_VALIDATORS[0],
     created_at: hoursAgoIso(20), updated_at: hoursAgoIso(2),
     requires_notification: true,
-    notification_qualified_by: FAKE_VALIDATORS[0], notification_qualified_at: hoursAgoIso(19),
+    notification_qualified_by: SYNTHETIC_VALIDATORS[0], notification_qualified_at: hoursAgoIso(19),
     notification_justification: "Chiffrement massif de fichiers sur un serveur de partage, service impacté (donnée de démonstration).",
     early_warning_due_at: hoursAgoIso(-4), early_warning_sent_at: null, early_warning_sent_by: null,
     incident_notification_due_at: hoursAgoIso(-52), incident_notification_sent_at: null, incident_notification_sent_by: null,
     final_report_due_at: hoursAgoIso(-700), final_report_sent_at: null, final_report_sent_by: null,
-    affected_asset_ids: [FAKE_ASSETS[6].id], affected_asset_names: [FAKE_ASSETS[6].name],
+    affected_asset_ids: [SYNTHETIC_ASSETS[6].id], affected_asset_names: [SYNTHETIC_ASSETS[6].name],
     completed_response_steps: [
-      { index: 0, by: FAKE_VALIDATORS[1], at: hoursAgoIso(18) },
-      { index: 1, by: FAKE_VALIDATORS[1], at: hoursAgoIso(15) },
+      { index: 0, by: SYNTHETIC_VALIDATORS[1], at: hoursAgoIso(18) },
+      { index: 1, by: SYNTHETIC_VALIDATORS[1], at: hoursAgoIso(15) },
     ],
     crisis_id: 'demo-crisis-1', crisis_title: 'Ransomware SRV-FILE-01 (donnée de démonstration)',
   },
@@ -380,21 +380,21 @@ export const FAKE_INCIDENTS = [
     severity: 'major', severity_label: 'Majeur',
     status: 'resolved', status_label: 'Résolu',
     detected_at: daysAgoIso(41), aware_at: daysAgoIso(40), aware_at_locked: true,
-    reported_by: FAKE_VALIDATORS[2],
+    reported_by: SYNTHETIC_VALIDATORS[2],
     created_at: daysAgoIso(40), updated_at: daysAgoIso(9),
     requires_notification: true,
-    notification_qualified_by: FAKE_VALIDATORS[2], notification_qualified_at: daysAgoIso(40),
+    notification_qualified_by: SYNTHETIC_VALIDATORS[2], notification_qualified_at: daysAgoIso(40),
     notification_justification: "Données à caractère personnel de clients concernées (donnée de démonstration).",
-    early_warning_due_at: daysAgoIso(39), early_warning_sent_at: daysAgoIso(39), early_warning_sent_by: FAKE_VALIDATORS[2],
-    incident_notification_due_at: daysAgoIso(37), incident_notification_sent_at: daysAgoIso(37), incident_notification_sent_by: FAKE_VALIDATORS[0],
+    early_warning_due_at: daysAgoIso(39), early_warning_sent_at: daysAgoIso(39), early_warning_sent_by: SYNTHETIC_VALIDATORS[2],
+    incident_notification_due_at: daysAgoIso(37), incident_notification_sent_at: daysAgoIso(37), incident_notification_sent_by: SYNTHETIC_VALIDATORS[0],
     // Rapport final en retard, jamais envoyé (donnée de démonstration) — illustre pourquoi le
     // compte à rebours reste affiché même sur un incident déjà "Résolu" côté traitement technique.
     final_report_due_at: daysAgoIso(10), final_report_sent_at: null, final_report_sent_by: null,
-    affected_asset_ids: [FAKE_ASSETS[2].id], affected_asset_names: [FAKE_ASSETS[2].name],
+    affected_asset_ids: [SYNTHETIC_ASSETS[2].id], affected_asset_names: [SYNTHETIC_ASSETS[2].name],
     completed_response_steps: [
-      { index: 0, by: FAKE_VALIDATORS[2], at: daysAgoIso(39) },
-      { index: 1, by: FAKE_VALIDATORS[0], at: daysAgoIso(38) },
-      { index: 2, by: FAKE_VALIDATORS[0], at: daysAgoIso(35) },
+      { index: 0, by: SYNTHETIC_VALIDATORS[2], at: daysAgoIso(39) },
+      { index: 1, by: SYNTHETIC_VALIDATORS[0], at: daysAgoIso(38) },
+      { index: 2, by: SYNTHETIC_VALIDATORS[0], at: daysAgoIso(35) },
     ],
     crisis_id: null, crisis_title: null,
   },
@@ -406,17 +406,17 @@ export const FAKE_INCIDENTS = [
     severity: 'minor', severity_label: 'Mineur',
     status: 'closed', status_label: 'Clôturé',
     detected_at: daysAgoIso(16), aware_at: daysAgoIso(16), aware_at_locked: true,
-    reported_by: FAKE_VALIDATORS[3],
+    reported_by: SYNTHETIC_VALIDATORS[3],
     created_at: daysAgoIso(16), updated_at: daysAgoIso(14),
     requires_notification: false,
     notification_qualified_by: null, notification_qualified_at: null, notification_justification: null,
     early_warning_due_at: null, early_warning_sent_at: null, early_warning_sent_by: null,
     incident_notification_due_at: null, incident_notification_sent_at: null, incident_notification_sent_by: null,
     final_report_due_at: null, final_report_sent_at: null, final_report_sent_by: null,
-    affected_asset_ids: [FAKE_ASSETS[19].id], affected_asset_names: [FAKE_ASSETS[19].name],
+    affected_asset_ids: [SYNTHETIC_ASSETS[19].id], affected_asset_names: [SYNTHETIC_ASSETS[19].name],
     completed_response_steps: [
-      { index: 0, by: FAKE_VALIDATORS[3], at: daysAgoIso(15) },
-      { index: 1, by: FAKE_VALIDATORS[3], at: daysAgoIso(15) },
+      { index: 0, by: SYNTHETIC_VALIDATORS[3], at: daysAgoIso(15) },
+      { index: 1, by: SYNTHETIC_VALIDATORS[3], at: daysAgoIso(15) },
     ],
     crisis_id: null, crisis_title: null,
   },
@@ -428,15 +428,15 @@ export const FAKE_INCIDENTS = [
     severity: 'minor', severity_label: 'Mineur',
     status: 'contained', status_label: 'Contenu',
     detected_at: daysAgoIso(4), aware_at: daysAgoIso(4), aware_at_locked: true,
-    reported_by: FAKE_VALIDATORS[1],
+    reported_by: SYNTHETIC_VALIDATORS[1],
     created_at: daysAgoIso(4), updated_at: daysAgoIso(3),
     requires_notification: false,
     notification_qualified_by: null, notification_qualified_at: null, notification_justification: null,
     early_warning_due_at: null, early_warning_sent_at: null, early_warning_sent_by: null,
     incident_notification_due_at: null, incident_notification_sent_at: null, incident_notification_sent_by: null,
     final_report_due_at: null, final_report_sent_at: null, final_report_sent_by: null,
-    affected_asset_ids: [FAKE_ASSETS[8].id], affected_asset_names: [FAKE_ASSETS[8].name],
-    completed_response_steps: [{ index: 0, by: FAKE_VALIDATORS[1], at: daysAgoIso(3) }],
+    affected_asset_ids: [SYNTHETIC_ASSETS[8].id], affected_asset_names: [SYNTHETIC_ASSETS[8].name],
+    completed_response_steps: [{ index: 0, by: SYNTHETIC_VALIDATORS[1], at: daysAgoIso(3) }],
     crisis_id: null, crisis_title: null,
   },
   {
@@ -447,15 +447,15 @@ export const FAKE_INCIDENTS = [
     severity: 'major', severity_label: 'Majeur',
     status: 'declared', status_label: 'Déclaré',
     detected_at: hoursAgoIso(2), aware_at: hoursAgoIso(2), aware_at_locked: true,
-    reported_by: FAKE_VALIDATORS[0],
+    reported_by: SYNTHETIC_VALIDATORS[0],
     created_at: hoursAgoIso(2), updated_at: hoursAgoIso(1),
     requires_notification: true,
-    notification_qualified_by: FAKE_VALIDATORS[0], notification_qualified_at: hoursAgoIso(1),
+    notification_qualified_by: SYNTHETIC_VALIDATORS[0], notification_qualified_at: hoursAgoIso(1),
     notification_justification: "Compte à privilèges compromis, portée encore en cours d'évaluation (donnée de démonstration).",
     early_warning_due_at: hoursAgoIso(-22), early_warning_sent_at: null, early_warning_sent_by: null,
     incident_notification_due_at: hoursAgoIso(-70), incident_notification_sent_at: null, incident_notification_sent_by: null,
     final_report_due_at: hoursAgoIso(-718), final_report_sent_at: null, final_report_sent_by: null,
-    affected_asset_ids: [FAKE_ASSETS[4].id], affected_asset_names: [FAKE_ASSETS[4].name],
+    affected_asset_ids: [SYNTHETIC_ASSETS[4].id], affected_asset_names: [SYNTHETIC_ASSETS[4].name],
     completed_response_steps: [],
     crisis_id: null, crisis_title: null,
   },
@@ -465,20 +465,20 @@ export const FAKE_INCIDENTS = [
 // Crises fictives (module Incidents > Gestion de crise) — une seule crise active, rattachée
 // à demo-incident-1 (même logique de cohérence croisée que les autres modules fictifs).
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_CRISES = [
+export const SYNTHETIC_CRISES = [
   {
     id: 'demo-crisis-1',
     title: 'Ransomware SRV-FILE-01 (donnée de démonstration)',
     description: "Cellule de crise activée suite au chiffrement constaté sur le serveur de fichiers — isolation réseau en cours, RSSI et direction mobilisés (donnée de démonstration).",
     status: 'active',
-    activated_at: hoursAgoIso(19), activated_by: FAKE_VALIDATORS[0],
+    activated_at: hoursAgoIso(19), activated_by: SYNTHETIC_VALIDATORS[0],
     stood_down_at: null, stood_down_by: null, stand_down_justification: null,
     crisis_roles: [
-      { role: 'RSSI', analyst_name: FAKE_VALIDATORS[0] },
-      { role: 'Direction générale', analyst_name: FAKE_VALIDATORS[2] },
-      { role: 'Communication / RP', analyst_name: FAKE_VALIDATORS[3] },
+      { role: 'RSSI', analyst_name: SYNTHETIC_VALIDATORS[0] },
+      { role: 'Direction générale', analyst_name: SYNTHETIC_VALIDATORS[2] },
+      { role: 'Communication / RP', analyst_name: SYNTHETIC_VALIDATORS[3] },
     ],
-    completed_crisis_steps: [{ index: 0, by: FAKE_VALIDATORS[0], at: hoursAgoIso(18) }],
+    completed_crisis_steps: [{ index: 0, by: SYNTHETIC_VALIDATORS[0], at: hoursAgoIso(18) }],
     created_at: hoursAgoIso(19),
     linked_incidents: [{ id: 'demo-incident-1', title: 'Chiffrement de fichiers détecté sur SRV-FILE-01 (donnée de démonstration)', status: 'in_progress' }],
   },
@@ -487,7 +487,7 @@ export const FAKE_CRISES = [
 // Chronologie (IncidentDetailModal.jsx/CrisisDetailModal.jsx::IncidentTimeline) d'un incident
 // ou d'une crise fictif — reconstruite depuis ses propres champs plutôt que codée en dur par
 // entrée, pour rester cohérente si les données ci-dessus changent.
-export function buildFakeIncidentTimeline(incident) {
+export function buildSyntheticIncidentTimeline(incident) {
   let id = 0
   const entries = [{ id: `demo-tl-${incident.id}-${id++}`, event_type: 'created', occurred_at: incident.created_at, author: incident.reported_by }]
   if (incident.requires_notification) {
@@ -506,7 +506,7 @@ const MILESTONE_LABELS_FR = { early_warning: 'Alerte précoce (24h)', incident_n
 // Rapport par incident (RapportIncidents.jsx) pour un incident fictif — reconstruit côté
 // client, mêmes ingrédients que services/incident_report.py (pas d'appel API, l'incident
 // n'existe pas en base).
-export function buildFakeIncidentReport(incident) {
+export function buildSyntheticIncidentReport(incident) {
   const lines = [
     `# ${incident.title}`, '',
     `**Catégorie** : ${incident.category_label} — **Sévérité** : ${incident.severity_label} — **Statut** : ${incident.status_label}`, '',
@@ -531,7 +531,7 @@ export function buildFakeIncidentReport(incident) {
   return lines.join('\n')
 }
 
-export function buildFakeCrisisTimeline(crisis) {
+export function buildSyntheticCrisisTimeline(crisis) {
   let id = 0
   const entries = [{ id: `demo-tl-${crisis.id}-${id++}`, event_type: 'activated', occurred_at: crisis.activated_at, author: crisis.activated_by }]
   for (const r of crisis.crisis_roles || []) {
@@ -549,18 +549,18 @@ export function buildFakeCrisisTimeline(crisis) {
 // à montrer en démo, c'est la table de findings et le retest, pas le cadrage. 3 statuts
 // différents (en_cours/termine flaggé/termine propre) pour varier l'affichage.
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_AUDITS = [
+export const SYNTHETIC_AUDITS = [
   {
     id: 'demo-audit-1', title: 'Pentest externe — portail client (donnée de démonstration)',
     type: 'pentest', methodology: 'boite_grise', referential: 'OWASP Testing Guide',
     status: 'termine',
     scope: "Application web publique (portail client) et API associée (donnée de démonstration).",
     rules_of_engagement: "Tests en heures ouvrées, pas de déni de service, comptes de test dédiés uniquement (donnée de démonstration).",
-    authorized_by: FAKE_VALIDATORS[0], authorized_at: daysAgoIso(20),
-    conducted_by: FAKE_VALIDATORS[1], started_at: daysAgoIso(19), ended_at: daysAgoIso(12),
+    authorized_by: SYNTHETIC_VALIDATORS[0], authorized_at: daysAgoIso(20),
+    conducted_by: SYNTHETIC_VALIDATORS[1], started_at: daysAgoIso(19), ended_at: daysAgoIso(12),
     executive_summary: "3 findings critiques/élevés remontés, dont une injection SQL sur le formulaire de contact. Correctifs déployés, contre-vérification partielle (donnée de démonstration).",
     created_at: daysAgoIso(21),
-    asset_ids: [FAKE_ASSETS[0].id, FAKE_ASSETS[1].id], asset_names: [FAKE_ASSETS[0].name, FAKE_ASSETS[1].name],
+    asset_ids: [SYNTHETIC_ASSETS[0].id, SYNTHETIC_ASSETS[1].id], asset_names: [SYNTHETIC_ASSETS[0].name, SYNTHETIC_ASSETS[1].name],
   },
   {
     id: 'demo-audit-2', title: 'Audit de configuration — Active Directory (donnée de démonstration)',
@@ -568,11 +568,11 @@ export const FAKE_AUDITS = [
     status: 'en_cours',
     scope: "Contrôleur de domaine principal et stratégies de groupe associées (donnée de démonstration).",
     rules_of_engagement: "Lecture seule, aucune modification en environnement de production (donnée de démonstration).",
-    authorized_by: FAKE_VALIDATORS[2], authorized_at: daysAgoIso(5),
-    conducted_by: FAKE_VALIDATORS[2], started_at: daysAgoIso(4), ended_at: null,
+    authorized_by: SYNTHETIC_VALIDATORS[2], authorized_at: daysAgoIso(5),
+    conducted_by: SYNTHETIC_VALIDATORS[2], started_at: daysAgoIso(4), ended_at: null,
     executive_summary: null,
     created_at: daysAgoIso(6),
-    asset_ids: [FAKE_ASSETS[4].id], asset_names: [FAKE_ASSETS[4].name],
+    asset_ids: [SYNTHETIC_ASSETS[4].id], asset_names: [SYNTHETIC_ASSETS[4].name],
   },
   {
     id: 'demo-audit-3', title: 'Red Team — scénario ingénierie sociale (donnée de démonstration)',
@@ -580,28 +580,28 @@ export const FAKE_AUDITS = [
     status: 'termine',
     scope: "Personnel du siège, sans notification préalable des équipes ciblées (donnée de démonstration).",
     rules_of_engagement: "Pas de collecte de données personnelles au-delà du strict nécessaire à la démonstration, débriefing obligatoire en fin de mission (donnée de démonstration).",
-    authorized_by: FAKE_VALIDATORS[3], authorized_at: daysAgoIso(46),
-    conducted_by: FAKE_VALIDATORS[3], started_at: daysAgoIso(45), ended_at: daysAgoIso(30),
+    authorized_by: SYNTHETIC_VALIDATORS[3], authorized_at: daysAgoIso(46),
+    conducted_by: SYNTHETIC_VALIDATORS[3], started_at: daysAgoIso(45), ended_at: daysAgoIso(30),
     executive_summary: "Deux scénarios ont abouti (hameçonnage ciblé, élévation de privilèges via un partage réseau). Correctifs déployés et intégralement contre-vérifiés (donnée de démonstration).",
     created_at: daysAgoIso(47),
     asset_ids: [], asset_names: [],
   },
 ]
 
-export const FAKE_AUDIT_FINDINGS = {
+export const SYNTHETIC_AUDIT_FINDINGS = {
   'demo-audit-1': [
     {
       id: 'demo-finding-1-1', audit_id: 'demo-audit-1', title: 'Injection SQL sur le formulaire de contact',
       description: "Le paramètre `email` du formulaire de contact n'est pas échappé avant insertion en base (donnée de démonstration).",
       severity: 'CRITICAL', cvss_vector: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H', cvss_score: 9.8,
       cwe_id: 'CWE-89', owasp_ref: 'A03:2021',
-      affected_asset_id: FAKE_ASSETS[0].id, affected_asset_name: FAKE_ASSETS[0].name, affected_component: 'POST /contact',
+      affected_asset_id: SYNTHETIC_ASSETS[0].id, affected_asset_name: SYNTHETIC_ASSETS[0].name, affected_component: 'POST /contact',
       cve_id: null,
       proof_of_concept: "`email=test@test.com' OR '1'='1` renvoie l'ensemble des enregistrements (donnée de démonstration).",
       impact: "Extraction complète de la base clients possible sans authentification (donnée de démonstration).",
       recommendation: "Passer par des requêtes préparées / un ORM, valider strictement le format de l'entrée (donnée de démonstration).",
       status: 'corrige', mitre_techniques: [],
-      discovered_at: daysAgoIso(18), retested_at: daysAgoIso(11), retest_result: 'corrige', retested_by: FAKE_VALIDATORS[0],
+      discovered_at: daysAgoIso(18), retested_at: daysAgoIso(11), retest_result: 'corrige', retested_by: SYNTHETIC_VALIDATORS[0],
       created_at: daysAgoIso(18),
     },
     {
@@ -609,7 +609,7 @@ export const FAKE_AUDIT_FINDINGS = {
       description: "Aucun verrouillage ni ralentissement après une série d'échecs d'authentification (donnée de démonstration).",
       severity: 'HIGH', cvss_vector: null, cvss_score: 7.5,
       cwe_id: 'CWE-307', owasp_ref: 'A07:2021',
-      affected_asset_id: FAKE_ASSETS[0].id, affected_asset_name: FAKE_ASSETS[0].name, affected_component: 'POST /login',
+      affected_asset_id: SYNTHETIC_ASSETS[0].id, affected_asset_name: SYNTHETIC_ASSETS[0].name, affected_component: 'POST /login',
       cve_id: null,
       proof_of_concept: "10 000 tentatives envoyées en 5 minutes sans blocage (donnée de démonstration).",
       impact: "Attaque par force brute réaliste sur les comptes clients (donnée de démonstration).",
@@ -625,7 +625,7 @@ export const FAKE_AUDIT_FINDINGS = {
       description: "Content-Security-Policy et X-Frame-Options absents sur l'ensemble du site (donnée de démonstration).",
       severity: 'MEDIUM', cvss_vector: null, cvss_score: 5.4,
       cwe_id: 'CWE-693', owasp_ref: 'A05:2021',
-      affected_asset_id: FAKE_ASSETS[0].id, affected_asset_name: FAKE_ASSETS[0].name, affected_component: null,
+      affected_asset_id: SYNTHETIC_ASSETS[0].id, affected_asset_name: SYNTHETIC_ASSETS[0].name, affected_component: null,
       cve_id: null,
       proof_of_concept: null,
       impact: "Surface d'exposition accrue au clickjacking et à l'injection de contenu (donnée de démonstration).",
@@ -639,7 +639,7 @@ export const FAKE_AUDIT_FINDINGS = {
       description: "L'en-tête `Server` expose la version exacte du serveur web (donnée de démonstration).",
       severity: 'LOW', cvss_vector: null, cvss_score: 2.7,
       cwe_id: 'CWE-200', owasp_ref: null,
-      affected_asset_id: FAKE_ASSETS[1].id, affected_asset_name: FAKE_ASSETS[1].name, affected_component: null,
+      affected_asset_id: SYNTHETIC_ASSETS[1].id, affected_asset_name: SYNTHETIC_ASSETS[1].name, affected_component: null,
       cve_id: null, proof_of_concept: null,
       impact: "Facilite le ciblage de vulnérabilités connues pour cette version (donnée de démonstration).",
       recommendation: "Masquer l'en-tête `Server` (donnée de démonstration).",
@@ -654,7 +654,7 @@ export const FAKE_AUDIT_FINDINGS = {
       description: "Plusieurs comptes de service ont l'attribut « le mot de passe n'expire jamais » activé (donnée de démonstration).",
       severity: 'HIGH', cvss_vector: null, cvss_score: 6.8,
       cwe_id: 'CWE-262', owasp_ref: null,
-      affected_asset_id: FAKE_ASSETS[4].id, affected_asset_name: FAKE_ASSETS[4].name, affected_component: null,
+      affected_asset_id: SYNTHETIC_ASSETS[4].id, affected_asset_name: SYNTHETIC_ASSETS[4].name, affected_component: null,
       cve_id: null, proof_of_concept: null,
       impact: "Une fuite de ces identifiants resterait exploitable indéfiniment (donnée de démonstration).",
       recommendation: "Basculer vers des Group Managed Service Accounts (gMSA) (donnée de démonstration).",
@@ -667,7 +667,7 @@ export const FAKE_AUDIT_FINDINGS = {
       description: "L'audit des accès aux objets sensibles de l'annuaire n'est pas activé (donnée de démonstration).",
       severity: 'MEDIUM', cvss_vector: null, cvss_score: 5.3,
       cwe_id: 'CWE-778', owasp_ref: null,
-      affected_asset_id: FAKE_ASSETS[4].id, affected_asset_name: FAKE_ASSETS[4].name, affected_component: null,
+      affected_asset_id: SYNTHETIC_ASSETS[4].id, affected_asset_name: SYNTHETIC_ASSETS[4].name, affected_component: null,
       cve_id: null, proof_of_concept: null,
       impact: "Une compromission de l'annuaire serait difficile à reconstituer a posteriori (donnée de démonstration).",
       recommendation: "Activer l'audit avancé (Advanced Audit Policy) sur les objets critiques (donnée de démonstration).",
@@ -688,7 +688,7 @@ export const FAKE_AUDIT_FINDINGS = {
       impact: "Compromission initiale de comptes utilisateurs standards (donnée de démonstration).",
       recommendation: "Campagne de sensibilisation ciblée + MFA généralisé (donnée de démonstration).",
       status: 'corrige', mitre_techniques: ['T1566.001'],
-      discovered_at: daysAgoIso(40), retested_at: daysAgoIso(25), retest_result: 'corrige', retested_by: FAKE_VALIDATORS[3],
+      discovered_at: daysAgoIso(40), retested_at: daysAgoIso(25), retest_result: 'corrige', retested_by: SYNTHETIC_VALIDATORS[3],
       created_at: daysAgoIso(40),
     },
     {
@@ -702,7 +702,7 @@ export const FAKE_AUDIT_FINDINGS = {
       impact: "Élévation de privilèges standard → administrateur local (donnée de démonstration).",
       recommendation: "Restreindre les droits d'écriture sur le partage aux seuls comptes de service nécessaires (donnée de démonstration).",
       status: 'corrige', mitre_techniques: ['T1021.002'],
-      discovered_at: daysAgoIso(38), retested_at: daysAgoIso(25), retest_result: 'corrige', retested_by: FAKE_VALIDATORS[3],
+      discovered_at: daysAgoIso(38), retested_at: daysAgoIso(25), retest_result: 'corrige', retested_by: SYNTHETIC_VALIDATORS[3],
       created_at: daysAgoIso(38),
     },
   ],
@@ -710,8 +710,8 @@ export const FAKE_AUDIT_FINDINGS = {
 
 // Résumé par sévérité + compteurs (Audits.jsx::flagged, AuditDetail.jsx) — dérivé des findings
 // ci-dessus plutôt que codé en dur, pour ne jamais diverger si la liste change.
-export function fakeAuditSummary(auditId) {
-  const findings = FAKE_AUDIT_FINDINGS[auditId] || []
+export function syntheticAuditSummary(auditId) {
+  const findings = SYNTHETIC_AUDIT_FINDINGS[auditId] || []
   const by_severity = {}
   for (const f of findings) by_severity[f.severity] = (by_severity[f.severity] || 0) + 1
   const unretested_closed = findings.filter(f => ['corrige', 'risque_accepte'].includes(f.status) && !f.retested_at).length
@@ -723,16 +723,16 @@ export function fakeAuditSummary(auditId) {
   }
 }
 
-// Complète chaque FAKE_AUDITS avec son résumé de findings, pour qu'Audits.jsx (liste) affiche
+// Complète chaque SYNTHETIC_AUDITS avec son résumé de findings, pour qu'Audits.jsx (liste) affiche
 // les mêmes badges de sévérité/le même flag "non retesté" que la page de détail.
-FAKE_AUDITS.forEach(a => Object.assign(a, fakeAuditSummary(a.id)))
+SYNTHETIC_AUDITS.forEach(a => Object.assign(a, syntheticAuditSummary(a.id)))
 
 // ─────────────────────────────────────────────────────────────────────────
 // Veille technologique fictive (module CyberVeille > Veille technologique) — registre
 // auditable NIS 2, statuts/sévérités variés. `url: null` volontairement (pas de vrai lien
 // externe à ouvrir depuis une donnée de démonstration).
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_WATCH_ITEMS = [
+export const SYNTHETIC_WATCH_ITEMS = [
   {
     id: 'demo-watch-1', source: 'cert-fr-avis', source_label: 'CERT-FR Avis',
     title: 'Vulnérabilité critique dans un pare-feu périmétrique largement déployé (donnée de démonstration)',
@@ -747,7 +747,7 @@ export const FAKE_WATCH_ITEMS = [
     title: "Campagne d'exploitation active visant un CMS très répandu (donnée de démonstration)",
     url: null, summary: "Des indices de compromission confirment une exploitation en masse dans la nature. Mise à jour à appliquer en urgence (donnée de démonstration).",
     published_at: daysAgoIso(1), received_at: daysAgoIso(1),
-    severity: 'critical', status: 'in_review', reviewed_by: FAKE_VALIDATORS[1], reviewed_at: null, decision: null,
+    severity: 'critical', status: 'in_review', reviewed_by: SYNTHETIC_VALIDATORS[1], reviewed_at: null, decision: null,
     linked_cve_id: null, cve_ids_found: [],
     themes: ['Cyber', 'Vulnérabilité'], country: 'FR', asset_ids: [], sla_exceeded: true, delay_hours: null,
   },
@@ -756,10 +756,10 @@ export const FAKE_WATCH_ITEMS = [
     title: 'Nouvelle version du guide de configuration Active Directory (donnée de démonstration)',
     url: null, summary: "Mise à jour des recommandations de durcissement AD, notamment sur la délégation Kerberos (donnée de démonstration).",
     published_at: daysAgoIso(6), received_at: daysAgoIso(6),
-    severity: 'informational', status: 'treated', reviewed_by: FAKE_VALIDATORS[2], reviewed_at: daysAgoIso(5),
+    severity: 'informational', status: 'treated', reviewed_by: SYNTHETIC_VALIDATORS[2], reviewed_at: daysAgoIso(5),
     decision: "Recommandations comparées à notre configuration actuelle — aucun écart majeur identifié (donnée de démonstration).",
     linked_cve_id: null, cve_ids_found: [],
-    themes: ['Admin', 'Réglementation'], country: 'FR', asset_ids: [FAKE_ASSETS[4].id], sla_exceeded: false, delay_hours: 26,
+    themes: ['Admin', 'Réglementation'], country: 'FR', asset_ids: [SYNTHETIC_ASSETS[4].id], sla_exceeded: false, delay_hours: 26,
   },
   {
     id: 'demo-watch-4', source: 'sekoia', source_label: 'Sekoia TDR',
@@ -775,7 +775,7 @@ export const FAKE_WATCH_ITEMS = [
     title: 'Multiples vulnérabilités dans une suite bureautique largement utilisée (donnée de démonstration)',
     url: null, summary: "Plusieurs failles de gravité modérée corrigées dans la dernière mise à jour cumulative (donnée de démonstration).",
     published_at: daysAgoIso(9), received_at: daysAgoIso(9),
-    severity: 'important', status: 'treated', reviewed_by: FAKE_VALIDATORS[0], reviewed_at: daysAgoIso(8),
+    severity: 'important', status: 'treated', reviewed_by: SYNTHETIC_VALIDATORS[0], reviewed_at: daysAgoIso(8),
     decision: "Déploiement de la mise à jour planifié via WSUS sur le prochain cycle de maintenance (donnée de démonstration).",
     linked_cve_id: null, cve_ids_found: ['CVE-2026-71009', 'CVE-2026-71010'],
     themes: ['Software', 'Vulnérabilité'], country: 'FR', asset_ids: [], sla_exceeded: false, delay_hours: 22,
@@ -787,7 +787,7 @@ export const FAKE_WATCH_ITEMS = [
 // informatif, mêmes sources dédiées que la page réelle (ZATAZ/fuitesinfos/Ransomware.live/
 // DataBreaches.net/HIBP). `url: null` (pas de vrai lien externe).
 // ─────────────────────────────────────────────────────────────────────────
-export const FAKE_LEAK_ITEMS = [
+export const SYNTHETIC_LEAK_ITEMS = [
   {
     id: 'demo-leak-1', source: 'ransomware-live', source_label: 'Ransomware.live',
     title: 'Société Exemple SARL — LockDemo (Industrie manufacturière) (donnée de démonstration)',
@@ -814,7 +814,7 @@ export const FAKE_LEAK_ITEMS = [
 // ─────────────────────────────────────────────────────────────────────────
 // Anonymisation des données réelles (affichage uniquement — id réel conservé)
 // ─────────────────────────────────────────────────────────────────────────
-function fakeIpForReal(id) {
+function syntheticIpForReal(id) {
   const h = hashStr('ip:' + String(id))
   // Décalage non-signé (>>>) : `h` (déjà >>> 0, donc 0..2^32-1) traité comme
   // signé par `>>` deviendrait négatif pour h >= 2^31, produisant un octet
@@ -823,19 +823,19 @@ function fakeIpForReal(id) {
 }
 
 export function anonymizeAsset(asset) {
-  if (!asset || isFakeId(asset.id)) return asset
+  if (!asset || isSyntheticId(asset.id)) return asset
   const idx = hashStr(String(asset.id)) % ANON_REAL_NAMES.length
-  const fakeName = ANON_REAL_NAMES[idx]
-  const fakeIp = fakeIpForReal(asset.id)
+  const syntheticName = ANON_REAL_NAMES[idx]
+  const syntheticIp = syntheticIpForReal(asset.id)
   return {
     ...asset,
-    name: fakeName,
-    hostname: asset.hostname ? `${fakeName.toLowerCase()}.${FAKE_DOMAIN}` : asset.hostname,
-    ip_address: asset.ip_address ? fakeIp : asset.ip_address,
+    name: syntheticName,
+    hostname: asset.hostname ? `${syntheticName.toLowerCase()}.${SYNTHETIC_DOMAIN}` : asset.hostname,
+    ip_address: asset.ip_address ? syntheticIp : asset.ip_address,
     // IP remontée par l'agent (services/asset_scanner.py::detected_ip), distincte de
     // ip_address (scan réseau SSH/WinRM) — même donnée réelle, oubliée ici jusqu'ici
     // (AgentHistory.jsx/Inventaire.jsx l'affichaient encore en clair en mode Présentation).
-    hardware: asset.hardware ? { ...asset.hardware, ip: asset.hardware.ip ? fakeIp : asset.hardware.ip } : asset.hardware,
+    hardware: asset.hardware ? { ...asset.hardware, ip: asset.hardware.ip ? syntheticIp : asset.hardware.ip } : asset.hardware,
   }
 }
 
@@ -845,13 +845,13 @@ export function anonymizeAsset(asset) {
 // partout ailleurs) ; à défaut (agent orphelin, ou entrée d'historique sans id, cf.
 // AgentsGlobalHistory.jsx) on retombe sur l'id de l'agent puis sur son hostname.
 export function anonymizeAgent(agent) {
-  if (!agent || isFakeId(agent.id)) return agent
+  if (!agent || isSyntheticId(agent.id)) return agent
   const seed = agent.asset_id || agent.id || agent.hostname
-  const fakeName = ANON_REAL_NAMES[hashStr(String(seed)) % ANON_REAL_NAMES.length]
+  const syntheticName = ANON_REAL_NAMES[hashStr(String(seed)) % ANON_REAL_NAMES.length]
   return {
     ...agent,
-    hostname: agent.hostname ? fakeName : agent.hostname,
-    asset_name: agent.asset_name ? fakeName : agent.asset_name,
+    hostname: agent.hostname ? syntheticName : agent.hostname,
+    asset_name: agent.asset_name ? syntheticName : agent.asset_name,
     enrolled_by: agent.enrolled_by ? anonymizeValidator(agent.enrolled_by) : agent.enrolled_by,
     revoked_by: agent.revoked_by ? anonymizeValidator(agent.revoked_by) : agent.revoked_by,
     deleted_by: agent.deleted_by ? anonymizeValidator(agent.deleted_by) : agent.deleted_by,
@@ -861,15 +861,15 @@ export function anonymizeAgent(agent) {
 
 export function anonymizeValidator(name) {
   if (!name || name === 'Auto (patch check)') return name
-  const idx = hashStr('validator:' + name) % FAKE_VALIDATORS.length
-  return FAKE_VALIDATORS[idx]
+  const idx = hashStr('validator:' + name) % SYNTHETIC_VALIDATORS.length
+  return SYNTHETIC_VALIDATORS[idx]
 }
 
 // Registre « Rôles » (organigramme, Administration > Rôles) — noms complets, distincts de
-// FAKE_VALIDATORS (initiales abrégées, pensées pour un dropdown compact) : un organigramme
+// SYNTHETIC_VALIDATORS (initiales abrégées, pensées pour un dropdown compact) : un organigramme
 // affiche un nom complet crédible. `position` (RSSI, DPO...) n'est jamais modifiée, elle n'est
 // pas sensible — seuls le nom et l'email d'une personne réelle le sont.
-const FAKE_ROLE_HOLDER_NAMES = [
+const SYNTHETIC_ROLE_HOLDER_NAMES = [
   'Camille Bertrand', 'Julien Faucher', 'Sophie Marchand', 'Nicolas Delattre',
   'Amandine Rousseau', 'Thomas Guillet', 'Léa Fontaine', 'Antoine Perrot',
 ]
@@ -880,13 +880,13 @@ function slugifyName(name) {
 
 export function anonymizeRoleHolder(role) {
   if (!role) return role
-  const idx = hashStr('role-holder:' + String(role.id || role.name)) % FAKE_ROLE_HOLDER_NAMES.length
-  const fakeName = FAKE_ROLE_HOLDER_NAMES[idx]
-  return { ...role, name: fakeName, email: role.email ? `${slugifyName(fakeName)}@${FAKE_DOMAIN}` : role.email }
+  const idx = hashStr('role-holder:' + String(role.id || role.name)) % SYNTHETIC_ROLE_HOLDER_NAMES.length
+  const syntheticName = SYNTHETIC_ROLE_HOLDER_NAMES[idx]
+  return { ...role, name: syntheticName, email: role.email ? `${slugifyName(syntheticName)}@${SYNTHETIC_DOMAIN}` : role.email }
 }
 
 export function anonymizeVuln(vuln) {
-  if (!vuln || isFakeId(vuln.id)) return vuln
+  if (!vuln || isSyntheticId(vuln.id)) return vuln
   return {
     ...vuln,
     asset: vuln.asset ? anonymizeAsset(vuln.asset) : vuln.asset,
@@ -900,19 +900,149 @@ export function anonymizeConnection(log) {
   return { ...log, ip: `10.99.${200 + (h % 40)}.${10 + ((h >>> 8) % 240)}` }
 }
 
+// Alertes de déception DB (Administration > Base de données) — `db_user` n'est jamais
+// anonymisé : c'est soit un rôle-leurre intentionnellement alléchant (admin/root/dba...),
+// soit le compte applicatif fixe `cbr_app`, aucune identité personnelle réelle derrière.
+// Seule l'IP source (23/08/2026, demande explicite — "il faut des synthetic data sur toute
+// la partie administration") est une donnée à masquer si l'évènement est réel.
+export function anonymizeSecurityEvent(e) {
+  if (!e) return e
+  const h = hashStr('sec-event:' + String(e.id))
+  return { ...e, client_addr: e.client_addr ? `10.99.${200 + (h % 40)}.${10 + ((h >>> 8) % 240)}` : e.client_addr }
+}
+
+// Trois alertes types (23/08/2026) — variété volontaire pour montrer les 3 signaux couverts
+// par la couche de déception (lecture, écriture, connexion par rôle-leurre) plutôt qu'un
+// seul cas répété, plus une déjà acquittée pour illustrer ce second état visuel.
+export const SYNTHETIC_SECURITY_EVENTS = [
+  {
+    id: 'demo-secevent-1', source: 'trap_read', object_name: 'ssh_credentials_backup',
+    operation: 'SELECT', db_user: 'cbr_app', client_addr: '10.0.4.212',
+    occurred_at: hoursAgoIso(3), acknowledged: false, ack_by: null,
+  },
+  {
+    id: 'demo-secevent-2', source: 'trap_role', object_name: null,
+    operation: null, db_user: 'admin', client_addr: '10.0.4.212',
+    occurred_at: hoursAgoIso(3.2), acknowledged: false, ack_by: null,
+  },
+  {
+    id: 'demo-secevent-3', source: 'trap_write', object_name: 'app_users',
+    operation: 'UPDATE', db_user: 'cbr_app', client_addr: '10.0.7.44',
+    occurred_at: daysAgoIso(6), acknowledged: true, ack_by: SYNTHETIC_VALIDATORS[0],
+  },
+]
+
+// Correspondances Windows (Administration > Correspondances Windows, 23/08/2026) — aucune
+// donnée personnelle/infra ici (juste des noms de logiciels publics), pas d'anonymisation à
+// faire : uniquement du padding pour ne pas présenter une page vide en démo, même exemples
+// que les placeholders du formulaire (cohérence, cf. WindowsAppMappingFormModal.jsx).
+export const SYNTHETIC_WINDOWS_APP_MAPPINGS = [
+  { id: 'demo-winmap-1', pattern: 'putty', cpe_product: 'putty', cpe_vendor: 'simon_tatham', created_at: daysAgoIso(40) },
+  { id: 'demo-winmap-2', pattern: '7-zip', cpe_product: '7-zip', cpe_vendor: '7-zip', created_at: daysAgoIso(35) },
+  { id: 'demo-winmap-3', pattern: 'vlc media player', cpe_product: 'vlc_media_player', cpe_vendor: 'videolan', created_at: daysAgoIso(28) },
+  { id: 'demo-winmap-4', pattern: 'notepad++', cpe_product: 'notepad++', cpe_vendor: 'notepad-plus-plus', created_at: daysAgoIso(12) },
+]
+
 // Journal de connexion PAR UTILISATEUR (12/08/2026) — email nominatif en plus de l'IP,
 // donc anonymisé lui aussi (même pool que anonymizeRoleHolder, cohérent avec le reste de
 // l'app : une même personne réelle garde le même nom fictif partout).
 export function anonymizeUserConnection(log) {
   if (!log) return log
   const h = hashStr('user-conn:' + String(log.id))
-  const fakeName = FAKE_ROLE_HOLDER_NAMES[hashStr('login-email:' + (log.email || log.id)) % FAKE_ROLE_HOLDER_NAMES.length]
+  const syntheticName = SYNTHETIC_ROLE_HOLDER_NAMES[hashStr('login-email:' + (log.email || log.id)) % SYNTHETIC_ROLE_HOLDER_NAMES.length]
   return {
     ...log,
-    email: log.email ? `${slugifyName(fakeName)}@${FAKE_DOMAIN}` : log.email,
+    email: log.email ? `${slugifyName(syntheticName)}@${SYNTHETIC_DOMAIN}` : log.email,
     ip: log.ip ? `10.99.${200 + (h % 40)}.${10 + ((h >>> 8) % 240)}` : log.ip,
   }
 }
+
+// Registre Analystes (Administration > Analystes, 23/08/2026, demande explicite — "il manque
+// des synthetic data dans administration, j'en veux dans tous les modules") : padding pur, pas
+// d'anonymisation à faire ici (le registre lui-même n'a que le nom, déjà couvert par
+// anonymizeValidator sur les entrées réelles) — juste de quoi ne pas présenter une liste vide
+// en démo sur une base fraîchement installée ou déjà purgée.
+export const SYNTHETIC_ANALYSTS = SYNTHETIC_VALIDATORS.map((name, i) => ({
+  id: `demo-analyst-${i + 1}`, name, created_at: daysAgoIso(60 - i * 7),
+}))
+
+// Comptes de connexion (Administration > Utilisateurs, 23/08/2026, "pareil pour les
+// utilisateurs") — noms repris de SYNTHETIC_ROLE_HOLDER_NAMES (mêmes personnes fictives que
+// l'organigramme, cohérent : "Julien Faucher" y est RSSI ET a un compte ici). Variété
+// délibérée des badges affichés (rôle, désactivé, accès restreint, changement mdp requis)
+// pour montrer les 4 états gérés par UsersTab plutôt qu'une ligne unique.
+export const SYNTHETIC_USERS = [
+  { id: 'demo-user-1', full_name: 'Julien Faucher', email: 'j.faucher@demo.local', role: 'admin', is_active: true, allowed_pages: null, must_change_password: false, created_at: daysAgoIso(180) },
+  { id: 'demo-user-2', full_name: 'Sophie Marchand', email: 's.marchand@demo.local', role: 'analyst', is_active: true, allowed_pages: ['/incidents', '/documentation'], must_change_password: false, created_at: daysAgoIso(90) },
+  { id: 'demo-user-3', full_name: 'Nicolas Delattre', email: 'n.delattre@demo.local', role: 'analyst', is_active: true, allowed_pages: null, must_change_password: true, created_at: daysAgoIso(15) },
+  { id: 'demo-user-4', full_name: 'Amandine Rousseau', email: 'a.rousseau@demo.local', role: 'analyst', is_active: false, allowed_pages: null, must_change_password: false, created_at: daysAgoIso(300) },
+]
+
+// Rôles d'organigramme (Administration > Rôles + Services, 23/08/2026) — mêmes intitulés de
+// poste que SYNTHETIC_CRISES::crisis_roles (RSSI/Direction générale/Communication) pour rester
+// cohérent avec le reste de la démo. `service_id: null` (pas de vraie table `services` à
+// référencer sans connaître ses UUID réels d'une instance à l'autre) — `service_name`/
+// `service_color`/`service_icon` suffisent à l'affichage dans OrganizationRolesTab telles
+// quelles ; ServicesTab les rattache lui-même par nom (cf. AdministrationSecurity.jsx) plutôt
+// que par id pour retomber sur les vrais services (RH/DSI/Juridique/Direction) sans deviner
+// leurs identifiants.
+// Deux niveaux minimum sur au moins un service (DSI, Juridique) — pas juste une ligne à plat
+// sous la Direction générale (23/08/2026, retour utilisateur — "pour avoir une vision sur
+// l'organigramme") : ServiceOrgChartModal.jsx est un rendu RÉCURSIF (OrgNode), une hiérarchie
+// plate ne montre jamais le cas à plusieurs niveaux/plusieurs enfants qu'il sait dessiner.
+// `reports_to_id` référence l'id synthétique lui-même (pas juste reports_to_name/_position,
+// affichage seul dans OrganizationRolesTab) — c'est le seul champ que ServiceOrgChartModal lit
+// pour construire l'arbre. Les 8 noms de SYNTHETIC_ROLE_HOLDER_NAMES y passent tous.
+export const SYNTHETIC_ORGANIZATION_ROLES = [
+  {
+    id: 'demo-role-1', position: 'Direction générale', name: 'Camille Bertrand',
+    email: 'c.bertrand@demo.local', service_id: null, service_name: 'Direction',
+    service_color: '#f85149', service_icon: 'building',
+    reports_to_id: null, reports_to_name: null, reports_to_position: null,
+  },
+  {
+    id: 'demo-role-2', position: 'Communication / RP', name: 'Amandine Rousseau',
+    email: 'a.rousseau@demo.local', service_id: null, service_name: 'Direction',
+    service_color: '#f85149', service_icon: 'building',
+    reports_to_id: 'demo-role-1', reports_to_name: 'Camille Bertrand', reports_to_position: 'Direction générale',
+  },
+  {
+    id: 'demo-role-3', position: 'RSSI', name: 'Julien Faucher',
+    email: 'j.faucher@demo.local', service_id: null, service_name: 'DSI',
+    service_color: '#58a6ff', service_icon: 'server',
+    reports_to_id: 'demo-role-1', reports_to_name: 'Camille Bertrand', reports_to_position: 'Direction générale',
+  },
+  {
+    id: 'demo-role-4', position: 'Administratrice systèmes', name: 'Léa Fontaine',
+    email: 'l.fontaine@demo.local', service_id: null, service_name: 'DSI',
+    service_color: '#58a6ff', service_icon: 'server',
+    reports_to_id: 'demo-role-3', reports_to_name: 'Julien Faucher', reports_to_position: 'RSSI',
+  },
+  {
+    id: 'demo-role-5', position: 'Analyste SOC', name: 'Antoine Perrot',
+    email: 'a.perrot@demo.local', service_id: null, service_name: 'DSI',
+    service_color: '#58a6ff', service_icon: 'server',
+    reports_to_id: 'demo-role-3', reports_to_name: 'Julien Faucher', reports_to_position: 'RSSI',
+  },
+  {
+    id: 'demo-role-6', position: 'DPO', name: 'Sophie Marchand',
+    email: 's.marchand@demo.local', service_id: null, service_name: 'Juridique',
+    service_color: '#a371f7', service_icon: 'scale',
+    reports_to_id: 'demo-role-1', reports_to_name: 'Camille Bertrand', reports_to_position: 'Direction générale',
+  },
+  {
+    id: 'demo-role-7', position: 'Juriste', name: 'Thomas Guillet',
+    email: 't.guillet@demo.local', service_id: null, service_name: 'Juridique',
+    service_color: '#a371f7', service_icon: 'scale',
+    reports_to_id: 'demo-role-6', reports_to_name: 'Sophie Marchand', reports_to_position: 'DPO',
+  },
+  {
+    id: 'demo-role-8', position: 'Responsable RH', name: 'Nicolas Delattre',
+    email: 'n.delattre@demo.local', service_id: null, service_name: 'RH',
+    service_color: '#3fb950', service_icon: 'users',
+    reports_to_id: 'demo-role-1', reports_to_name: 'Camille Bertrand', reports_to_position: 'Direction générale',
+  },
+]
 
 // Remplace, dans un texte libre (résumé exécutif, CSV...), toute occurrence
 // des noms/hostnames/IP/analystes réels par leur équivalent fictif — pour que
@@ -921,11 +1051,11 @@ export function redactText(text, realAssets, realValidatorNames) {
   if (!text || typeof text !== 'string') return text
   let out = text
   for (const a of realAssets || []) {
-    if (!a || isFakeId(a.id)) continue
-    const fake = anonymizeAsset(a)
-    if (a.name) out = out.split(a.name).join(fake.name)
-    if (a.hostname && a.hostname !== a.name) out = out.split(a.hostname).join(fake.hostname)
-    if (a.ip_address) out = out.split(a.ip_address).join(fake.ip_address)
+    if (!a || isSyntheticId(a.id)) continue
+    const synthetic = anonymizeAsset(a)
+    if (a.name) out = out.split(a.name).join(synthetic.name)
+    if (a.hostname && a.hostname !== a.name) out = out.split(a.hostname).join(synthetic.hostname)
+    if (a.ip_address) out = out.split(a.ip_address).join(synthetic.ip_address)
   }
   for (const name of realValidatorNames || []) {
     if (!name) continue
@@ -935,9 +1065,9 @@ export function redactText(text, realAssets, realValidatorNames) {
 }
 
 // Anonymisation des ENTITÉS RÉELLES d'Incidents/Crises/Audits/Veille (21/08/2026, retour
-// utilisateur — "il manque beaucoup de fake data un peu partout") : jusqu'ici ces 4 pages ne
-// faisaient qu'ajouter les FAKE_* aux vraies lignes SANS les transformer (`[...data.items,
-// ...FAKE_X]`), contrairement à Assets.jsx/Agents.jsx/Vulnerabilities.jsx qui appellent bien
+// utilisateur — "il manque beaucoup de synthetic data un peu partout") : jusqu'ici ces 4 pages ne
+// faisaient qu'ajouter les SYNTHETIC_* aux vraies lignes SANS les transformer (`[...data.items,
+// ...SYNTHETIC_X]`), contrairement à Assets.jsx/Agents.jsx/Vulnerabilities.jsx qui appellent bien
 // anonymizeAsset/anonymizeAgent/anonymizeVuln sur les vraies lignes avant de les afficher — une
 // ligne réelle restait donc intégralement en clair (titre, description, noms d'actifs, analystes)
 // en mode Présentation. Même principe que anonymizeVuln (id fictif → inchangé), texte libre
@@ -945,7 +1075,7 @@ export function redactText(text, realAssets, realValidatorNames) {
 // noms d'analystes par anonymizeValidator (déterministe, pas besoin de connaître le nom réel à
 // l'avance).
 export function anonymizeIncident(inc, realAssets) {
-  if (!inc || isFakeId(inc.id)) return inc
+  if (!inc || isSyntheticId(inc.id)) return inc
   const redact = t => redactText(t, realAssets)
   return {
     ...inc,
@@ -964,7 +1094,7 @@ export function anonymizeIncident(inc, realAssets) {
 }
 
 export function anonymizeCrisis(crisis, realAssets) {
-  if (!crisis || isFakeId(crisis.id)) return crisis
+  if (!crisis || isSyntheticId(crisis.id)) return crisis
   const redact = t => redactText(t, realAssets)
   return {
     ...crisis,
@@ -980,7 +1110,7 @@ export function anonymizeCrisis(crisis, realAssets) {
 }
 
 export function anonymizeAudit(audit, realAssets) {
-  if (!audit || isFakeId(audit.id)) return audit
+  if (!audit || isSyntheticId(audit.id)) return audit
   const redact = t => redactText(t, realAssets)
   return {
     ...audit,
@@ -995,8 +1125,8 @@ export function anonymizeAudit(audit, realAssets) {
 }
 
 // Un finding d'audit réel n'a pas d'id fictif propre (il hérite du statut Présentation de son
-// audit parent, cf. AuditDetail.jsx) — pas de garde `isFakeId` ici, l'appelant décide déjà quand
-// l'appliquer (uniquement sur les findings d'un audit réel, jamais sur FAKE_AUDIT_FINDINGS).
+// audit parent, cf. AuditDetail.jsx) — pas de garde `isSyntheticId` ici, l'appelant décide déjà quand
+// l'appliquer (uniquement sur les findings d'un audit réel, jamais sur SYNTHETIC_AUDIT_FINDINGS).
 export function anonymizeAuditFinding(finding, realAssets) {
   if (!finding) return finding
   const redact = t => redactText(t, realAssets)
@@ -1029,7 +1159,7 @@ export function anonymizeDocument(doc) {
 }
 
 export function anonymizeWatchItem(item, realAssets) {
-  if (!item || isFakeId(item.id)) return item
+  if (!item || isSyntheticId(item.id)) return item
   const redact = t => redactText(t, realAssets)
   return {
     ...item,
@@ -1083,7 +1213,7 @@ export function sortVulnList(list, sort) {
 // Simulation des actions interactives sur les vulnérabilités de démonstration
 // (id `demo-vuln-*`) — jamais d'appel réseau, tout est calculé localement.
 // ─────────────────────────────────────────────────────────────────────────
-export function fakePatchCheckResult(vuln) {
+export function syntheticPatchCheckResult(vuln) {
   const h = hashStr('patch:' + vuln.id)
   const detected = (h % 100) < 55
   const kbs = [`KB50${(h % 90000 + 10000)}`, `KB50${(hashStr('b' + vuln.id) % 90000 + 10000)}`]
@@ -1095,7 +1225,7 @@ export function fakePatchCheckResult(vuln) {
   }
 }
 
-export function fakeAnalysis(vuln) {
+export function syntheticAnalysis(vuln) {
   const cve = vuln.cve || {}
   const cvss = cve.cvss_score || 5
   const priority = cvss >= 9 ? 'immédiate' : cvss >= 7 ? 'haute' : cvss >= 4 ? 'normale' : 'faible'
@@ -1131,8 +1261,8 @@ export function fakeAnalysis(vuln) {
   }
 }
 
-export function fakeRecommendation(vuln) {
-  const asset = findFakeAsset(vuln.asset?.id)
+export function syntheticRecommendation(vuln) {
+  const asset = findSyntheticAsset(vuln.asset?.id)
   const isWin = (asset?.os || '').toLowerCase().includes('windows')
   const cve = vuln.cve || {}
   const steps = isWin ? [
@@ -1155,8 +1285,8 @@ export function fakeRecommendation(vuln) {
   }
 }
 
-export function fakeScript(vuln) {
-  const asset = findFakeAsset(vuln.asset?.id)
+export function syntheticScript(vuln) {
+  const asset = findSyntheticAsset(vuln.asset?.id)
   const isWin = (asset?.os || '').toLowerCase().includes('windows')
   const cve = vuln.cve || {}
   const script_type = isWin ? 'powershell' : 'bash'
@@ -1166,7 +1296,7 @@ export function fakeScript(vuln) {
   return { script, script_type }
 }
 
-export function fakeScanResult(asset) {
+export function syntheticScanResult(asset) {
   return {
     reachable: true,
     packages: asset.installed_packages,
@@ -1191,38 +1321,38 @@ export function fakeScanResult(asset) {
 // l'entreprise réelle n'a (heureusement) aucune fuite recensée.
 // ─────────────────────────────────────────────────────────────────────────
 
-const FAKE_COMPANY_NAMES = [
+const SYNTHETIC_COMPANY_NAMES = [
   'Norvenia Group', 'Kaltrix Industries', 'Solvane Corp', 'Meridian Dynamics',
   'Arkwell Holdings', 'Blythorn SA', 'Halden Systems', 'Verakko Group',
 ]
-const FAKE_COMPANY_DOMAINS = [
+const SYNTHETIC_COMPANY_DOMAINS = [
   'norvenia.io', 'kaltrix.com', 'solvane.fr', 'meridian-dynamics.com',
   'arkwell.io', 'blythorn.fr', 'halden-systems.com', 'verakko.io',
 ]
 // Identités "email" (28/07/2026, services/leak_lookup.py § XposedOrNot) —
-// domaines cohérents avec FAKE_COMPANY_DOMAINS pour rester crédible en démo.
-const FAKE_EMAILS = [
+// domaines cohérents avec SYNTHETIC_COMPANY_DOMAINS pour rester crédible en démo.
+const SYNTHETIC_EMAILS = [
   'contact@norvenia.io', 'admin@kaltrix.com', 'contact@solvane.fr', 'it@meridian-dynamics.com',
 ]
 // Plages documentaires (RFC 5737, TEST-NET) — jamais routées sur Internet,
 // donc sûres à afficher tel quel sans risquer de pointer vers une vraie IP.
-const FAKE_PUBLIC_IPS = ['203.0.113.10', '203.0.113.42', '198.51.100.7', '198.51.100.23']
-const FAKE_PUBLIC_IP_RANGES = ['203.0.113.0/24', '198.51.100.0/24']
+const SYNTHETIC_PUBLIC_IPS = ['203.0.113.10', '203.0.113.42', '198.51.100.7', '198.51.100.23']
+const SYNTHETIC_PUBLIC_IP_RANGES = ['203.0.113.0/24', '198.51.100.0/24']
 
 export function anonymizeIdentity(identity) {
-  if (!identity || isFakeId(identity.id)) return identity
-  const pools = { domain: FAKE_COMPANY_DOMAINS, ip: FAKE_PUBLIC_IPS, ip_range: FAKE_PUBLIC_IP_RANGES, email: FAKE_EMAILS }
-  const pool = pools[identity.kind] || FAKE_COMPANY_NAMES
+  if (!identity || isSyntheticId(identity.id)) return identity
+  const pools = { domain: SYNTHETIC_COMPANY_DOMAINS, ip: SYNTHETIC_PUBLIC_IPS, ip_range: SYNTHETIC_PUBLIC_IP_RANGES, email: SYNTHETIC_EMAILS }
+  const pool = pools[identity.kind] || SYNTHETIC_COMPANY_NAMES
   const idx = hashStr('identity:' + String(identity.id)) % pool.length
   return { ...identity, value: pool[idx] }
 }
 
-export const FAKE_IDENTITIES = [
+export const SYNTHETIC_IDENTITIES = [
   { id: 'demo-identity-1', value: 'Norvenia Group', kind: 'name', enabled: true, created_at: daysAgoIso(120) },
   { id: 'demo-identity-2', value: 'norvenia.io', kind: 'domain', enabled: true, created_at: daysAgoIso(120) },
 ]
 
-export const FAKE_IDENTITY_MATCHES = [
+export const SYNTHETIC_IDENTITY_MATCHES = [
   {
     id: 'demo-identity-match-1', source: 'ransomware-live', source_label: 'Ransomware.live',
     title: 'Norvenia Group — LockBit (Extorsion)', url: '#',
@@ -1241,17 +1371,17 @@ export const FAKE_IDENTITY_MATCHES = [
 // pour retrouver quelle identité réelle correspond à chaque valeur détectée
 // dans `matched_identities` et donc quel remplacement fictif appliquer.
 export function anonymizeIdentityMatch(item, realIdentities) {
-  if (!item || isFakeId(item.id)) return item
+  if (!item || isSyntheticId(item.id)) return item
   let title = item.title
   let summary = item.summary
   const matched = (item.matched_identities || []).map(value => {
     const real = (realIdentities || []).find(i => i.value === value)
-    const fake = real ? anonymizeIdentity(real).value : value
+    const synthetic = real ? anonymizeIdentity(real).value : value
     if (value) {
-      if (title) title = title.split(value).join(fake)
-      if (summary) summary = summary.split(value).join(fake)
+      if (title) title = title.split(value).join(synthetic)
+      if (summary) summary = summary.split(value).join(synthetic)
     }
-    return fake
+    return synthetic
   })
   return { ...item, title, summary, matched_identities: matched }
 }
@@ -1264,7 +1394,7 @@ export function anonymizeIpMatch(match, realIdentities) {
   return { ...match, identity_value: real ? anonymizeIdentity(real).value : match.identity_value }
 }
 
-export const FAKE_IP_MATCHES = [
+export const SYNTHETIC_IP_MATCHES = [
   {
     identity_value: '203.0.113.0/24', identity_kind: 'ip_range',
     source_label: 'IPsum (FireHOL)', ip: '203.0.113.42', detail: 'score 6',
@@ -1284,7 +1414,7 @@ export function anonymizeOsintMatch(match, realIdentities) {
   return { ...match, identity_value: real ? anonymizeIdentity(real).value : match.identity_value }
 }
 
-export const FAKE_OSINT_MATCHES = [
+export const SYNTHETIC_OSINT_MATCHES = [
   {
     identity_value: 'contact@norvenia.io', identity_kind: 'email',
     source_label: 'XposedOrNot', detail: '3 fuite(s) connue(s) : Collection-1, Dropbox, LinkedIn', url: null,

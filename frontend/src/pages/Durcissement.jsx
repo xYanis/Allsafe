@@ -6,7 +6,7 @@ import {
 } from '../api/client.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
-import { FAKE_ASSETS, anonymizeAsset, isFakeId } from '../utils/fakeData.js'
+import { SYNTHETIC_ASSETS, anonymizeAsset, isSyntheticId } from '../utils/syntheticData.js'
 import { assetCategory, categoryStyle } from '../utils/assetCategory.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
@@ -417,7 +417,7 @@ export default function Durcissement() {
   const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (durcissementPageCache == null) return []
-    return isAnonymous ? [...durcissementPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : durcissementPageCache
+    return isAnonymous ? [...durcissementPageCache.map(anonymizeAsset), ...SYNTHETIC_ASSETS] : durcissementPageCache
   })
   const [loading, setLoading] = useState(() => durcissementPageCache == null)
   const [search, setSearch] = useState('')
@@ -550,7 +550,7 @@ export default function Durcissement() {
         const raw = r.data || []
         durcissementPageCache = raw   // alimente le cache module pour le prochain remontage
         let list = raw
-        if (isAnonymous) list = [...list.map(anonymizeAsset), ...FAKE_ASSETS]
+        if (isAnonymous) list = [...list.map(anonymizeAsset), ...SYNTHETIC_ASSETS]
         setAssetList(list)
       })
   }
@@ -646,7 +646,7 @@ export default function Durcissement() {
       <PageHero
         icon="M6 13.5V3.75m0 9.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 3.75V16.5m12-12V3.75m0 9.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 3.75V16.5m-6-9V3.75m0 3.75a1.5 1.5 0 010 3m0-3a1.5 1.5 0 000 3m0 9.75V10.5"
         title="Durcissement"
-        color="#39c5cf"
+        color={MODULES.inventaire.color}
         subtitle="Conformité CIS-like du parc — compte de service ou agent, lecture seule."
       />
 

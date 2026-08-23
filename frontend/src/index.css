@@ -975,24 +975,46 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
   .login-logo-flip { animation: none; transform: none; }
 }
 
-/* Erreur de connexion : apparaît puis tremble légèrement — indication d'état
-   (cf. emil-design-eng § purpose), pas de la décoration pure. Une seule
-   keyframe (plutôt que deux animations superposées) : deux `animation`
-   distinctes animant chacune `transform` sur le même élément ne se combinent
-   pas nativement en CSS, la seconde écraserait silencieusement la première.
-   `key={error}` côté JSX force le remontage à chaque nouvelle tentative ratée
-   pour rejouer l'animation même si le message reste identique. */
-@keyframes login-error-in {
-  0%   { opacity: 0; transform: translateY(6px); filter: blur(3px); }
-  40%  { opacity: 1; transform: translateY(0) translateX(0); filter: blur(0); }
-  50%  { transform: translateX(-4px); }
-  60%  { transform: translateX(4px); }
-  70%  { transform: translateX(-3px); }
-  80%  { transform: translateX(3px); }
-  90%  { transform: translateX(-1px); }
-  100% { transform: translateX(0); }
+/* Bannière d'erreur de connexion (23/08/2026, demande explicite — remplace l'ancien
+   .login-error texte seul, cf. components/LoginErrorBanner.jsx pour la config par code).
+   Réservée aux erreurs d'infrastructure (429/503/réseau) — 401/champ requis retirés du
+   composant (23/08/2026, demande explicite), restent un simple texte statique dans
+   Login.jsx, plus de tremblement à gérer ici. `key` côté JSX force le remontage à chaque
+   nouvelle tentative pour rejouer l'animation. Durée alignée sur le reste du login (750ms
+   les champs, 850ms le bouton — cf. commentaire du <form>, "le login est une occasion rare,
+   elle peut se permettre d'être vue plutôt que juste perçue") : une première version à
+   420ms filait trop vite pour que le message soit réellement lu, retour utilisateur
+   explicite (23/08/2026). */
+@keyframes login-err-in {
+  0%   { opacity: 0; transform: scale(0.94) translateY(8px); filter: blur(3px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
 }
-.login-error { opacity: 0; animation: login-error-in 480ms var(--ease-out) both; }
+.login-err-banner { opacity: 0; animation: login-err-in 650ms var(--ease-out) both; }
+
+/* Icône : petit pop avec léger overshoot de rotation, décalé après le début de l'entrée
+   de la bannière pour un effet de cascade plutôt qu'un bloc figé arrivant d'un seul bloc. */
+@keyframes login-err-icon-pop {
+  0%   { opacity: 0; transform: scale(0.5) rotate(-10deg); }
+  65%  { opacity: 1; transform: scale(1.15) rotate(4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.login-err-icon { animation: login-err-icon-pop 620ms var(--ease-bounce) 120ms both; }
+
+/* Halo qui respire (429 uniquement, cf. `pulse` dans LoginErrorBanner.jsx) : suggère
+   "patientez" sans agressivité — contrairement au tremblement, une boucle continue tant
+   que l'erreur reste affichée, pas juste à l'entrée. */
+@keyframes login-err-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--err-color) 40%, transparent); }
+  50%      { box-shadow: 0 0 0 5px color-mix(in srgb, var(--err-color) 0%, transparent); }
+}
+.login-err-pulse { animation: login-err-pulse 1.7s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .login-err-banner, .login-err-icon, .login-err-pulse {
+    animation: none !important; opacity: 1 !important; transform: none !important;
+    filter: none !important; box-shadow: none !important;
+  }
+}
 
 /* Trame de points du hero (cf. .hero-grid, index.css § tokens) : révélée en
    cercle depuis le centre façon "mise sous tension", au lieu d'apparaître
@@ -1024,7 +1046,6 @@ input[type="time"]::-webkit-calendar-picker-indicator:hover {
 @media (prefers-reduced-motion: reduce) {
   .login-enter, .login-field-left, .login-field-right, .login-button-enter { animation: none; opacity: 1; transform: none; filter: none; }
   .login-field-left-exit, .login-field-right-exit, .login-button-exit { animation: none; opacity: 1; transform: none; filter: none; }
-  .login-error { animation: none; opacity: 1; }
   .hero-grid-boot { animation: none; clip-path: none; }
 }
 

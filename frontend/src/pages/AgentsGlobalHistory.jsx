@@ -7,6 +7,8 @@ import OsLogo from '../components/OsLogo.jsx'
 import { StatusBadge, formatDateTime } from '../components/AgentBadges.jsx'
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { anonymizeAgent, SYNTHETIC_AGENTS } from '../utils/syntheticData.js'
 
 // Historique global des agents (19/08/2026, demande explicite) — vue de parc COMPLÉMENTAIRE
 // à la page de détail par agent (AgentHistory.jsx) : on ne rejoue pas ici la frise de
@@ -39,6 +41,7 @@ export default function AgentsGlobalHistory() {
   const [error, setError] = useState('')
   // Filtre (but premier de la page) : se concentrer sur ce qui a quitté le parc actif.
   const [inactiveOnly, setInactiveOnly] = useState(false)
+  const { isAnonymous } = usePresentation()
 
   useEffect(() => {
     agentsHistory()
@@ -57,9 +60,14 @@ export default function AgentsGlobalHistory() {
   if (!history) return <PageLoader />
 
   const items = history.items || []
-  // "Inactif" = a quitté le parc actif : révoqué (encore en base) ou supprimé (journal).
-  const shown = inactiveOnly ? items.filter(i => i.deleted || i.status === 'revoked') : items
   const revokedCount = items.filter(i => !i.deleted && i.status === 'revoked').length
+  // Compteurs des tuiles ("Total"/"Actifs"/"Révoqués"/"Supprimés") gardés sur les seules
+  // données réelles (history.total/live_count/deleted_count, ci-dessous) — les agents fictifs
+  // ne s'ajoutent qu'au tableau, jamais aux stats globales du parc.
+  const combined = isAnonymous ? [...items, ...SYNTHETIC_AGENTS.map(a => ({ ...a, deleted: false }))] : items
+  // "Inactif" = a quitté le parc actif : révoqué (encore en base) ou supprimé (journal).
+  const filtered = inactiveOnly ? combined.filter(i => i.deleted || i.status === 'revoked') : combined
+  const shown = isAnonymous ? filtered.map(anonymizeAgent) : filtered
 
   return (
     <div className="p-6 space-y-5">

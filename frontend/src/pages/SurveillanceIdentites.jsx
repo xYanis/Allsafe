@@ -4,12 +4,13 @@ import FlagIcon from '../components/FlagIcon.jsx'
 import { hexToRgba } from '../utils/color.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import {
-  isFakeId, anonymizeIdentity, anonymizeIdentityMatch, anonymizeIpMatch, anonymizeOsintMatch,
-  FAKE_IDENTITIES, FAKE_IDENTITY_MATCHES, FAKE_IP_MATCHES, FAKE_OSINT_MATCHES,
-} from '../utils/fakeData.js'
+  isSyntheticId, anonymizeIdentity, anonymizeIdentityMatch, anonymizeIpMatch, anonymizeOsintMatch,
+  SYNTHETIC_IDENTITIES, SYNTHETIC_IDENTITY_MATCHES, SYNTHETIC_IP_MATCHES, SYNTHETIC_OSINT_MATCHES,
+} from '../utils/syntheticData.js'
 import PageLoader from '../components/PageLoader.jsx'
 import PageHero from '../components/PageHero.jsx'
 import { tintedCard } from '../utils/cardStyle.js'
+import { MODULES } from '../constants/modules.js'
 
 // Module Surveillance Identités (CyberVeille, couleur bleue #58a6ff) — repère
 // les items de fuite de données concernant l'entreprise, en croisant des
@@ -32,7 +33,12 @@ import { tintedCard } from '../utils/cardStyle.js'
 // GITHUB_TOKEN configuré). Un premier brouillon à base d'API payantes (HIBP,
 // IntelX, Hunter.io, Shodan, Censys, SecurityTrails) a été explicitement
 // écarté pour rester 100% gratuit (cf. STATUS.md).
-const ACCENT = '#58a6ff'
+// Résolu par thème (23/08/2026, retour utilisateur — "le fond bleu" restait fixe sur
+// Neutre/Cyberpunk sur les 3 pages CyberVeille) : hex fixe auparavant, contournait le système
+// déjà en place ailleurs (cf. constants/modules.js — Incidents.jsx/Documentation.jsx etc.
+// consomment déjà `MODULES.x.color`, seul CyberVeille y avait échappé, corrigé sur les 3 pages
+// en même temps — Watch.jsx et FuiteDeDonnees.jsx).
+const ACCENT = MODULES.cyberveille.color
 const CARD = tintedCard(ACCENT)
 
 const KIND_OPTIONS = [
@@ -42,12 +48,16 @@ const KIND_OPTIONS = [
   { value: 'ip_range', label: 'Plage IP' },
   { value: 'email',    label: 'Email' },
 ]
+// Exemples génériques (23/08/2026, demande explicite — "retire AER") : name/domain/email
+// citaient le nom réel de l'entreprise du déploiement. Remplacés par des valeurs sans rapport
+// avec une organisation réelle, même esprit que ip/ip_range déjà sur une plage RFC 5737
+// (TEST-NET, réservée à la documentation) plutôt qu'une IP publique existante.
 const KIND_PLACEHOLDERS = {
-  name: 'Nom de l\'entreprise (ex : AER)',
-  domain: 'Domaine (ex : aer.fr)',
+  name: 'Nom de l\'entreprise (ex : Exemple SARL)',
+  domain: 'Domaine (ex : exemple.fr)',
   ip: 'Adresse IP publique (ex : 203.0.113.10)',
   ip_range: 'Plage IP au format CIDR (ex : 203.0.113.0/24)',
-  email: 'Adresse email (ex : contact@aer.fr)',
+  email: 'Adresse email (ex : contact@exemple.fr)',
 }
 const KIND_LABELS = { name: 'Nom', domain: 'Domaine', ip: 'IP', ip_range: 'Plage IP', email: 'Email' }
 
@@ -86,14 +96,14 @@ export default function SurveillanceIdentites() {
       const realIpMatches    = matchData.ip_matches || []
       const realOsintMatches = matchData.osint_matches || []
       if (isAnonymous) {
-        setIdentities([...realIdentities.map(anonymizeIdentity), ...FAKE_IDENTITIES])
+        setIdentities([...realIdentities.map(anonymizeIdentity), ...SYNTHETIC_IDENTITIES])
         const anonMatches = realMatches.map(m => anonymizeIdentityMatch(m, realIdentities))
-        const items = [...anonMatches, ...FAKE_IDENTITY_MATCHES]
+        const items = [...anonMatches, ...SYNTHETIC_IDENTITY_MATCHES]
         setMatches({ items, total: items.length })
         const anonIpMatches = realIpMatches.map(m => anonymizeIpMatch(m, realIdentities))
-        setIpMatches([...anonIpMatches, ...FAKE_IP_MATCHES])
+        setIpMatches([...anonIpMatches, ...SYNTHETIC_IP_MATCHES])
         const anonOsintMatches = realOsintMatches.map(m => anonymizeOsintMatch(m, realIdentities))
-        setOsintMatches([...anonOsintMatches, ...FAKE_OSINT_MATCHES])
+        setOsintMatches([...anonOsintMatches, ...SYNTHETIC_OSINT_MATCHES])
       } else {
         setIdentities(realIdentities)
         setMatches({ items: realMatches, total: realMatches.length })
@@ -123,7 +133,7 @@ export default function SurveillanceIdentites() {
   }
 
   async function handleDelete(id) {
-    if (isAnonymous || isFakeId(id)) return
+    if (isAnonymous || isSyntheticId(id)) return
     await deleteIdentity(id)
     reload()
   }

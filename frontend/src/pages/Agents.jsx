@@ -14,6 +14,8 @@ import { StatusBadge, VersionBadge, TokenStateBadge, DistroBadge, formatDateTime
 import { MODULES } from '../constants/modules.js'
 import { tintedCard } from '../utils/cardStyle.js'
 import { useHorizontalWheelScroll } from '../hooks/useHorizontalWheelScroll.js'
+import { usePresentation } from '../contexts/PresentationContext.jsx'
+import { anonymizeAsset, anonymizeAgent, isSyntheticId, SYNTHETIC_AGENTS } from '../utils/syntheticData.js'
 
 const MODULE_COLOR = MODULES.inventaire.color
 
@@ -115,6 +117,58 @@ function DownloadDropdown({ color, versionInfo }) {
               </span>
             </a>
           ))}
+        </div>
+      )}
+    </>
+  )
+}
+
+// Détail du dernier ping au clic, sans quitter le tableau (21/08/2026, demande explicite —
+// jusque-là seulement visible en survol via `title`, "pas assez visible"). Même idiome
+// position-fixed que DownloadDropdown/AssetSearchSelect ci-dessus (mesuré via
+// getBoundingClientRect, pas `absolute` — échappe à l'`overflow-x: auto` du tableau).
+function PingResult({ agent }) {
+  const [open, setOpen] = useState(false)
+  const [popStyle, setPopStyle] = useState({})
+  const btnRef = useRef(null)
+  const popRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    function handler(e) {
+      if (
+        btnRef.current && !btnRef.current.contains(e.target) &&
+        popRef.current && !popRef.current.contains(e.target)
+      ) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPopStyle({ position: 'fixed', top: r.bottom + 6, left: r.left + r.width / 2, transform: 'translateX(-50%)', zIndex: 9999 })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      <button ref={btnRef} type="button" onClick={toggle}
+        className="text-xs font-medium hover:underline" style={{ color: '#3fb950' }}>
+        ↩ {agent.last_pong_ms} ms
+      </button>
+      {open && (
+        <div ref={popRef} className="rounded-xl px-3.5 py-3 text-left"
+          style={{ ...popStyle, width: 210, background: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: '0 8px 24px rgba(0,0,0,0.35)' }}>
+          <p className="text-[10px] font-semibold uppercase tracking-wide mb-1.5" style={{ color: 'var(--text-muted)' }}>Détail du ping</p>
+          <p className="text-sm" style={{ color: 'var(--text-primary)' }}>
+            Latence <strong style={{ color: '#3fb950' }}>{agent.last_pong_ms} ms</strong>
+          </p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
+            {new Date(agent.last_pong_at).toLocaleString('fr-FR')}
+          </p>
         </div>
       )}
     </>
@@ -393,6 +447,7 @@ let agentsCache = null
 export default function Agents() {
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
+  const { isAnonymous } = usePresentation()
   // Scroll horizontal à la molette (19/08/2026, retour utilisateur) — cf. useHorizontalWheelScroll.js.
   const tableScrollRef = useHorizontalWheelScroll()
   const [agentList, setAgentList] = useState(() => agentsCache?.agentList ?? [])
@@ -469,6 +524,15 @@ export default function Agents() {
     const id = pingConfirm.id
     setPingRowBusy(id)
     setPingConfirm(null)
+    // Agent de démonstration : pas d'appel API (n'existe pas en base) — simule un pong
+    // après un court délai, mutation directe du jeu fictif comme ailleurs (Watch.jsx).
+    if (isSyntheticId(id)) {
+      await new Promise(r => setTimeout(r, 900 + Math.random() * 500))
+      const synthetic = SYNTHETIC_AGENTS.find(a => a.id === id)
+      if (synthetic) { synthetic.last_pong_at = new Date().toISOString(); synthetic.last_pong_ms = 40 + Math.floor(Math.random() * 120) }
+      setPingRowBusy(null)
+      return
+    }
     try { await pingAgent(id); load() } catch {} finally { setPingRowBusy(null) }
   }
 
@@ -500,7 +564,9 @@ export default function Agents() {
   }
 
   const pendingTokens = tokens.filter(t => t.use_count < t.max_uses && new Date(t.expires_at) > new Date())
-  const assetNameById = new Map(assetList.map(a => [a.id, a.name]))
+  const displayAssetList = isAnonymous ? assetList.map(anonymizeAsset) : assetList
+  const displayAgents = isAnonymous ? [...agentList.map(anonymizeAgent), ...SYNTHETIC_AGENTS] : agentList
+  const assetNameById = new Map(displayAssetList.map(a => [a.id, a.name]))
 
   if (loading && !hasLoadedOnce) {
     return <PageLoader />
@@ -513,37 +579,41 @@ export default function Agents() {
         title={<>Agents{(latestVersionInfo?.version_windows || latestVersionInfo?.version_linux) && (
           <Link to="/agents/notes-de-version" title="Voir les notes de version de l'agent"
             className="text-xs font-semibold px-2 py-0.5 rounded-full hover:underline"
-            style={{ color: '#39c5cf', background: 'rgba(57,197,207,0.12)', border: '1px solid rgba(57,197,207,0.3)' }}>
+            style={{ color: MODULE_COLOR, background: `${MODULE_COLOR}1f`, border: `1px solid ${MODULE_COLOR}4d` }}>
             Win v{latestVersionInfo.version_windows} · Linux v{latestVersionInfo.version_linux}
           </Link>
         )}<Link to="/agents/historique" title="Historique global des agents, y compris révoqués et supprimés"
             className="text-xs font-semibold px-2 py-0.5 rounded-full hover:underline ml-1.5 align-middle"
-            style={{ color: '#39c5cf', background: 'rgba(57,197,207,0.12)', border: '1px solid rgba(57,197,207,0.3)' }}>
+            style={{ color: MODULE_COLOR, background: `${MODULE_COLOR}1f`, border: `1px solid ${MODULE_COLOR}4d` }}>
             Historique
           </Link></>}
-        color="#39c5cf"
+        color={MODULE_COLOR}
         subtitle="Collecte alternative pour les postes, en complément du compte de service AD/SSH — lecture seule."
       >
         <div className="flex items-center gap-2">
           <DownloadDropdown color={MODULE_COLOR} versionInfo={latestVersionInfo} />
           {isAdmin && (
+            // Icône seule plutôt qu'un pill coloré (21/08/2026, demande explicite — aligné sur
+            // l'idiome déjà utilisé pour le ping par ligne ci-dessous) : gris au repos, coloré
+            // seulement au survol, comme le reste des actions icône de la page.
             <button
               onClick={() => setGlobalPingConfirm(true)}
               disabled={globalPinging}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-opacity"
-              style={{ background: 'rgba(88,166,255,0.15)', color: '#58a6ff', opacity: globalPinging ? 0.6 : 1 }}
               title="Ping tous les agents actifs"
+              className="p-2 rounded-lg inline-flex items-center justify-center transition-colors"
+              style={{ color: 'var(--text-muted)', opacity: globalPinging ? 0.6 : 1 }}
+              onMouseEnter={e => { if (!globalPinging) { e.currentTarget.style.color = '#58a6ff'; e.currentTarget.style.background = 'rgba(88,166,255,0.1)' } }}
+              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}
             >
               {globalPinging ? (
-                <svg className="animate-spin" style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="none">
+                <svg className="animate-spin" style={{ width: 16, height: 16 }} viewBox="0 0 24 24" fill="none">
                   <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="40 20" />
                 </svg>
               ) : (
-                <svg style={{ width: 14, height: 14 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
+                <svg style={{ width: 16, height: 16 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12Zm0 0h7.5" />
                 </svg>
               )}
-              Ping tous
             </button>
           )}
           {isAdmin && (
@@ -568,12 +638,12 @@ export default function Agents() {
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {['Hôte', 'OS', 'Distribution', 'Actif lié', 'Version', 'Dernier contact', 'Statut', 'État', 'Ping', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap" style={{ color: 'var(--text-muted)' }}>{h}</th>
+                  <th key={h} className={`px-4 py-3 text-xs font-semibold uppercase tracking-wide whitespace-nowrap ${h === 'Ping' ? 'text-center' : 'text-left'}`} style={{ color: 'var(--text-muted)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {!loading && agentList.length === 0 && (
+              {!loading && displayAgents.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-4 py-16 text-center" style={{ color: 'var(--text-muted)' }}>
                     <p className="text-sm font-medium mb-1">Aucun agent enrôlé</p>
@@ -581,15 +651,16 @@ export default function Agents() {
                   </td>
                 </tr>
               )}
-              {agentList.map(a => (
+              {displayAgents.map(a => (
                 <tr key={a.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                   <td className="px-4 py-3 font-medium" style={{ color: 'var(--text-primary)' }}>
-                    <span className="inline-flex items-center gap-2">
+                    <Link to={`/agents/${a.id}`} className="inline-flex items-center gap-2 hover:underline"
+                      title="Voir l'historique des contacts de cet agent" style={{ color: 'inherit' }}>
                       {a.hostname}
                       {a.pending_scan_requested_at && (
                         <span title="Scan en cours…"><PageLoader size="sm" label="" color={MODULE_COLOR} /></span>
                       )}
-                    </span>
+                    </Link>
                   </td>
                   <td className="px-4 py-3">
                     <OsLogo os={a.os} size={18} />
@@ -598,12 +669,10 @@ export default function Agents() {
                   <td className="px-4 py-3 text-xs" style={{ color: 'var(--text-secondary)' }}>{a.asset_name || '—'}</td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><VersionBadge version={a.agent_version} outdated={a.outdated} /></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap">
-                    <Link to={`/agents/${a.id}`} className="inline-flex items-center gap-1.5 hover:underline"
-                      title="Voir l'historique des contacts de cet agent"
-                      style={{ color: FRESHNESS_COLOR[contactFreshness(a.last_seen_at)] }}>
+                    <span className="inline-flex items-center gap-1.5" style={{ color: FRESHNESS_COLOR[contactFreshness(a.last_seen_at)] }}>
                       <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: 'currentColor' }} />
                       {formatDateTime(a.last_seen_at)}
-                    </Link>
+                    </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap"><StatusBadge value={a.status} /></td>
                   <td className="px-4 py-3 text-xs whitespace-nowrap"><TokenStateBadge status={a.token_status} /></td>
@@ -615,36 +684,46 @@ export default function Agents() {
                         </svg>
                         En attente…
                       </span>
-                    ) : a.last_pong_ms != null ? (
-                      <span className="text-xs font-medium" title={`Dernier ping : ${new Date(a.last_pong_at).toLocaleString('fr-FR')}`}
-                        style={{ color: '#3fb950' }}>↩ {a.last_pong_ms} ms</span>
-                    ) : isAdmin && a.status === 'enrolled' ? (
-                      <button onClick={() => setPingConfirm(a)}
-                        className="text-xs px-2.5 py-1 rounded-lg font-medium inline-flex items-center gap-1"
-                        style={{ background: 'rgba(88,166,255,0.1)', color: '#58a6ff', border: '1px solid rgba(88,166,255,0.25)' }}>
-                        <svg style={{ width: 10, height: 10 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z" />
-                        </svg>
-                        Ping
-                      </button>
-                    ) : <span style={{ color: 'var(--text-faint)' }}>—</span>}
+                    ) : (
+                      <span className="inline-flex items-center justify-center gap-1">
+                        {a.last_pong_ms != null && <PingResult agent={a} />}
+                        {isAdmin && a.status === 'enrolled' ? (
+                          // Icône seule plutôt qu'un pill coloré (18/08/2026 → allégé 21/08/2026,
+                          // retour utilisateur — répété sur chaque ligne sans dernier ping, le pill
+                          // bleu plein "tachait" la colonne) : même idiome que le bouton fermer
+                          // ci-dessus, gris au repos, coloré seulement au survol. Reste affichée
+                          // même après un premier ping (21/08/2026, retour utilisateur — bouton
+                          // introuvable une fois un résultat déjà là) : renvoyer un ping doit
+                          // rester possible à tout moment, pas juste la première fois.
+                          <button onClick={() => setPingConfirm(a)} title="Envoyer un ping"
+                            className="p-1.5 rounded-lg inline-flex items-center justify-center transition-colors"
+                            style={{ color: 'var(--text-muted)' }}
+                            onMouseEnter={e => { e.currentTarget.style.color = '#58a6ff'; e.currentTarget.style.background = 'rgba(88,166,255,0.1)' }}
+                            onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}>
+                            <svg style={{ width: 13, height: 13 }} fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12Zm0 0h7.5" />
+                            </svg>
+                          </button>
+                        ) : a.last_pong_ms == null && <span style={{ color: 'var(--text-faint)' }}>—</span>}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    {isAdmin && a.status === 'enrolled' && !a.pending_scan_requested_at && (
+                    {isAdmin && a.status === 'enrolled' && !a.pending_scan_requested_at && !isSyntheticId(a.id) && (
                       <button onClick={() => handleRequestScan(a.id)}
                         className="text-xs px-2.5 py-1.5 rounded-lg font-medium mr-1.5"
                         style={{ background: 'var(--bg-secondary)', color: MODULE_COLOR, border: `1px solid ${MODULE_COLOR}33` }}>
                         Scanner maintenant
                       </button>
                     )}
-                    {isAdmin && a.status === 'enrolled' && (
+                    {isAdmin && a.status === 'enrolled' && !isSyntheticId(a.id) && (
                       <button onClick={() => setRevokeTarget(a)}
                         className="text-xs px-2.5 py-1.5 rounded-lg font-medium"
                         style={{ background: 'rgba(248,81,73,0.1)', color: '#f85149', border: '1px solid rgba(248,81,73,0.2)' }}>
                         Révoquer
                       </button>
                     )}
-                    {isAdmin && a.status === 'revoked' && (
+                    {isAdmin && a.status === 'revoked' && !isSyntheticId(a.id) && (
                       <button onClick={() => setDeleteAgentTarget(a)}
                         className="text-xs px-2.5 py-1.5 rounded-lg font-medium"
                         style={{ background: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
@@ -697,7 +776,7 @@ export default function Agents() {
       )}
 
       {tokenModal && (
-        <TokenModal assetList={assetList} onClose={() => setTokenModal(false)} onCreated={load} />
+        <TokenModal assetList={displayAssetList} onClose={() => setTokenModal(false)} onCreated={load} />
       )}
 
       {revokeTarget && (

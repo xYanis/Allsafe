@@ -3,7 +3,7 @@ import { assets as fetchAssets, createAsset, updateAsset, deleteAsset, scanAsset
 import { Link } from 'react-router-dom'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { useAuth } from '../contexts/AuthContext.jsx'
-import { FAKE_ASSETS, anonymizeAsset, isFakeId, fakeScanResult } from '../utils/fakeData.js'
+import { SYNTHETIC_ASSETS, anonymizeAsset, isSyntheticId, syntheticScanResult } from '../utils/syntheticData.js'
 import CriticiteBadge from '../components/CriticiteBadge.jsx'
 import NetworkStatusBadge, { NETWORK_STATUS_LABELS } from '../components/NetworkStatusBadge.jsx'
 import PendingUpdatesBadge from '../components/PendingUpdatesBadge.jsx'
@@ -429,7 +429,7 @@ function BulkDeleteAssetsModal({ assets, onClose, onDeleted }) {
       setProgress(i + 1)
       // Actifs de démonstration (mode Présentation) : jamais de vrai appel réseau,
       // même logique que la suppression unitaire et le scan en masse.
-      if (isFakeId(assets[i].id)) {
+      if (isSyntheticId(assets[i].id)) {
         deletedIds.push(assets[i].id)
         continue
       }
@@ -530,7 +530,7 @@ function ScanResultModal({ asset, result, onClose, onRescan, rescanning }) {
   const [search, setSearch] = useState('')
   const [auditFindings, setAuditFindings] = useState([])
   useEffect(() => {
-    if (isFakeId(asset.id)) return
+    if (isSyntheticId(asset.id)) return
     findingsByAsset(asset.id).then(r => setAuditFindings(r.data.items || [])).catch(() => {})
   }, [asset.id])
   const packages = result?.packages || []
@@ -793,7 +793,7 @@ export default function Assets() {
   const tableScrollRef = useHorizontalWheelScroll()
   const [assetList, setAssetList] = useState(() => {
     if (assetsPageCache == null) return []
-    return isAnonymous ? [...assetsPageCache.map(anonymizeAsset), ...FAKE_ASSETS] : assetsPageCache
+    return isAnonymous ? [...assetsPageCache.map(anonymizeAsset), ...SYNTHETIC_ASSETS] : assetsPageCache
   })
   const [loading, setLoading] = useState(() => assetsPageCache == null)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -832,7 +832,7 @@ export default function Assets() {
       const raw = a.data || []
       assetsPageCache = raw   // alimente le cache module pour le prochain remontage
       let list = raw
-      if (isAnonymous) list = [...list.map(anonymizeAsset), ...FAKE_ASSETS]
+      if (isAnonymous) list = [...list.map(anonymizeAsset), ...SYNTHETIC_ASSETS]
       setAssetList(list)
     }).finally(() => setLoading(false))
   }, [isAnonymous])
@@ -885,7 +885,7 @@ export default function Assets() {
       setBulkScanProgress(`Scan ${i + 1}/${idArr.length}…`)
       setScanLoading(l => ({ ...l, [asset.id]: true }))
       try {
-        if (isFakeId(asset.id)) {
+        if (isSyntheticId(asset.id)) {
           await new Promise(r => setTimeout(r, 200))
         } else {
           const { data } = await scanAsset(asset.id)
@@ -948,8 +948,8 @@ export default function Assets() {
   }
 
   async function handleScan(asset) {
-    if (isFakeId(asset.id)) {
-      setScanModal({ asset, result: fakeScanResult(asset) })
+    if (isSyntheticId(asset.id)) {
+      setScanModal({ asset, result: syntheticScanResult(asset) })
       return
     }
     setScanLoading(l => ({ ...l, [asset.id]: true }))
@@ -1044,7 +1044,7 @@ export default function Assets() {
   }
 
   async function handleViewPackages(asset) {
-    if (isFakeId(asset.id)) {
+    if (isSyntheticId(asset.id)) {
       setScanModal({ asset, result: { packages: asset.installed_packages, hardware: asset.hardware, last_scan: asset.last_scan } })
       return
     }
@@ -1063,7 +1063,7 @@ export default function Assets() {
       <PageHero
         icon="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18"
         title="Actifs"
-        color="#39c5cf"
+        color={MODULE_COLOR}
         subtitle="Inventaire des serveurs et postes de travail"
       >
         <div className="flex items-center gap-2 flex-wrap">
@@ -1292,7 +1292,7 @@ export default function Assets() {
                   <td className="px-4 py-3">
                     <PendingUpdatesBadge
                       pendingUpdates={a.pending_updates}
-                      onClick={isFakeId(a.id) ? undefined : () => setPendingUpdatesModal(a)}
+                      onClick={isSyntheticId(a.id) ? undefined : () => setPendingUpdatesModal(a)}
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -1313,25 +1313,25 @@ export default function Assets() {
                           </svg>
                         )}
                       </button>
-                      <button onClick={() => { if (!isFakeId(a.id) && isAdmin) setEditTarget(a) }}
-                        disabled={isFakeId(a.id) || !isAdmin}
+                      <button onClick={() => { if (!isSyntheticId(a.id) && isAdmin) setEditTarget(a) }}
+                        disabled={isSyntheticId(a.id) || !isAdmin}
                         className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         style={{ color: 'var(--text-muted)' }}
-                        onMouseEnter={e => { if (!isFakeId(a.id)) { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
+                        onMouseEnter={e => { if (!isSyntheticId(a.id)) { e.currentTarget.style.background = 'var(--border)'; e.currentTarget.style.color = 'var(--text-primary)' } }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                        title={isFakeId(a.id) ? 'Actif de démonstration — non modifiable' : !isAdmin ? 'Modification réservée aux administrateurs' : 'Modifier cet actif'}
+                        title={isSyntheticId(a.id) ? 'Actif de démonstration — non modifiable' : !isAdmin ? 'Modification réservée aux administrateurs' : 'Modifier cet actif'}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                       </button>
-                      <button onClick={() => { if (!isFakeId(a.id) && isAdmin) setDeleteTarget(a) }}
-                        disabled={isFakeId(a.id) || !isAdmin}
+                      <button onClick={() => { if (!isSyntheticId(a.id) && isAdmin) setDeleteTarget(a) }}
+                        disabled={isSyntheticId(a.id) || !isAdmin}
                         className="p-1.5 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         style={{ color: 'var(--text-muted)' }}
-                        onMouseEnter={e => { if (!isFakeId(a.id)) { e.currentTarget.style.background = 'rgba(248,81,73,0.1)'; e.currentTarget.style.color = '#f85149' } }}
+                        onMouseEnter={e => { if (!isSyntheticId(a.id)) { e.currentTarget.style.background = 'rgba(248,81,73,0.1)'; e.currentTarget.style.color = '#f85149' } }}
                         onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-muted)' }}
-                        title={isFakeId(a.id) ? 'Actif de démonstration — non supprimable' : !isAdmin ? 'Suppression réservée aux administrateurs' : 'Supprimer cet actif'}
+                        title={isSyntheticId(a.id) ? 'Actif de démonstration — non supprimable' : !isAdmin ? 'Suppression réservée aux administrateurs' : 'Supprimer cet actif'}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1365,7 +1365,7 @@ export default function Assets() {
       )}
       {scanModal && (
         <ScanResultModal asset={scanModal.asset} result={scanModal.result} onClose={() => setScanModal(null)}
-          onRescan={(isFakeId(scanModal.asset.id) || !isAdmin) ? undefined : () => handleScan(scanModal.asset)}
+          onRescan={(isSyntheticId(scanModal.asset.id) || !isAdmin) ? undefined : () => handleScan(scanModal.asset)}
           rescanning={!!scanLoading[scanModal.asset.id]}
         />
       )}

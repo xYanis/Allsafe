@@ -22,9 +22,9 @@ import { tintedCard, CYBERVULN_CARD_TINT } from '../utils/cardStyle.js'
 import { usePresentation } from '../contexts/PresentationContext.jsx'
 import { MODULES } from '../constants/modules.js'
 import {
-  FAKE_VULNERABILITIES, anonymizeVuln, isFakeId, sortVulnList,
-  fakePatchCheckResult, fakeAnalysis, fakeRecommendation, fakeScript,
-} from '../utils/fakeData.js'
+  SYNTHETIC_VULNERABILITIES, anonymizeVuln, isSyntheticId, sortVulnList,
+  syntheticPatchCheckResult, syntheticAnalysis, syntheticRecommendation, syntheticScript,
+} from '../utils/syntheticData.js'
 
 // Survol de ligne teinté à la couleur du module CyberVuln (11/08/2026, tour visuel — cohérence
 // sidebar → page, cf. docs/FRONTEND.md § Tour visuel), pas les boutons d'action (`Btn` plus bas,
@@ -244,7 +244,7 @@ export default function Vulnerabilities() {
       const ageCutoff = filters.max_age_years ? Date.now() - filters.max_age_years * 365 * 86400000 : null
       fetchVulns(params).then(r => {
         const realItems = (r.data.items || []).map(anonymizeVuln)
-        const fakeItems = FAKE_VULNERABILITIES.filter(v => {
+        const syntheticItems = SYNTHETIC_VULNERABILITIES.filter(v => {
           if (filters.status && v.status !== filters.status) return false
           if (filters.severity && v.cve?.severity !== filters.severity) return false
           if (filters.validated_by && v.validated_by !== filters.validated_by) return false
@@ -255,7 +255,7 @@ export default function Vulnerabilities() {
           if (selectedAssetIds.length && !selectedAssetIds.includes(v.asset?.id)) return false
           return true
         })
-        const merged = sortVulnList([...realItems, ...fakeItems], sort)
+        const merged = sortVulnList([...realItems, ...syntheticItems], sort)
         setData({ items: merged.slice((page - 1) * perPage, page * perPage), total: merged.length })
       }).finally(() => setLoading(false))
       return
@@ -326,8 +326,8 @@ export default function Vulnerabilities() {
   }
 
   async function handleAnalyze(vuln) {
-    if (isFakeId(vuln.id)) {
-      setAnalysisModal({ analysis: fakeAnalysis(vuln), cve_id: vuln.cve.cve_id, description: vuln.cve.description })
+    if (isSyntheticId(vuln.id)) {
+      setAnalysisModal({ analysis: syntheticAnalysis(vuln), cve_id: vuln.cve.cve_id, description: vuln.cve.description })
       return
     }
     flash('Analyse IA en cours…')
@@ -345,7 +345,7 @@ export default function Vulnerabilities() {
 
   async function handleShowHistory(vuln) {
     setHistoryModal({ cveId: vuln.cve.cve_id, entries: [], loading: true })
-    if (isFakeId(vuln.id)) {
+    if (isSyntheticId(vuln.id)) {
       // Historique prospectif introduit après le pool de démo — rien à simuler
       // de réaliste ici, l'état vide suffit à montrer le composant.
       setHistoryModal({ cveId: vuln.cve.cve_id, entries: [], loading: false })
@@ -365,7 +365,7 @@ export default function Vulnerabilities() {
     // d'une justification générée automatiquement (cf. OtherInstancesModal.jsx).
     const targetAssetName = vuln.asset?.name
     setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: [], loading: true })
-    if (isFakeId(vuln.id)) {
+    if (isSyntheticId(vuln.id)) {
       setOtherInstancesModal({ vulnId: vuln.id, targetAssetName, cveId: vuln.cve.cve_id, entries: [], loading: false })
       return
     }
@@ -388,8 +388,8 @@ export default function Vulnerabilities() {
   }
 
   async function handleRecommend(vuln) {
-    if (isFakeId(vuln.id)) {
-      setModal({ type: 'recommend', content: fakeRecommendation(vuln) })
+    if (isSyntheticId(vuln.id)) {
+      setModal({ type: 'recommend', content: syntheticRecommendation(vuln) })
       return
     }
     flash('Génération…')
@@ -404,9 +404,9 @@ export default function Vulnerabilities() {
     setPatchLoading(l => ({ ...l, [vuln.id]: true }))
     setPatchModal({ vuln, result: null })
     setShowDebugCommands(false)
-    if (isFakeId(vuln.id)) {
+    if (isSyntheticId(vuln.id)) {
       setTimeout(() => {
-        setPatchModal({ vuln, result: fakePatchCheckResult(vuln) })
+        setPatchModal({ vuln, result: syntheticPatchCheckResult(vuln) })
         setPatchLoading(l => ({ ...l, [vuln.id]: false }))
       }, 500)
       return
@@ -422,8 +422,8 @@ export default function Vulnerabilities() {
   }
 
   async function handleScript(vuln) {
-    if (isFakeId(vuln.id)) {
-      const r = fakeScript(vuln)
+    if (isSyntheticId(vuln.id)) {
+      const r = syntheticScript(vuln)
       setModal({ type: 'script', content: r.script, script_type: r.script_type })
       return
     }
@@ -554,7 +554,7 @@ export default function Vulnerabilities() {
     <div className="p-6 space-y-5">
       <PageHero
         icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-        title="Vulnérabilités" color="#f85149"
+        title="Vulnérabilités" color={MODULES.cybervuln.color}
         subtitle="Suivi et gestion des vulnérabilités par actif"
       />
 
